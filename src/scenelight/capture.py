@@ -28,6 +28,7 @@ import numpy as np
 import psutil
 from PIL import Image
 
+from .hashing import sha256_file
 from .project import (
     ProjectDiscovery,
     SpriteSpec,
@@ -617,8 +618,7 @@ def _deduplicate_normalized_captures(
 
 
 def _surface_capture_digest(path: Path) -> tuple[int, bytes]:
-    with path.open("rb") as stream:
-        return path.stat().st_size, hashlib.file_digest(stream, "sha256").digest()
+    return path.stat().st_size, sha256_file(path)
 
 
 def _deduplicate_surface_capture_paths(

@@ -17,6 +17,15 @@ from scenelight.cli import (
 from scenelight.sidecar import managed_project_root
 
 
+@pytest.fixture
+def source_only_install(monkeypatch):
+    # These tests cover generated sidecars and ownership using literal PNGs.
+    # Native capture has separate integration coverage; never borrow an SDK
+    # incidentally installed on the developer's machine for these unit tests.
+    monkeypatch.setattr(cli_module, "_resolve_renpy_executable", lambda *_args: None)
+    monkeypatch.setattr(cli_module, "needs_runtime_capture", lambda _discovery: False)
+
+
 def test_batch_launcher_arguments_cannot_expand_environment_variables() -> None:
     assert _batch_quote(r"C:\Games\100% Complete\%TEMP%\mod") == (
         r'"C:\Games\100%% Complete\%%TEMP%%\mod"'
@@ -71,7 +80,9 @@ def test_launch_detects_new_and_changed_external_lighting_profile(
     assert _launch_config(project, installed) == (profile, True)
 
 
-def test_install_creates_full_hybrid_gpu_sidecar(tmp_path: Path, monkeypatch) -> None:
+def test_install_creates_full_hybrid_gpu_sidecar(
+    tmp_path: Path, monkeypatch, source_only_install
+) -> None:
     monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed"))
     project = make_project(tmp_path / "project")
     original_files = sorted(
@@ -131,7 +142,7 @@ def test_install_creates_full_hybrid_gpu_sidecar(tmp_path: Path, monkeypatch) ->
 
 
 def test_attach_adds_only_reversible_namespace_and_removes_temporary_copy(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, source_only_install
 ) -> None:
     monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed"))
     project = make_project(tmp_path / "project")
@@ -177,7 +188,7 @@ def test_attach_refuses_occupied_namespace_before_expensive_analysis(
 
 
 def test_refresh_refuses_modified_owned_runtime_before_expensive_analysis(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, source_only_install
 ) -> None:
     monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed"))
     project = make_project(tmp_path / "project")
@@ -213,6 +224,15 @@ def test_refresh_refuses_modified_owned_runtime_before_expensive_analysis(
 
     assert not analysis_started
     assert runtime.read_text(encoding="utf-8") == "developer changed this"
+
+
+def test_install_requires_an_explicit_available_runtime_for_capture(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(cli_module, "_resolve_renpy_executable", lambda *_args: None)
+    project = make_project(tmp_path / "project")
+    with pytest.raises(FileNotFoundError, match="Choose a compatible Ren'Py SDK"):
+        main(["install", "--project", str(project), "--analyzer", "cpu"])
+    assert not (project / "game" / "scenelight_runtime").exists()
 
 
 def test_native_game_preflight_runs_before_expensive_analysis(tmp_path: Path, monkeypatch) -> None:

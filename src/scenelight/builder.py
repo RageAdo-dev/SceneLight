@@ -47,6 +47,7 @@ from .engine import (
     scene_target_mid,
 )
 from .form_maps import FORM_ANALYSIS_MAX_DIMENSION, FORM_MAP_VERSION, build_sprite_form_maps
+from .hashing import sha256_file
 from .project import ProjectDiscovery, SpriteSpec
 
 TILE_SIZE = (160, 90)
@@ -1075,8 +1076,7 @@ def _sprite_spec_fingerprint(
         cached = layer_digests.get(resolved) if layer_digests is not None else None
         if cached is None:
             size = resolved.stat().st_size
-            with resolved.open("rb") as stream:
-                layer_digest = hashlib.file_digest(stream, "sha256").digest()
+            layer_digest = sha256_file(resolved)
             cached = (size, layer_digest)
             if layer_digests is not None:
                 layer_digests[resolved] = cached
