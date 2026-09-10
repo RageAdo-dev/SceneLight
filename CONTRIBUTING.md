@@ -13,6 +13,10 @@ Use Python 3.10 or newer in an isolated environment:
 python -m pip install -e ".[dev,preview]"
 ```
 
+Minimal Ubuntu environments also need the system graphics library `libegl1`
+(`sudo apt-get install libegl1`) before importing Qt's GUI/OpenGL modules. CI
+installs it explicitly; a Python wheel does not supply this operating-system library.
+
 Before opening a pull request, run:
 
 ```text

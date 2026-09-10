@@ -6,10 +6,12 @@ import subprocess
 from itertools import pairwise
 from math import lcm
 from pathlib import Path
-from typing import Self
+from typing import TypeVar
 
 import numpy as np
 from PIL import Image
+
+_Writer = TypeVar("_Writer", bound="MP4Writer")
 
 
 def export_extension(background_kind: str, sprite_kind: str = "static") -> str:
@@ -160,7 +162,7 @@ class MP4Writer:
             self.destination.unlink(missing_ok=True)
             raise RuntimeError(stderr.decode("utf-8", "replace").strip() or "FFmpeg failed")
 
-    def __enter__(self) -> Self:
+    def __enter__(self: _Writer) -> _Writer:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
