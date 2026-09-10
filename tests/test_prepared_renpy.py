@@ -1,6 +1,8 @@
+import gc
 import hashlib
 import io
 import json
+import weakref
 from types import SimpleNamespace
 
 import pytest
@@ -84,6 +86,48 @@ def test_neutral_engine_wrapper_uses_decoded_frame_instead_of_clock(host):
         )[1]
         == fields
     )
+
+
+def test_prepared_identity_reuses_verified_fields_without_retaining_decoder_textures(host):
+    movies, child = host
+    display = movies.api.display
+
+    class Texture:
+        pass
+
+    old = Texture()
+    reference = weakref.ref(old)
+    display.video.texture["movie"] = old
+    display._scenelight_presented_movies["movie"] = ("video.webm", 1.0, old, "decoded-frame")
+    args = SimpleNamespace(child=child), SimpleNamespace(get_size=lambda: (1280, 720)), 1280, 720
+    old_key, fields = movies.frame(*args)
+    replacement = Texture()
+    display.video.texture["movie"] = replacement
+    display._scenelight_presented_movies["movie"] = (
+        "video.webm",
+        6.0,
+        replacement,
+        "decoded-frame",
+    )
+    new_key, repeated_fields = movies.frame(*args)
+    del old
+    gc.collect()
+    assert reference() is None
+    assert old_key == new_key == ("video.webm", 28)
+    assert fields == repeated_fields
+
+    movies.entries["other.webm"] = movies.entries["video.webm"]
+    original_file = movies.api.file
+    movies.api.file = lambda name: original_file("video.webm" if name == "other.webm" else name)
+    movies.api.music.get_playing = lambda **_: "other.webm"
+    display._scenelight_presented_movies["movie"] = (
+        "other.webm",
+        1.0,
+        replacement,
+        "decoded-frame",
+    )
+    other_key, _ = movies.frame(*args)
+    assert other_key != old_key
 
 
 @pytest.mark.parametrize(

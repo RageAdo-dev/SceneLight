@@ -126,7 +126,10 @@ class Movies(object):
             index = cached.signatures.get(signature)
             if index is None:
                 return None
-            return (texture, index), cached.frame(index)
+            # Lighting identity belongs to the verified source/frame, not the
+            # transient decoder texture. Background bindings can outlive a
+            # showing in rollback history and must not pin those full frames.
+            return (source, index), cached.frame(index)
         except Exception:
             self.failed.add(source)
             api.display.log.write("SceneLight prepared movie unavailable: " + source)

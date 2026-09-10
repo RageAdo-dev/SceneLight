@@ -838,7 +838,11 @@ init -50 python:
     _SCENELIGHT_MOVIE_CLOCK_FRAME = None
     _SCENELIGHT_MOVIE_POSITIONS = {}
     renpy.display._scenelight_transport_frames = None
-    renpy.display._scenelight_presented_movies = {}
+    # Ren'Py rewrites dict literals into rollback-tracked RevertableDicts,
+    # even when assigned outside the store. A movie texture in that dictionary
+    # would survive in each interaction's rollback snapshot. Use the standard
+    # library container so replacing a presented frame releases the old one.
+    renpy.display._scenelight_presented_movies = _SceneLightOrderedDict()
     SCENELIGHT_CHARACTER_TAGS.update(
         str(tag).split()[0]
         for tag in SCENELIGHT_MANIFEST.get("character_tags", [])

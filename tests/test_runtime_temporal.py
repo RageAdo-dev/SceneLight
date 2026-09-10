@@ -2,7 +2,9 @@
 
 import ast
 import copy
+import gc
 import textwrap
+import weakref
 from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
@@ -54,6 +56,51 @@ def runtime():
     ns["copy"] = copy
     ns["dict"] = type("RevertableDict", (dict,), {})
     return ns
+
+
+def test_presented_movie_cache_releases_textures_in_a_rollback_enabled_runtime(runtime):
+    history = []
+
+    class RevertableDict(dict):
+        def __setitem__(self, key, value):
+            if key in self:
+                history.append(self[key])
+            super().__setitem__(key, value)
+
+    class RenpyLiterals(ast.NodeTransformer):
+        # Ren'Py's compiler wraps literals in its rollback-dict constructor.
+        def visit_Dict(self, node):
+            assert not node.keys
+            return ast.copy_location(
+                ast.Call(
+                    func=ast.Name(id="__renpy__dict__", ctx=ast.Load()), args=[node], keywords=[]
+                ),
+                node,
+            )
+
+    path = ROOT / "src/scenelight/runtime/scenelight_runtime.rpy"
+    line = next(
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("renpy.display._scenelight_presented_movies =")
+    )
+    runtime.update(__renpy__dict__=RevertableDict, _SceneLightOrderedDict=OrderedDict)
+    runtime["renpy"].display = NS()
+    code = ast.fix_missing_locations(RenpyLiterals().visit(ast.parse(line)))
+    exec(compile(code, str(path), "exec"), runtime)
+    cache = runtime["renpy"].display._scenelight_presented_movies
+
+    class Texture:
+        pass
+
+    old = Texture()
+    reference = weakref.ref(old)
+    cache["movie"] = ("background.webm", 0.0, old, "signature")
+    del old
+    cache["movie"] = ("background.webm", 0.1, Texture(), "next-signature")
+    gc.collect()
+    assert reference() is None
+    assert not history
 
 
 def test_dynamic_follows_visible_child_not_elapsed_guess_or_dialogue(runtime):
