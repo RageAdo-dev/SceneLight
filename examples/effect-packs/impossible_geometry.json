@@ -1,0 +1,97 @@
+{
+  "format": "scenelight-effect-pack",
+  "version": 1,
+  "id": "impossible_geometry",
+  "name": "Impossible Geometry",
+  "author": "SceneLight",
+  "license": "MIT",
+  "effects": [
+    {
+      "id": "tesseract_idol",
+      "name": "Tesseract Idol",
+      "description": "Compresses the character onto three luminous faces of an impossible floating cube.",
+      "source_texture": true,
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "scale": { "type": "float", "default": 0.82, "min": 0.45, "max": 1.25 },
+        "depth": { "type": "float", "default": 0.34, "min": 0.12, "max": 0.55 },
+        "crop": { "type": "float", "default": 0.12, "min": 0.0, "max": 0.3 },
+        "edge_color": { "type": "vec3", "default": [0.15, 1.25, 1.55], "min": 0.0, "max": 2.0 },
+        "void_color": { "type": "vec3", "default": [0.08, 0.015, 0.16], "min": 0.0, "max": 1.5 }
+      },
+      "fragment": "vec2 l__p = (v_tex_coord - vec2(0.5)) / u__scale;\nfloat l__w = 0.54;\nfloat l__h = 0.58;\nvec2 l__front = vec2((l__p.x + 0.38) / l__w, (l__p.y + 0.16) / l__h);\nfloat l__front_mask = step(0.0, l__front.x) * step(l__front.x, 1.0) * step(0.0, l__front.y) * step(l__front.y, 1.0);\nvec2 l__right_delta = l__p - vec2(0.16, -0.16);\nfloat l__right_u = l__right_delta.x / u__depth;\nfloat l__right_v = (u__depth * l__right_delta.y + u__depth * 0.72 * l__right_delta.x) / (u__depth * l__h);\nvec2 l__right = vec2(l__right_u, l__right_v);\nfloat l__right_mask = step(0.0, l__right.x) * step(l__right.x, 1.0) * step(0.0, l__right.y) * step(l__right.y, 1.0);\nvec2 l__top_delta = l__p - vec2(-0.38, -0.16);\nfloat l__top_v = -l__top_delta.y / (u__depth * 0.72);\nfloat l__top_u = (l__top_delta.x - u__depth * l__top_v) / l__w;\nvec2 l__top = vec2(l__top_u, l__top_v);\nfloat l__top_mask = step(0.0, l__top.x) * step(l__top.x, 1.0) * step(0.0, l__top.y) * step(l__top.y, 1.0);\nvec2 l__crop_min = vec2(u__crop);\nvec2 l__crop_max = vec2(1.0 - u__crop);\nvec4 l__front_tex = texture2D(tex0, mix(l__crop_min, l__crop_max, clamp(l__front, 0.0, 1.0)));\nvec4 l__right_tex = texture2D(tex0, mix(l__crop_min, l__crop_max, clamp(vec2(1.0 - l__right.x, l__right.y), 0.0, 1.0)));\nvec4 l__top_tex = texture2D(tex0, mix(l__crop_min, l__crop_max, clamp(vec2(l__top.x, 1.0 - l__top.y), 0.0, 1.0)));\nfloat l__front_edge = l__front_mask * (1.0 - smoothstep(0.0, 0.045, min(min(l__front.x, 1.0 - l__front.x), min(l__front.y, 1.0 - l__front.y))));\nfloat l__right_edge = l__right_mask * (1.0 - smoothstep(0.0, 0.055, min(min(l__right.x, 1.0 - l__right.x), min(l__right.y, 1.0 - l__right.y))));\nfloat l__top_edge = l__top_mask * (1.0 - smoothstep(0.0, 0.055, min(min(l__top.x, 1.0 - l__top.x), min(l__top.y, 1.0 - l__top.y))));\nvec4 l__cube = vec4(0.0);\nl__cube += vec4(mix(u__void_color, l__front_tex.rgb, 0.88), max(0.82, l__front_tex.a)) * l__front_mask;\nl__cube = mix(l__cube, vec4(mix(u__void_color, l__right_tex.rgb * vec3(0.42, 0.82, 1.18), 0.84), max(0.82, l__right_tex.a)), l__right_mask);\nl__cube = mix(l__cube, vec4(mix(u__void_color, l__top_tex.rgb * vec3(1.28, 0.72, 1.18), 0.84), max(0.82, l__top_tex.a)), l__top_mask);\nfloat l__edge = max(l__front_edge, max(l__right_edge, l__top_edge));\nl__cube.rgb += u__edge_color * l__edge * 0.55;\nl__cube.a = max(l__cube.a, l__edge);\ngl_FragColor = mix(gl_FragColor, l__cube, u__intensity);"
+    },
+    {
+      "id": "voxel_reconstruction",
+      "name": "Voxel Reconstruction",
+      "description": "Rebuilds the character as animated illuminated cubes that separate in depth.",
+      "source_texture": true,
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "blocks": { "type": "float", "default": 24.0, "min": 8.0, "max": 64.0 },
+        "scatter": { "type": "float", "default": 0.62, "min": 0.0, "max": 1.5 },
+        "depth": { "type": "float", "default": 0.72, "min": 0.0, "max": 1.5 },
+        "speed": { "type": "float", "default": 0.8, "min": 0.0, "max": 4.0 },
+        "edge_color": { "type": "vec3", "default": [0.1, 0.88, 1.35], "min": 0.0, "max": 2.0 }
+      },
+      "fragment": "vec2 l__grid = vec2(u__blocks, u__blocks);\nvec2 l__cell = floor(v_tex_coord * l__grid);\nvec2 l__local = fract(v_tex_coord * l__grid) - vec2(0.5);\nvec2 l__center = (l__cell + vec2(0.5)) / l__grid;\nfloat l__hash = fract(sin(dot(l__cell, vec2(127.1, 311.7))) * 43758.5453);\nfloat l__hash2 = fract(sin(dot(l__cell, vec2(269.5, 183.3))) * 24634.6345);\nfloat l__pulse = 0.5 + 0.5 * sin(u_time * u__speed + l__hash * 6.28318);\nvec2 l__radial = l__center - vec2(0.5);\nfloat l__shell = smoothstep(0.08, 0.68, length(l__radial));\nvec2 l__source = l__center - l__radial * u__scatter * u__intensity * (0.28 + 0.72 * l__pulse) * l__shell;\nl__source += vec2(l__hash - 0.5, l__hash2 - 0.5) * 0.055 * u__scatter * u__intensity;\nvec4 l__cube = texture2D(tex0, clamp(l__source, vec2(0.001), vec2(0.999)));\nfloat l__square = 1.0 - smoothstep(0.40, 0.49, max(abs(l__local.x), abs(l__local.y)));\nfloat l__bevel = smoothstep(0.30, 0.47, max(abs(l__local.x), abs(l__local.y)));\nfloat l__face = 0.72 + u__depth * (0.42 * l__local.x - 0.55 * l__local.y + 0.18 * (l__hash - 0.5));\nl__cube.rgb *= max(0.18, l__face) * l__square;\nl__cube.rgb += u__edge_color * l__bevel * l__square * l__cube.a * (0.18 + 0.35 * l__pulse) * u__depth;\nl__cube.a *= l__square;\ngl_FragColor = mix(gl_FragColor, l__cube, u__intensity);"
+    },
+    {
+      "id": "dimensional_fold",
+      "name": "Dimensional Fold",
+      "description": "Folds the sprite through a rotating impossible kaleidoscope centered inside the body.",
+      "source_texture": true,
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "folds": { "type": "float", "default": 7.0, "min": 3.0, "max": 14.0 },
+        "twist": { "type": "float", "default": 2.2, "min": -6.0, "max": 6.0 },
+        "speed": { "type": "float", "default": 0.35, "min": 0.0, "max": 3.0 },
+        "core": { "type": "float", "default": 0.92, "min": 0.2, "max": 1.5 },
+        "color": { "type": "vec3", "default": [1.18, 0.55, 1.34], "min": 0.0, "max": 2.0 }
+      },
+      "fragment": "vec2 l__p = v_tex_coord - vec2(0.5);\nfloat l__radius = length(l__p);\nfloat l__angle = atan(l__p.y, l__p.x) + u_time * u__speed + l__radius * u__twist;\nfloat l__sector = 6.2831853 / max(3.0, u__folds);\nfloat l__folded = abs(mod(l__angle + 0.5 * l__sector, l__sector) - 0.5 * l__sector);\nvec2 l__warped = vec2(cos(l__folded), sin(l__folded)) * l__radius * u__core + vec2(0.5);\nvec4 l__fold = texture2D(tex0, clamp(l__warped, vec2(0.001), vec2(0.999)));\nfloat l__rim = pow(clamp(1.0 - abs(sin(l__angle * u__folds * 0.5)), 0.0, 1.0), 7.0);\nl__fold.rgb = mix(l__fold.rgb, l__fold.rgb * u__color, 0.48 + 0.34 * l__rim);\nl__fold.rgb += u__color * l__rim * l__fold.a * 0.22;\nl__fold.a *= smoothstep(0.72, 0.05, l__radius);\ngl_FragColor = mix(gl_FragColor, l__fold, u__intensity);"
+    },
+    {
+      "id": "chromatic_soul_echo",
+      "name": "Chromatic Soul Echo",
+      "description": "Pulls several colored copies of the character out of alignment like separated souls.",
+      "source_texture": true,
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "distance": { "type": "float", "default": 0.055, "min": 0.0, "max": 0.18 },
+        "speed": { "type": "float", "default": 0.75, "min": 0.0, "max": 5.0 },
+        "cyan": { "type": "vec3", "default": [0.05, 1.1, 1.4], "min": 0.0, "max": 2.0 },
+        "magenta": { "type": "vec3", "default": [1.35, 0.05, 1.1], "min": 0.0, "max": 2.0 }
+      },
+      "fragment": "float l__breath = 0.72 + 0.28 * sin(u_time * u__speed);\nvec2 l__offset = vec2(u__distance * l__breath * u__intensity, 0.012 * sin(u_time * u__speed * 1.7));\nvec4 l__left = texture2D(tex0, clamp(v_tex_coord + l__offset, vec2(0.001), vec2(0.999)));\nvec4 l__right = texture2D(tex0, clamp(v_tex_coord - l__offset, vec2(0.001), vec2(0.999)));\nvec4 l__high = texture2D(tex0, clamp(v_tex_coord + vec2(0.0, u__distance * 0.65), vec2(0.001), vec2(0.999)));\nvec4 l__low = texture2D(tex0, clamp(v_tex_coord - vec2(0.0, u__distance * 0.65), vec2(0.001), vec2(0.999)));\nvec3 l__souls = l__left.rgb * u__cyan * 0.42 + l__right.rgb * u__magenta * 0.42;\nl__souls += l__high.rgb * vec3(0.22, 0.08, 0.38) + l__low.rgb * vec3(0.06, 0.24, 0.34);\nfloat l__alpha = max(max(l__left.a, l__right.a), max(l__high.a, l__low.a));\nvec4 l__echo = vec4(l__souls, l__alpha);\ngl_FragColor = mix(gl_FragColor, l__echo, u__intensity * 0.88);"
+    },
+    {
+      "id": "reality_shredder",
+      "name": "Reality Shredder",
+      "description": "Cuts the sprite into independently displaced strips with violent RGB fractures.",
+      "source_texture": true,
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "slices": { "type": "float", "default": 42.0, "min": 8.0, "max": 110.0 },
+        "distance": { "type": "float", "default": 0.12, "min": 0.0, "max": 0.35 },
+        "speed": { "type": "float", "default": 2.0, "min": 0.0, "max": 8.0 },
+        "void_color": { "type": "vec3", "default": [0.28, 0.0, 0.48], "min": 0.0, "max": 2.0 }
+      },
+      "fragment": "float l__slice = floor(v_tex_coord.y * u__slices);\nfloat l__hash = fract(sin(l__slice * 91.173 + floor(u_time * u__speed * 5.0) * 17.13) * 43758.5453);\nfloat l__gate = step(0.54, l__hash) * (0.35 + 0.65 * fract(l__hash * 7.91));\nfloat l__shift = (l__hash - 0.5) * 2.0 * u__distance * u__intensity * l__gate;\nfloat l__jitter = sin(v_tex_coord.y * 930.0 + u_time * u__speed * 13.0) * 0.004 * u__intensity;\nvec2 l__uv = clamp(v_tex_coord + vec2(l__shift + l__jitter, 0.0), vec2(0.001), vec2(0.999));\nvec4 l__red = texture2D(tex0, clamp(l__uv + vec2(0.008 * u__intensity, 0.0), vec2(0.001), vec2(0.999)));\nvec4 l__green = texture2D(tex0, l__uv);\nvec4 l__blue = texture2D(tex0, clamp(l__uv - vec2(0.011 * u__intensity, 0.0), vec2(0.001), vec2(0.999)));\nvec4 l__shred = vec4(l__red.r, l__green.g, l__blue.b, max(l__red.a, max(l__green.a, l__blue.a)));\nfloat l__cut = step(0.92, fract(l__hash * 13.7 + v_tex_coord.x * 3.0));\nl__shred.rgb = mix(l__shred.rgb, u__void_color * l__shred.a, l__cut * 0.72);\nl__shred.a *= 1.0 - l__cut * 0.58 * u__intensity;\ngl_FragColor = mix(gl_FragColor, l__shred, u__intensity);"
+    },
+    {
+      "id": "impossible_melt",
+      "name": "Impossible Melt",
+      "description": "Turns the lower body into living vertical trails while the face swims out of phase.",
+      "source_texture": true,
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "drip": { "type": "float", "default": 0.3, "min": 0.0, "max": 0.75 },
+        "frequency": { "type": "float", "default": 34.0, "min": 6.0, "max": 90.0 },
+        "speed": { "type": "float", "default": 0.55, "min": 0.0, "max": 5.0 },
+        "blood": { "type": "vec3", "default": [1.18, 0.03, 0.16], "min": 0.0, "max": 2.0 }
+      },
+      "fragment": "float l__column = floor(v_tex_coord.x * u__frequency);\nfloat l__hash = fract(sin(l__column * 71.319) * 43758.5453);\nfloat l__wave = 0.5 + 0.5 * sin(u_time * u__speed + l__hash * 8.0);\nfloat l__lower = smoothstep(0.28, 0.94, v_tex_coord.y);\nfloat l__drop = u__drip * u__intensity * l__lower * (0.18 + 0.82 * l__hash) * (0.55 + 0.45 * l__wave);\nvec2 l__melt_uv = v_tex_coord - vec2(sin(v_tex_coord.y * 17.0 + l__hash * 9.0) * 0.012 * u__intensity, l__drop);\nvec4 l__melt = texture2D(tex0, clamp(l__melt_uv, vec2(0.001), vec2(0.999)));\nvec4 l__ghost = texture2D(tex0, clamp(v_tex_coord + vec2(sin(v_tex_coord.y * 23.0 + u_time) * 0.025, -l__drop * 0.35), vec2(0.001), vec2(0.999)));\nfloat l__vein = pow(0.5 + 0.5 * sin(v_tex_coord.x * u__frequency * 3.14159 + l__hash * 5.0), 9.0);\nl__melt.rgb = mix(l__melt.rgb, l__melt.rgb * u__blood, l__lower * (0.28 + 0.55 * l__vein));\nl__melt.rgb += l__ghost.rgb * u__blood * 0.16 * u__intensity;\nl__melt.a = max(l__melt.a, l__ghost.a * 0.32 * u__intensity);\ngl_FragColor = mix(gl_FragColor, l__melt, u__intensity);"
+    }
+  ]
+}

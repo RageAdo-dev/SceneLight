@@ -1,0 +1,16 @@
+{
+  "format": "scenelight-effect-pack",
+  "version": 1,
+  "id": "nightmare_transfigurations",
+  "name": "Nightmare Transfigurations",
+  "author": "SceneLight",
+  "license": "MIT",
+  "effects": [
+    {
+      "id": "eyes_everywhere",
+      "name": "Eyes Everywhere",
+      "description": "The character's living surface opens into irregular independently roaming eyes.",
+      "preset": "eyes_everywhere"
+    }
+  ]
+}

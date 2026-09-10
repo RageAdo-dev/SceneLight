@@ -1,0 +1,33 @@
+{
+  "format": "scenelight-effect-pack",
+  "version": 1,
+  "id": "divine_power",
+  "name": "Divine Power",
+  "author": "SceneLight",
+  "license": "MIT",
+  "effects": [
+    {
+      "id": "lightning_god",
+      "name": "Lightning God",
+      "description": "Layered electric aura, turbulent glow, and branching animated discharges.",
+      "preset": "lightning_god",
+      "defaults": {
+        "discharge": 0.85,
+        "aura_color": [0.04, 0.46, 1.0],
+        "core_color": [0.76, 0.94, 1.0]
+      }
+    },
+    {
+      "id": "inferno_incarnate",
+      "name": "Inferno Incarnate",
+      "description": "Turbulent silhouette-driven fire with a black-body gradient and rising embers.",
+      "preset": "inferno_incarnate"
+    },
+    {
+      "id": "the_legend",
+      "name": "The Legend",
+      "description": "An original overwhelming green legendary-power aura with shock pulses and vertical surges.",
+      "preset": "the_legend"
+    }
+  ]
+}

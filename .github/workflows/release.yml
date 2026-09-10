@@ -1,0 +1,65 @@
+name: Build release ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -e ".[dev,preview]"
+      - run: python -m pip check
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest
+      - run: bandit -r src -ll
+      - run: python -m pip_audit -r requirements-preview.txt --progress-spinner off
+      - run: python -m build
+      - name: Build the tested ZIP variants with the verified compatibility runtime
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SCENELIGHT_COMPATIBILITY_ROOT = Join-Path $env:RUNNER_TEMP 'scenelight-renpy'
+          python -m scenelight.compatibility
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility runtime verification failed.' }
+          .\tools\build_release_zip.ps1 -CompatibilityRuntime $env:SCENELIGHT_COMPATIBILITY_ROOT
+          .\tools\build_release_zip.ps1 -Source
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SceneLight-Windows
+          path: |
+            dist/SceneLight-v*-Windows.zip
+            dist/SceneLight-v*-Windows.zip.sha256
+            dist/SceneLight-v*-Windows-source.zip
+            dist/SceneLight-v*-Windows-source.zip.sha256
+            dist/scenelight_renpy-*.whl
+            dist/scenelight_renpy-*.tar.gz
+      - if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "$env:RELEASE_TAG"
+          dist/SceneLight-v*-Windows.zip
+          dist/SceneLight-v*-Windows.zip.sha256
+          dist/SceneLight-v*-Windows-source.zip
+          dist/SceneLight-v*-Windows-source.zip.sha256
+          dist/scenelight_renpy-*.whl
+          dist/scenelight_renpy-*.tar.gz
+          --generate-notes
+          --draft --prerelease --verify-tag
+          --title "SceneLight $env:RELEASE_TAG"
