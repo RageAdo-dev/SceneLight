@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import math
 from pathlib import Path
 
 import cv2
@@ -51,7 +52,18 @@ def test_fast_linear_quantile_is_bit_exact_to_numpy() -> None:
 
 def test_form_map_uint8_linear_lookup_is_bit_exact() -> None:
     values = np.arange(256, dtype=np.uint8)
-    expected = _srgb_to_linear(values.astype(np.float32) / 255.0)
+    # Vector float32 power varies by one ULP with NumPy's AVX-512 dispatch.
+    # Use scalar libm as the independent reference, retaining the approved
+    # float32 input arithmetic and rounding the power result only once.
+    expected = []
+    for value in values:
+        normalized = np.float32(int(value) / 255.0)
+        if normalized <= 0.04045:
+            expected.append(normalized / np.float32(12.92))
+        else:
+            base = (normalized + np.float32(0.055)) / np.float32(1.055)
+            expected.append(math.pow(float(base), float(np.float32(2.4))))
+    expected = np.asarray(expected, dtype=np.float32)
 
     assert np.array_equal(_SRGB_U8_TO_LINEAR[values], expected)
 

@@ -12,10 +12,11 @@ draft candidates there; public availability requires a separate owner decision.
 3. Run the Preview & Calibrator with the default profile and confirm that
    Relit matches the game capture, Original is unchanged, and split comparison
    compiles with the production shader hash.
-4. Inspect the archive; it must contain no game assets, generated atlases,
-   form maps, `.rpa` files, validation captures, or backups. A Windows offline
-   release may contain only the audited Ren'Py 7 compatibility runtime passed
-   explicitly to the release builder, including its original `LICENSE.txt`.
+4. Inspect the SceneLight payload; it must contain no third-party game assets,
+   generated atlases, form maps, `.rpa` files, validation captures, or backups.
+   Windows ZIPs also contain the audited Ren'Py 7 compatibility SDK passed
+   explicitly to the release builder, including its original `LICENSE.txt` and
+   any of Ren'Py's own launcher/sample files in that unmodified SDK.
 5. Search the release tree for developer-machine paths, private assets,
    temporary captures, and development-only wording.
    Confirm `pyproject.toml`, `scenelight.__version__`, the archive name, and both
@@ -24,7 +25,8 @@ draft candidates there; public availability requires a separate owner decision.
    temporary folder; install dependencies there, then prove the folder can be
    removed without changing the selected test project or global Python.
 7. Run a vulnerability audit against the fully resolved private environment
-   and a medium/high static source scan with no inline suppressions; update any
+   and a medium/high static source scan. Review each narrow suppression against
+   its documented input restrictions; update any
    affected pin or code and repeat the complete matrix before release.
 8. Create an annotated `vX.Y.Z` tag.
 9. On Windows, run `.\tools\build_release_zip.ps1 -CompatibilityRuntime <audited-renpy-7-runtime>`
