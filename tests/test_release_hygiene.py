@@ -462,7 +462,7 @@ def test_production_runtime_stabilizes_background_and_character_transitions() ->
     assert "def _scenelight_contains_lit_sprite(displayable):" in runtime
     assert "def _scenelight_flatten_lit_side(displayable):" in runtime
     assert "class _SceneLightFrozenSide(renpy.Displayable):" in runtime
-    assert "texture = rendered.render_to_texture(True)" in runtime
+    assert "texture = renderer.snapshot(rendered) if renderer is not None else None" in runtime
     assert "rv.blit(self.texture, (0, 0))" in runtime
     assert "def _scenelight_screen_rect(self):" in runtime
     assert "rv._sc_frozen_screen_rect = self._scenelight_screen_rect()" in runtime

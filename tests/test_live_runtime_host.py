@@ -3,8 +3,11 @@ import copy
 import gc
 import sys
 import textwrap
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from scenelight.runtime.live_renpy import Renderer, TextureUploadState
 
@@ -269,6 +272,44 @@ def renderer_fixture():
     return Renderer(gpu, api, None), draw, analysis, copies, errors
 
 
+@pytest.mark.parametrize("modern", [False, True])
+@pytest.mark.parametrize("upload_fails", [False, True])
+def test_snapshot_resolves_samplers_before_allocation_and_restores_state(
+    monkeypatch, modern, upload_fails
+):
+    renderer, draw, _, _, _ = renderer_fixture()
+    source, allocated, loaded = Render(), [], []
+    monkeypatch.setitem(sys.modules, "renpy.display.matrix", SimpleNamespace(MatrixStack=tuple))
+
+    def prepare(what):
+        loaded.append(what)
+        draw.current_fbo = 99
+        if upload_fails:
+            raise RuntimeError("sampler upload failed")
+        what.samplers_ready = True
+
+    def load_modern(what, reverse):
+        assert reverse == (1, 0, 0, 1)
+        prepare(what)
+
+    def allocate(what):
+        allocated.append(what)
+        assert what.samplers_ready  # Native RTT otherwise leaks before its draw fails.
+        return "snapshot"
+
+    draw.load_all_textures = load_modern if modern else prepare
+    draw.render_to_texture = allocate
+    if upload_fails:
+        with pytest.raises(RuntimeError, match="sampler upload failed"):
+            renderer.snapshot(source)
+        assert not allocated
+    else:
+        assert renderer.snapshot(source) == "snapshot"
+        assert allocated == [source]
+    assert loaded == [source]
+    assert draw.current_fbo == 7
+
+
 def test_new_renderer_receives_identity_texture_transform(monkeypatch):
     renderer, draw, _, _, errors = renderer_fixture()
     loaded = []
@@ -327,6 +368,24 @@ def test_static_render_reuses_analysis_and_changes_preserve_frozen_fields():
     del background
     gc.collect()
     assert not renderer.backgrounds
+
+
+def test_retired_source_graph_is_released_while_rollback_keeps_its_lighting():
+    renderer, _, _, _, errors = renderer_fixture()
+    retired_background, source = Background(), Render()
+    source_reference = weakref.ref(source)
+    renderer.capture(retired_background, source, 1280, 720, Frame)
+    frozen_frame = renderer.frame(retired_background)
+    frozen_fields = renderer.fields(frozen_frame)
+    source.killed = True  # Ren'Py's completed mark/sweep, not merely a cache miss.
+    del source
+    renderer.api.game.interface.frame_time += 1.0
+    renderer.capture(Background(), Render(), 1280, 720, Frame)
+    gc.collect()
+    assert source_reference() is None
+    assert renderer.fields(frozen_frame) is frozen_fields
+    assert renderer.frame(retired_background) is frozen_frame
+    assert not errors
 
 
 def test_placement_changes_reanalyze_and_context_recreation_discards_old_handles():

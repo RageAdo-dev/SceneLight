@@ -5,7 +5,7 @@ and a successful install is not a complete game playthrough.
 
 ## Current validation
 
-The local Windows suite passed 550 tests on 2026-09-10, with no failures,
+The local Windows suite passed 566 tests on 2026-09-10, with no failures,
 errors or skips. Lint, formatting, package builds, dependency checks and the
 configured static/dependency audits are also release gates. GitHub CI runs the
 committed source on Windows and Linux, with a separate player-only installation
@@ -51,10 +51,21 @@ prepared frames advancing while live-analysis evaluations stayed flat, including
 after loading a save. Ambiguous decoded frames and visually transformed movies
 retain live analysis of the actual rendered background.
 
+The transition texture fix passed native playback and actual save/load on
+Ren'Py 7.7.1 and 8.5.3. Ten settled captures and six fixed-time transition
+captures were pixel-identical to their respective pre-change references.
+The original form-map hashes also pass on Windows and Linux with AVX-512 enabled;
+the small sRGB lookup-table initialization no longer depends on float32 SIMD power
+rounding. Per-frame shader calculations and approved map bytes are unchanged.
+
 The older iMac test machine runs **Windows**, not macOS. Earlier measurements
 showed that its live analyzer was too slow for smooth movies; prepared playback
-addressed that workload. A new 30-minute session is being checked for frame pacing,
-save/load recovery and memory growth; it is not yet a completed stability gate.
+addressed that workload. A completed 30-minute session exposed a remaining
+transition allocation leak and was not counted as a memory-stability pass.
+After correcting texture preparation before transition capture, a short repeated
+transition test accounted for every engine texture allocation. A fresh 30-minute
+session is checking the fix's frame pacing, save/load recovery and memory growth;
+it is not yet a completed stability gate.
 Those results do not establish performance for every low-end laptop or procedural effect.
 
 Rendering uses Ren'Py's graphics renderer. A compatible integrated GPU can be

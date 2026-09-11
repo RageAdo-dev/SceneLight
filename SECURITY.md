@@ -15,17 +15,19 @@ Dependencies are installed into `%LOCALAPPDATA%\SceneLight\python-env`, not the
 global Python package set. Packaging tools and direct runtime dependencies are
 version-pinned and checked during release validation against published
 vulnerability data. The Python source also passes a medium-and-high-severity
-static security scan; the release gate contains no inline suppression markers.
+static security scan; any narrowly scoped suppression must be reviewed with its
+documented input restrictions.
 
 An optional offline release contains a pinned `wheelhouse`; a source checkout
 can use an adjacent `wheelhouse` for the same behavior. Both switch dependency
 installation to pip's `--no-index --find-links` mode. Users should verify the
 release checksum supplied by the publisher before running any package.
 
-The game runtime and renderer contain no network client. Setup exposes only two
+The game runtime and renderer contain no network client. Setup exposes three
 network-capable workflows: the confirmed pinned Python download described
-above, and a confirmed `python -m pip install ...` operation for published
-dependencies. SceneLight has no advertising, automatic updater, service,
+above, a confirmed `python -m pip install ...` operation for published
+dependencies, and the pinned, SHA-256-verified Ren'Py compatibility download from
+`renpy.org` when it is not already bundled. SceneLight has no advertising, automatic updater, service,
 driver, or startup persistence. It passes subprocess arguments as lists and
 never executes game-supplied text through a command shell. Video decoding and
 encoding likewise use an argument list for the locally installed FFmpeg
@@ -38,8 +40,9 @@ managed copy under the user's local application data. Removal validates the
 copy's ownership marker and managed-root boundary before deletion. Release ZIPs
 include a SHA-256 checksum. The shared dependency environment can be removed by
 closing SceneLight and deleting `%LOCALAPPDATA%\SceneLight\python-env`; installed
-game runtimes do not import from it. GitHub's release workflow and all
-installer/runtime source are public so a release can be audited before use.
+game runtimes do not import from it. The release workflow and all installer/runtime
+source are included in this private repository for review. Public availability
+requires a separate owner decision.
 
 **Add to this game** and the separately labeled mod-author integration are the
 explicit in-place exceptions to the read-only source rule. They refuse to

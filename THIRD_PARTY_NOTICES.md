@@ -1,17 +1,18 @@
 # Third-party notices
 
-SceneLight depends on NumPy, Pillow, OpenCV, and psutil. The optional Preview &
-Calibrator also uses PySide6, PyOpenGL, and imageio-ffmpeg.
+SceneLight depends on NumPy, Pillow, OpenCV, psutil, PySide6-Essentials and
+imageio-ffmpeg. The optional Preview & Calibrator additionally uses the full
+PySide6 package and PyOpenGL.
 Optional NVIDIA acceleration uses CuPy. Their licenses are not replaced by
 SceneLight's MIT license. Binary distributions must reproduce the applicable
 notices, including the license information for the FFmpeg executable supplied
 by imageio-ffmpeg.
 
-The optional Windows offline release can include an unmodified, trimmed copy of
+The normal Windows ZIP and optional offline release include an unmodified copy of
 the official Ren'Py 7.7.1 runtime solely as a compatibility layer for legacy Ren'Py
 6/Python 2 games. Ren'Py is licensed under the MIT license. Its original
-`LICENSE.txt` is retained inside `compatibility-runtime/`; no Ren'Py sample
-project, launcher UI, tutorial, or third-party game content is included.
+`LICENSE.txt` is retained inside `compatibility-runtime/`. The verified SDK may
+include Ren'Py's own launcher and samples; no third-party game content is bundled.
 
 SceneLight does not download or bundle third-party game or mod content. Its
 setup window can invoke Python's package manager only after a user accepts the

@@ -59,6 +59,7 @@ class Renderer(object):
         self.prepared_pool = []
         self.prepared_releases = {}
         self.texture_transform = None
+        self.retired_source_frame_time = None
 
     def _context(self):
         draw = self.api.display.draw
@@ -78,6 +79,7 @@ class Renderer(object):
             self.last_analysis_time = None
             self.prepared_pool[:] = []
             self.prepared_releases.clear()
+            self.retired_source_frame_time = None
             # Newer Ren'Py renderers require a model-to-texture MatrixStack.
             # Inspect the bound method once per context; do not catch TypeError
             # from texture loading itself, which could hide an engine failure.
@@ -96,12 +98,51 @@ class Renderer(object):
             self.analysis = self.gpu.Analysis()
         return draw
 
+    def _release_retired_sources(self):
+        now = self.api.game.interface.frame_time
+        if now == self.retired_source_frame_time:
+            return
+        self.retired_source_frame_time = now
+        for binding, previous in list(self.backgrounds.items()):
+            signature, frame, animated, canvas, offset = previous
+            retired_source = getattr(signature[0], "killed", False)
+            retired_canvas = getattr(canvas, "killed", False)
+            if retired_source or retired_canvas:
+                # Ren'Py deliberately leaves texture-only children on killed
+                # Renders (image-cache tiles use them). Rollback can retain our
+                # binding, but must not retain that retired source graph.
+                # Small completed lighting fields remain available to snapshots.
+                self.backgrounds[binding] = (
+                    (None,) + signature[1:] if retired_source else signature,
+                    frame,
+                    animated,
+                    None if retired_canvas else canvas,
+                    offset,
+                )
+
+    def snapshot(self, rendered):
+        """Resolve mesh samplers before allocating a transition snapshot."""
+        draw = self._context()
+        if draw is None:
+            return None
+        saved_fbo = draw.current_fbo
+        try:
+            with self.gpu.State(self.analysis.device.gl):
+                if self.texture_transform is None:
+                    draw.load_all_textures(rendered)
+                else:
+                    draw.load_all_textures(rendered, self.texture_transform)
+                return draw.render_to_texture(rendered)
+        finally:
+            draw.current_fbo = saved_fbo
+
     def capture(self, background, rendered, width, height, frame_factory):
         """Analyze the actual child render, including its final placement."""
         try:
             draw = self._context()
             if draw is None:
                 return
+            self._release_retired_sources()
             placement = tuple(background.child.get_placement())
             binding = getattr(background, "binding", background)
             previous = self.backgrounds.get(binding)

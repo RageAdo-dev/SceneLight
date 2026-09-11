@@ -1447,12 +1447,16 @@ init -50 python:
                 0.0,
                 0.0,
             )
-            texture = rendered.render_to_texture(True)
-            return _SceneLightFrozenSide(
-                texture,
-                rendered.get_size(),
-                displayable.get_placement(),
-            )
+            renderer = renpy.display._scenelight_live_renderer
+            # RTT does not resolve the mesh samplers itself. Drawing this tree
+            # early can fail after allocation and leak an unfinished texture.
+            texture = renderer.snapshot(rendered) if renderer is not None else None
+            if texture is not None:
+                return _SceneLightFrozenSide(
+                    texture,
+                    rendered.get_size(),
+                    displayable.get_placement(),
+                )
         except Exception:
             # Older/alternate model renderers may not expose GPU RTT here.
             # Retain Ren'Py's supported lazy flattening path rather than
