@@ -1062,7 +1062,9 @@ def _sprite_spec_fingerprint(
     established exact RGBA pixel hash in ``source_sha256``.
     """
 
-    digest = hashlib.sha256(b"scenelight-sprite-spec-3\0")
+    # v4 invalidates maps made with the CPU-dispatch-dependent sRGB table.
+    # Captured source pixels and scene transport retain their own contracts.
+    digest = hashlib.sha256(b"scenelight-sprite-spec-4\0")
     digest.update(json.dumps(spec.positions, separators=(",", ":")).encode("ascii"))
     digest.update(b"\0")
     digest.update(json.dumps(spec.canvas_size, separators=(",", ":")).encode("ascii"))

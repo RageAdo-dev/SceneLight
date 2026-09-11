@@ -3,7 +3,15 @@ import hashlib
 import numpy as np
 from PIL import Image, ImageDraw
 
-from scenelight.form_maps import FORM_MAP_VERSION, build_sprite_form_maps
+from scenelight.form_maps import _SRGB_U8_TO_LINEAR, FORM_MAP_VERSION, build_sprite_form_maps
+
+
+def test_integer_srgb_lookup_preserves_every_approved_float32_value() -> None:
+    assert _SRGB_U8_TO_LINEAR.dtype == np.float32
+    assert not _SRGB_U8_TO_LINEAR.flags.writeable
+    assert hashlib.sha256(_SRGB_U8_TO_LINEAR.astype("<f4").tobytes()).hexdigest() == (
+        "305f395a99e83b5e2f75b6de7c72acc42af192eab6e377a18d6b209beead7c04"
+    )
 
 
 def _pre_effect_fixture(mode: str) -> Image.Image:

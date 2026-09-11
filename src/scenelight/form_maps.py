@@ -22,7 +22,6 @@ from .engine import (
     _luminance,
     _material_light_response,
     _pseudo_surface,
-    _srgb_to_linear,
     _surface_ambient_occlusion,
 )
 
@@ -32,7 +31,22 @@ HEIGHT_MIN = -0.25
 HEIGHT_MAX = 1.25
 NOISE_RANGE = 4.0
 RESPONSE_SIZE = 64
-_SRGB_U8_TO_LINEAR = _srgb_to_linear(np.arange(256, dtype=np.float32) / 255.0)
+
+
+def _srgb_u8_table() -> np.ndarray:
+    values = np.arange(256, dtype=np.float32) / 255.0
+    base = (values + np.float32(0.055)) / np.float32(1.055)
+    # AVX-512's float32 power can differ by one ULP from the approved table.
+    # Evaluate only this 256-entry table in double precision, retaining the
+    # original float32 base/exponent and rounding back once. Per-pixel lookup
+    # and the live analyzer keep their existing fast paths.
+    high = np.power(base.astype(np.float64), float(np.float32(2.4))).astype(np.float32)
+    result = np.where(values <= 0.04045, values / 12.92, high)
+    result.flags.writeable = False
+    return result
+
+
+_SRGB_U8_TO_LINEAR = _srgb_u8_table()
 
 
 @dataclass(frozen=True, slots=True)

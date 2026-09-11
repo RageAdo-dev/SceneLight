@@ -17,6 +17,17 @@ from scenelight.form_maps import FORM_ANALYSIS_MAX_DIMENSION
 from scenelight.project import SpriteSpec, discover_project
 
 
+def test_stable_color_table_invalidates_the_previous_form_cache_key(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"legacy raw sprite bytes")
+    spec = SpriteSpec("test", (source,))
+    # Captured from the v3 fingerprint with these exact encoded source bytes.
+    legacy = "443a0cec7cb6f12f7152f149d9c49e3931f2e4b2d76116b9899e6860599badae"
+    current = builder_module._sprite_spec_fingerprint(spec)
+    assert current != legacy
+    assert builder_module._sprite_spec_fingerprint(spec) == current
+
+
 def test_neutral_key_plus_strong_colored_source_uses_spatial_family_slots() -> None:
     physical = DetectedLight(
         0.132926,
