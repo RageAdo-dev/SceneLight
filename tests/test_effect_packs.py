@@ -198,7 +198,8 @@ def test_runtime_composes_custom_effects_after_the_lighting_shader() -> None:
     runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
         encoding="utf-8"
     )
-    lighting = 'result.add_shader("scenelight.dynamic_sprite")'
+    lighting = "result.add_shader(_scenelight_sprite_shader)"
+    assert '_scenelight_sprite_shader = "scenelight.dynamic_sprite"' in runtime
     custom = "return _scenelight_custom_effect_render("
 
     render_start = runtime.index("        def render(self, width, height, st, at):")

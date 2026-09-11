@@ -5,7 +5,7 @@ and a successful install is not a complete game playthrough.
 
 ## Current validation
 
-The local Windows suite passed 571 tests on 2026-09-10, with no failures,
+The local Windows suite passed 596 tests on 2026-09-11, with no failures,
 errors or skips. Lint, formatting, package builds, dependency checks and the
 configured static/dependency audits are also release gates. GitHub CI runs the
 committed source on Windows and Linux, with a separate player-only installation
@@ -53,6 +53,30 @@ that evidence.
 
 ## Playback and hardware
 
+The shared Preview/Ren'Py shader now samples lighting values that are constant
+across a character in the vertex stage. It keeps the same lighting formulas,
+texture resolution, light count and source frames. Unsupported varying/texture
+limits or a rejected combined shader select the original implementation. Games
+using Ren'Py's custom shader-part filter also retain the original implementation,
+so their filter receives the established public shader name.
+
+On the older Radeon HD 6700M, an ABBA GPU timer comparison at 2160x1215 measured
+14.62/14.61 ms for the original draw and 11.98/11.98 ms for vertex sampling: about
+18% less GPU drawing time. This is not a measurement of GPU utilization or power.
+Four 70-second real-game playback runs remained around 22 presented movie frames
+per second for a 24-fps video, with the same 128,010,714-byte engine texture count.
+The reduced shader work did not remove that machine's remaining playback limit.
+
+All 18 synthetic Preview comparisons were pixel-identical on both tested GPUs.
+Native Ren'Py 7.7.1 and 8.5.3 comparisons on NVIDIA covered two sprites, rotation,
+scaling, transparency, physical/separate light colors, transition snapshots and
+actual save/load; the captured pixels matched exactly. A game shader-filter test
+and deliberately rejected optional shaders preserved original rendering and
+save/load. On the old AMD driver, real-game captures had tiny rounding differences:
+at most 305 of 921,600 pixels differed, with a maximum channel difference of 4/255.
+Visual equivalence, rather than universal bit identity across shader stages, is
+the accepted target; no resolution or lighting-detail reduction was introduced.
+
 Prepared movie playback keeps the same lighting calculation, resolution and
 light count. The resulting shader inputs are cached losslessly. Tests observed
 prepared frames advancing while live-analysis evaluations stayed flat, including
@@ -84,6 +108,12 @@ averaged 22.0/s after the fix versus 22.5/s before it for the 24-fps test movie;
 this is not a 60-fps performance claim or a measurement of GPU utilization.
 Those results do not establish performance for every low-end laptop or procedural effect.
 
+The vertex-sampling candidate also completed a 194.5-second iMac scene-cycle
+check: ten movie/static cycles, one actual save/load, 3,023 prepared frames and no
+renderer failures. Peak sampled private memory was 541.7 MiB; final engine texture
+storage was 154,255,899 bytes. This shorter check supplements the earlier memory
+tests rather than replacing the 30-minute result.
+
 Rendering uses Ren'Py's graphics renderer. A compatible integrated GPU can be
 sufficient; CPU-only rendering and zero GPU usage are not promised. Native GIF
 files are not used as animated Ren'Py images in the test lab: the lab uses decoded
@@ -97,6 +127,13 @@ with `python examples/synthetic/make_release_lab.py <new-directory>`.
 Use `--ddlc` only to create an overlay for a disposable, separately obtained DDLC
 copy. No commercial game, third-party game art, saves or private captures are
 included in the source or release artifacts.
+
+With the optional Preview dependencies installed, run
+`python tools/audit_vertex_sampling.py <lab>/game/scenelight_lab <new-output-directory>`
+to reproduce the 18 exact-image checks and the offscreen ABBA GPU timer comparison.
+The report records the production shader hash and retains images if a comparison
+differs. The command requires an OpenGL 3.3 context and does not measure total game
+frame rate or GPU utilization.
 
 When reporting a problem, include the SceneLight version, Ren'Py version, OS,
 GPU/driver, input format and a short reproduction. Describe whether the issue

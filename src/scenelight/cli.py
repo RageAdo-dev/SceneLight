@@ -174,7 +174,15 @@ def _install_runtime_files(game_root: Path) -> None:
     shutil.copy2(_runtime_source(), game_root / "scenelight_runtime.rpy")
     data_root = game_root / "scenelight_runtime"
     data_root.mkdir(parents=True, exist_ok=True)
-    for name in ("live_gpu", "live_renpy", "live_opencl", "prepared", "prepared_renpy"):
+    for name in (
+        "live_gpu",
+        "live_renpy",
+        "live_opencl",
+        "prepared",
+        "prepared_renpy",
+        "shader_stages",
+        "shader_renpy",
+    ):
         shutil.copy2(_runtime_source().with_name(name + ".py"), data_root / (name + ".txt"))
 
 

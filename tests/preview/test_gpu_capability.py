@@ -25,3 +25,36 @@ def test_shader_capability_check_accepts_complete_api(monkeypatch) -> None:
         monkeypatch.setattr(gpu_view.GL, name, lambda: None)
 
     gpu_view._require_shader_api()
+
+
+@pytest.mark.parametrize("capable,link_fails", [(True, False), (True, True), (False, False)])
+def test_sprite_shader_falls_back_without_losing_the_preview(monkeypatch, capable, link_fails):
+    calls = []
+    monkeypatch.setattr(gpu_view.GL, "glGetIntegerv", lambda key: 128 if capable else 0)
+
+    def link(vertex, fragment):
+        optimized = "v_sc_pack_19" in vertex
+        calls.append(optimized)
+        assert ("v_sc_pack_19" in fragment) is optimized
+        if optimized and link_fails:
+            raise RuntimeError("driver rejects varying layout")
+        return 19
+
+    monkeypatch.setattr(gpu_view, "_link_program", link)
+    assert gpu_view._sprite_program() == 19
+    assert calls == ([True, False] if link_fails else [capable])
+
+
+def test_failed_fragment_compile_releases_the_completed_vertex_shader(monkeypatch):
+    deleted = []
+
+    def compile_shader(kind, source):
+        if kind == gpu_view.GL.GL_FRAGMENT_SHADER:
+            raise RuntimeError("fragment rejected")
+        return 7
+
+    monkeypatch.setattr(gpu_view, "_compile_shader", compile_shader)
+    monkeypatch.setattr(gpu_view.GL, "glDeleteShader", deleted.append)
+    with pytest.raises(RuntimeError, match="fragment rejected"):
+        gpu_view._link_program("vertex", "fragment")
+    assert deleted == [7]

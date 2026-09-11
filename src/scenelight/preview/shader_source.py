@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
 
+from ..runtime import shader_stages
+from ..runtime.shader_stages import build, vertex_preamble
 from .core import runtime_source_path
 
 
@@ -22,11 +25,13 @@ def _extract(name: str) -> str:
 
 
 def production_shader_sha256() -> str:
-    return hashlib.sha256(runtime_source_path().read_bytes()).hexdigest()
+    digest = hashlib.sha256(runtime_source_path().read_bytes())
+    digest.update(Path(shader_stages.__file__).read_bytes())
+    return digest.hexdigest()
 
 
-def vertex_source() -> str:
-    return """#version 330 core
+def vertex_source(*, center_samples: bool = False) -> str:
+    source = """#version 330 core
 in vec2 in_unit;
 in vec2 in_uv;
 uniform vec2 u_canvas_size;
@@ -49,10 +54,27 @@ void main() {
     v_sc_center = (u_sprite_position + u_sc_form_center * u_sprite_size) / u_canvas_size;
 }
 """
+    if center_samples:
+        declarations, helpers, body, _ = build(
+            _extract("fragment_functions"), _extract("fragment_350")
+        )
+        helpers, body = vertex_preamble(_extract("variables"), helpers, body)
+        source = source.replace(
+            "void main() {",
+            declarations.replace("varying ", "out ") + "\n" + helpers + "\nvoid main() {",
+        )
+        end = source.rfind("}")
+        source = source[:end] + body + "\n" + source[end:]
+        source = source.replace("texture2D", "texture")
+    return source
 
 
-def fragment_source() -> str:
+def fragment_source(*, center_samples: bool = False) -> str:
     variables = _extract("variables")
+    body = _extract("fragment_350")
+    if center_samples:
+        declarations, _, _, body = build(_extract("fragment_functions"), body)
+        variables += "\n" + declarations
     variables = re.sub(r"\bvarying\s+", "in ", variables)
     # These are supplied by Ren'Py's base texture shader in-game. The desktop
     # wrapper declares the same values explicitly without changing the body.
@@ -63,7 +85,7 @@ def fragment_source() -> str:
         flags=re.MULTILINE,
     )
     functions = _extract("fragment_functions").replace("texture2D", "texture")
-    body = _extract("fragment_350").replace("texture2D", "texture")
+    body = body.replace("texture2D", "texture")
     body = body.replace(
         "vec4 source = gl_FragColor;",
         "vec4 source = texture(tex0, v_tex_coord, u_lod_bias);",

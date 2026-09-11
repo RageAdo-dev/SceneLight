@@ -15,6 +15,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from ..calibration import Calibration
 from ..runtime.live_gpu import Analysis
+from ..runtime.shader_stages import supported
 from .artifacts import FormArtifacts, SceneArtifacts
 from .core import (
     CHROMA_RANGE,
@@ -80,7 +81,11 @@ def _compile_shader(kind: int, source: str) -> int:
 
 def _link_program(vertex: str, fragment: str) -> int:
     vertex_shader = _compile_shader(GL.GL_VERTEX_SHADER, vertex)
-    fragment_shader = _compile_shader(GL.GL_FRAGMENT_SHADER, fragment)
+    try:
+        fragment_shader = _compile_shader(GL.GL_FRAGMENT_SHADER, fragment)
+    except BaseException:
+        GL.glDeleteShader(vertex_shader)
+        raise
     program = GL.glCreateProgram()
     GL.glAttachShader(program, vertex_shader)
     GL.glAttachShader(program, fragment_shader)
@@ -92,6 +97,20 @@ def _link_program(vertex: str, fragment: str) -> int:
         GL.glDeleteProgram(program)
         raise RuntimeError(log.decode("utf-8", "replace") if isinstance(log, bytes) else str(log))
     return program
+
+
+def _sprite_program() -> int:
+    try:
+        if supported(
+            int(GL.glGetIntegerv(GL.GL_MAX_FRAGMENT_INPUT_COMPONENTS)),
+            int(GL.glGetIntegerv(GL.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS)),
+        ):
+            return _link_program(
+                vertex_source(center_samples=True), fragment_source(center_samples=True)
+            )
+    except Exception:
+        pass  # A driver may advertise limits that this complete shader exceeds.
+    return _link_program(vertex_source(), fragment_source())
 
 
 class SceneLightGPUView(QOpenGLWidget):
@@ -341,7 +360,7 @@ class SceneLightGPUView(QOpenGLWidget):
             # Qt can recreate the widget context when it changes top-level window.
             self._transport_fbo = 0
             self._transport_rendered_key = None
-            self._program = _link_program(vertex_source(), fragment_source())
+            self._program = _sprite_program()
             self._background_program = _link_program(BACKGROUND_VERTEX, BACKGROUND_FRAGMENT)
             self._transport_blend_program = _link_program(
                 BACKGROUND_VERTEX.replace("v_uv", "v_tex_coord").replace(

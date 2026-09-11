@@ -3205,6 +3205,7 @@ init -50 python:
             }
         """)
 
+    _scenelight_sprite_shader = "scenelight.dynamic_sprite"
     if _SCENELIGHT_SHADER_AVAILABLE:
         renpy.register_shader(
             "scenelight.dynamic_sprite",
@@ -3213,6 +3214,39 @@ init -50 python:
             fragment_functions=_scenelight_shader_fragment_functions,
             fragment_350=_scenelight_shader_fragment_350,
         )
+        if renpy.loadable("scenelight_runtime/shader_stages.txt") and renpy.loadable("scenelight_runtime/shader_renpy.txt"):
+            try:
+                _sc_stage_module = _scenelight_runtime_module("shader_stages")
+                _sc_stage_functions = _scenelight_shader_fragment_functions
+                _sc_stage_fragment = _scenelight_shader_fragment_350
+                for _sc_original, _sc_alias in _SCENELIGHT_FRAGMENT_FUNCTION_ALIASES:
+                    _sc_stage_functions = _sc_stage_functions.replace(_sc_alias, _sc_original)
+                    _sc_stage_fragment = _sc_stage_fragment.replace(_sc_alias, _sc_original)
+                _sc_stage_variables, _sc_stage_helpers, _sc_stage_body, _sc_stage_fragment = _sc_stage_module.build(
+                    _sc_stage_functions, _sc_stage_fragment
+                )
+                _sc_stage_helpers, _sc_stage_body = _sc_stage_module.vertex_preamble(
+                    _scenelight_shader_variables, _sc_stage_helpers, _sc_stage_body
+                )
+                renpy.register_shader(
+                    _sc_stage_module.OPTIMIZED,
+                    variables=_scenelight_shader_variables + "\n" + _sc_stage_variables,
+                    vertex_functions=_sc_stage_helpers,
+                    vertex_150=_scenelight_shader_vertex_150 + "\n" + _sc_stage_body,
+                    fragment_functions=_scenelight_shader_fragment_functions,
+                    fragment_350=_scenelight_fragment_source(_sc_stage_fragment),
+                )
+                import renpy.gl2.gl2shadercache as _sc_shader_cache
+                _scenelight_runtime_module("shader_renpy").install(
+                    _sc_shader_cache, _scenelight_runtime_module("live_gpu"),
+                    # The store's config proxy raises non-AttributeError for
+                    # options absent in older engines. Use the actual module.
+                    _sc_stage_module, renpy.config, renpy.display.log.write
+                )
+                _scenelight_sprite_shader = _sc_stage_module.OPTIMIZED
+            except Exception:
+                import traceback
+                renpy.display.log.write("SceneLight retained its original shader.\n" + traceback.format_exc())
 
     class SceneLightSprite(renpy.Displayable):
         def __init__(
@@ -3569,7 +3603,7 @@ init -50 python:
             result.blit(transport_render, (0, 0))
             result.mesh = True
             result.add_shader("renpy.texture")
-            result.add_shader("scenelight.dynamic_sprite")
+            result.add_shader(_scenelight_sprite_shader)
             result.add_uniform("u_sc_scene_uv", tuple(scene["uv"]))
             result.add_uniform("u_sc_wrap_uv", tuple(scene["uv"]))
             result.add_uniform("u_sc_wrap_uv_next", tuple(scene.get("_sc_next_uv", scene["uv"])))
