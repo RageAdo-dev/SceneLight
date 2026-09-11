@@ -1,6 +1,8 @@
 # SceneLight validation results
 
-Current validation date: 2026-09-05
+This file retains the historical validation record through 2026-09-05.
+For the current private beta's test counts, package checks, native playback and
+low-end memory results, see [Beta validation](docs/BETA_VALIDATION.md).
 
 ## Animated-background correction
 

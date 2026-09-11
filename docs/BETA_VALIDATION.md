@@ -52,7 +52,8 @@ after loading a save. Ambiguous decoded frames and visually transformed movies
 retain live analysis of the actual rendered background.
 
 The transition texture fix passed native playback and actual save/load on
-Ren'Py 7.7.1 and 8.5.3. Ten settled captures and six fixed-time transition
+Ren'Py 7.7.1 and 8.5.3, including saving during an active transition and loading
+that save. Ten settled captures and six fixed-time transition
 captures were pixel-identical to their respective pre-change references.
 The original form-map hashes also pass on Windows and Linux with AVX-512 enabled;
 the small sRGB lookup-table initialization no longer depends on float32 SIMD power
@@ -60,12 +61,19 @@ rounding. Per-frame shader calculations and approved map bytes are unchanged.
 
 The older iMac test machine runs **Windows**, not macOS. Earlier measurements
 showed that its live analyzer was too slow for smooth movies; prepared playback
-addressed that workload. A completed 30-minute session exposed a remaining
-transition allocation leak and was not counted as a memory-stability pass.
-After correcting texture preparation before transition capture, a short repeated
-transition test accounted for every engine texture allocation. A fresh 30-minute
-session is checking the fix's frame pacing, save/load recovery and memory growth;
-it is not yet a completed stability gate.
+addressed that workload. The final 30-minute retest completed 28 scene cycles and
+two actual save/load cycles with lighting active and no renderer errors. The
+last five-minute median of process-private memory fell from 762.3 MiB before the
+transition fix to 525.3 MiB after it (31% lower). After warm-up, five-minute medians
+spanned 499.4–525.3 MiB; peak private memory was 541.0 MiB. The final engine texture
+counter fell from 432.5 to 154.4 MiB (64% lower).
+
+The snapshot ownership trace found no unowned engine texture bytes after the fix.
+Separate 80-cycle/160-transition tests filled rollback history on both engines:
+late texture variation was under 0.2 MiB on Ren'Py 7 and zero on Ren'Py 8. These
+checks passed the candidate's memory-stability gate. Prepared movie-frame advances
+averaged 22.0/s after the fix versus 22.5/s before it for the 24-fps test movie;
+this is not a 60-fps performance claim or a measurement of GPU utilization.
 Those results do not establish performance for every low-end laptop or procedural effect.
 
 Rendering uses Ren'Py's graphics renderer. A compatible integrated GPU can be
