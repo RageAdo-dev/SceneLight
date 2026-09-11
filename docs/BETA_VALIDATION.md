@@ -5,7 +5,7 @@ and a successful install is not a complete game playthrough.
 
 ## Current validation
 
-The local Windows suite passed 566 tests on 2026-09-10, with no failures,
+The local Windows suite passed 571 tests on 2026-09-10, with no failures,
 errors or skips. Lint, formatting, package builds, dependency checks and the
 configured static/dependency audits are also release gates. GitHub CI runs the
 committed source on Windows and Linux, with a separate player-only installation
@@ -16,6 +16,14 @@ prepared all frames of a test movie. Qt Essentials and FFmpeg are required playe
 components; the full Qt Preview interface and PyOpenGL remain optional. Missing
 preparation components cause an actionable installation error instead of silently
 selecting a more expensive live playback path.
+
+Unchanged managed installs now reuse complete raw captures. Generated Ren'Py
+bytecode is excluded from the capture identity only when the managed-copy record
+identifies its existing authored source; bytecode supplied by the author remains
+an input. Native tests verified cache hits, invalidation for same-size/same-time
+script edits, changed captured pixels, and restoration of the original pixels.
+One shared content hash also replaces two full game-file hashing passes per
+capture request.
 
 | Area | Tested scope |
 |---|---|

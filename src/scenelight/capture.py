@@ -34,7 +34,7 @@ from .project import (
     SpriteSpec,
     _looks_like_foreground_sprite,
 )
-from .sidecar import renpy_runtime_command
+from .sidecar import STATE_NAME, managed_project_root, renpy_runtime_command
 from .source_types import VISUAL_SOURCE_SUFFIXES
 
 CAPTURE_VERSION = 42
@@ -109,6 +109,22 @@ def needs_runtime_capture(discovery: ProjectDiscovery) -> bool:
     )
 
 
+def _managed_authored_paths(project_root: Path) -> set[str] | None:
+    """Read provenance only for a managed copy owned by the current storage root."""
+    try:
+        state = json.loads((project_root / STATE_NAME).read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("version") != 1:
+            return None
+        source, files = state.get("source"), state.get("source_files")
+        if not isinstance(source, str) or not source or not isinstance(files, dict):
+            return None
+        if managed_project_root(Path(source)) != project_root.resolve():
+            return None
+        return set(files) if all(isinstance(key, str) for key in files) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _capture_content_signature(discovery: ProjectDiscovery) -> str:
     """Identify pixel-producing logic and visual inputs, not UI/helper wording.
 
@@ -119,6 +135,7 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
 
     digest = hashlib.sha256()
     digest.update(f"scenelight-capture-pixels-{CAPTURE_PIXEL_VERSION}\0".encode("ascii"))
+    authored = _managed_authored_paths(discovery.project_root)
     for path in sorted(discovery.game_root.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in VISUAL_SOURCE_SUFFIXES:
             continue
@@ -130,6 +147,15 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
             continue
         if relative.parts and relative.parts[0].lower() == "scenelight_runtime":
             continue
+        if authored is not None and path.suffix.lower() in {".rpyc", ".rpymc"}:
+            key = path.relative_to(discovery.project_root).as_posix()
+            source_path = path.with_suffix(path.suffix[:-1])
+            source_key = source_path.relative_to(discovery.project_root).as_posix()
+            if key not in authored and source_key in authored and source_path.is_file():
+                # Preflight can regenerate nondeterministic bytecode. It is not
+                # an authored input and sync_project removes it before playback.
+                # Keep hashing bytecode shipped by the author, even beside source.
+                continue
         digest.update(str(relative).replace("\\", "/").encode("utf-8"))
         digest.update(b"\0")
         with path.open("rb") as stream:
@@ -139,11 +165,13 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
     return digest.hexdigest()
 
 
-def _project_signature(discovery: ProjectDiscovery) -> str:
+def _project_signature(discovery: ProjectDiscovery, *, content_signature: str | None = None) -> str:
     """Identify one complete requested inventory over stable visual content."""
 
     digest = hashlib.sha256()
-    digest.update(_capture_content_signature(discovery).encode("ascii"))
+    if content_signature is None:
+        content_signature = _capture_content_signature(discovery)
+    digest.update(content_signature.encode("ascii"))
     digest.update(b"\0")
     digest.update(f"protocol={CAPTURE_VERSION}\0plan={CAPTURE_PLAN_VERSION}\0".encode("ascii"))
     digest.update(json.dumps(discovery.runtime_sprite_names, sort_keys=True).encode("utf-8"))
@@ -1993,13 +2021,13 @@ def capture_runtime_assets(
     """Capture unresolved raw assets through the target Ren'Py runtime."""
 
     cache_root = discovery.project_root / ".scenelight_cache"
-    signature = _project_signature(discovery)
     # A signature-specific directory makes per-form checkpoint reuse safe:
     # changed art, script state, or resolver code can never reuse stale pixels.
     # Raw pixels depend on the helper and visual project content, not on which
     # subset happened to request them. A later scan can therefore add a sprite
     # family without moving every unchanged per-form checkpoint to a new cache.
     content_signature = _capture_content_signature(discovery)
+    signature = _project_signature(discovery, content_signature=content_signature)
     capture_root = cache_root / "captured" / content_signature[:16]
     cache_root.mkdir(parents=True, exist_ok=True)
     capture_root.mkdir(parents=True, exist_ok=True)
