@@ -65,7 +65,7 @@ def test_release_record_names_every_cache_contract() -> None:
         "runtime_api_version": 1,
         "runtime_manifest_version": 8,
         "transport_algorithm": "12-scene-stable-light-layout",
-        "sprite_form_version": 3,
+        "sprite_form_version": 4,
         "capture_version": 42,
         "capture_plan_version": 2,
         "capture_pixel_version": 2,
@@ -233,7 +233,7 @@ def test_direct_refresh_seeds_only_compatible_sprite_form_maps(tmp_path: Path) -
     (forms / "hero_response.png").write_bytes(b"map")
     manifest = source / "sprite_form_manifest.json"
     manifest.write_text(
-        json.dumps({"version": 3, "sprites": {"hero idle": {"response": "map"}}}),
+        json.dumps({"version": 4, "sprites": {"hero idle": {"response": "map"}}}),
         encoding="utf-8",
     )
     managed = tmp_path / "working-copy"
@@ -248,7 +248,7 @@ def test_direct_refresh_seeds_only_compatible_sprite_form_maps(tmp_path: Path) -
     incompatible_forms.mkdir(parents=True)
     (incompatible_forms / "hero_response.png").write_bytes(b"old map")
     (incompatible_source / "sprite_form_manifest.json").write_text(
-        json.dumps({"version": 2, "sprites": {"hero idle": {}}}), encoding="utf-8"
+        json.dumps({"version": 3, "sprites": {"hero idle": {}}}), encoding="utf-8"
     )
     other_managed = tmp_path / "other-working-copy"
     (other_managed / "game").mkdir(parents=True)

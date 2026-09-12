@@ -117,3 +117,11 @@ def test_gpu_wrapper_keeps_all_eight_texture_inputs() -> None:
     source = fragment_source()
     for index in range(8):
         assert f"sampler2D tex{index}" in source
+
+
+def test_color_separation_retains_forward_normal_component():
+    source = fragment_source()
+    surface = source.split("vec2 sc_creative_surface =", 1)[1].split(";", 1)[0]
+    assert "normalize(vec3(" in surface
+    assert "normal.z" in surface
+    assert ")).xy" in surface

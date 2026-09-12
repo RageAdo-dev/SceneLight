@@ -1337,7 +1337,11 @@ def _pseudo_surface(
     broad_luma = cv2.GaussianBlur(luma, (0, 0), sigmaX=max(2.0, min(alpha.shape) / 100))
     broad_luma = (broad_luma - np.mean(broad_luma[mask > 0])) if np.any(mask) else broad_luma
     height = 0.76 * np.sqrt(np.maximum(distance, 0.0)) + 0.24 * broad_luma
-    sigma = max(1.2, min(alpha.shape) / 260)
+    # A distance field has ridges wherever two silhouette edges are equally
+    # close. Treat the inferred relief as a broad surface before differentiating
+    # it, or those ridges become false creases under opposing colored lights.
+    # This filters derived height only; the source artwork stays untouched.
+    sigma = max(1.2, min(alpha.shape) / 16)
     height = cv2.GaussianBlur(height, (0, 0), sigmaX=sigma)
     gx = cv2.Sobel(height, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(height, cv2.CV_32F, 0, 1, ksize=3)

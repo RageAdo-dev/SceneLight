@@ -29,30 +29,28 @@ def _pre_effect_fixture(mode: str) -> Image.Image:
     return image
 
 
-def test_repacked_form_maps_preserve_every_approved_logical_texel() -> None:
-    # These are hashes captured immediately before the optional-effects
-    # implementation. Rain and glitch are runtime-only, so the approved
-    # physical form textures must remain byte-identical.
+def test_form_maps_preserve_the_reviewed_smooth_surface_texels() -> None:
+    # v4 smooths the inferred height ridges before normal reconstruction.
+    # Keep this reviewed surface stable across packing and optional-FX changes.
     expected = {
         "opaque": {
-            "normal_noise": "f31a4a00857470e9707a78822c6199cfff53ba2950893eda8c3dd584542595df",
-            "height_ao_edge": "05792c02e4064a466b50f410848e9840548935c2cad2a9c3bb995b73ba8fa611",
-            "response": "9ab5910c74bd5e9ba8cace49e6cd38aa9ab35e23a4ab381df7e787415a44f3dd",
+            "normal_noise": "a7d09d9f121700fe164b03581279e182db92cc75af205b2d7c7be2d4d8426eea",
+            "height_ao_edge": "c362e890dd1ac50dfd93199b95ae4216d9f055cca6d5267b7aa8a7ac6f384d13",
+            "response": "d17bc4082a8941719be73b5b6822c392d06bc5164116c16e36691c5711de35ba",
         },
         "sprite": {
-            "normal_noise": "85d42d5260d709e86fbaded5375ee53c99ca5056662bb605d5a7a352e88db726",
-            "height_ao_edge": "39be341a0f5ea304ec32d8c74c4dcc341442de2f20f6625e05b31064f440a065",
-            "response": "a7e66718d4af9b26facf7b04049dc8ce60f4bce748eee52bffe7e98cd3ee13cc",
+            "normal_noise": "76d3751e6aa1683c1bf07fdad4eb88b829ddfa78a476204e41afd63ed181c13f",
+            "height_ao_edge": "194cc97568f0ec4d264b9a522748c49928e449093896a0b2d511216b8d38ee37",
+            "response": "d6b22ba76ef0d8b2da451f79d7a0b635b180b06f547419303710b493be4df3ff",
         },
     }
-    assert FORM_MAP_VERSION == 3
+    assert FORM_MAP_VERSION == 4
     for mode, hashes in expected.items():
         maps = build_sprite_form_maps(_pre_effect_fixture(mode))
         normal = np.asarray(maps.normal_noise.convert("RGB"), dtype=np.uint8)
         auxiliary = np.asarray(maps.height_ao_edge.convert("RGB"), dtype=np.uint8)
-        # v2 groups smooth normal/edge bytes and height/AO/noise bytes into two
-        # RGB files. Reconstructing v1's logical shader channels must remain
-        # byte-identical, as must the directional response texture.
+        # Compare logical channels so PNG compression and physical channel
+        # packing cannot hide a change to the reviewed surface or grain.
         logical_normal = np.dstack((normal[..., :2], auxiliary[..., 2]))
         logical = {
             "normal_noise": logical_normal.tobytes(),

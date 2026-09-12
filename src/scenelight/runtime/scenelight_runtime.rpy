@@ -2783,9 +2783,13 @@ init -50 python:
                 // distinct lamps distinct regions to paint.
                 vec2 sc_form_direction = relative_form_position
                     / max(length(relative_form_position), 0.08);
-                vec2 sc_creative_surface = normalize(
-                    normal.xy + sc_form_direction * sc_creative_spread * 1.35
-                );
+                // Keep the forward component: normalizing XY alone turns
+                // even a tiny slope into a full-strength sideways direction,
+                // producing sharp color seams as the slope crosses zero.
+                vec2 sc_creative_surface = normalize(vec3(
+                    normal.xy + sc_form_direction * sc_creative_spread * 1.35,
+                    normal.z
+                )).xy;
                 float sc_creative_lobe0 = clamp(
                     0.50 + 0.50 * dot(sc_creative_surface, sc_creative_direction0), 0.035, 1.0
                 );
