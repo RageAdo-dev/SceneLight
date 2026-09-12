@@ -32,8 +32,9 @@
     "seed": 947
   },
   "comparison_changed_pixels": 146150,
-  "animation_frames": 72,
-  "animation_duration_ms": 3000,
+  "animation_frames": 240,
+  "animation_fps": 60,
+  "animation_duration_ms": 4000,
   "normal_display": "X/Y from stored channels; Z reconstructed from unit length",
   "height_display": "Stored height channel, without contrast stretching",
   "occlusion_display": "Inverted stored amount: white is open, dark is occluded",

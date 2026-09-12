@@ -25,7 +25,8 @@ from scenelight.preview.shader_source import production_shader_sha256
 
 PAPER = (244, 246, 249)
 INK = (26, 35, 47)
-MUTED = (84, 99, 118)
+ANIMATION_FPS = 60
+ANIMATION_SECONDS = 4
 
 
 def font(size):
@@ -56,7 +57,7 @@ def lighting_stage():
 
 
 def comparison(before, after):
-    result = Image.new("RGB", (1440, 744), PAPER)
+    result = Image.new("RGB", (1440, 708), PAPER)
     draw = ImageDraw.Draw(result)
     for index, (title, pixels) in enumerate(
         (("Without SceneLight", before), ("With SceneLight", after))
@@ -70,12 +71,6 @@ def comparison(before, after):
             .resize((684, 616), Image.Resampling.LANCZOS)
         )
         result.paste(crop.convert("RGB"), (left, 68))
-    draw.text(
-        (24, 710),
-        "Same sprite and placement, with SceneLight's default lighting settings.",
-        fill=MUTED,
-        font=font(19),
-    )
     return result
 
 
@@ -100,23 +95,16 @@ def map_figure(source, artifacts):
     ]
     for item in maps[1:]:
         item.putalpha(alpha)
-    result = Image.new("RGB", (1440, 780), PAPER)
+    result = Image.new("RGB", (1440, 722), PAPER)
     draw = ImageDraw.Draw(result)
-    titles = ("Source sprite", "Estimated height", "Surface normals", "Occlusion")
-    captions = (
-        "Original color and transparency",
-        "Brighter = higher on the surface",
-        "Color shows surface direction",
-        "Darker = more occlusion",
-    )
-    for index, (title, caption, item) in enumerate(zip(titles, captions, maps, strict=True)):
+    titles = ("Sprite", "Height map", "Normal map", "Ambient occlusion")
+    for index, (title, item) in enumerate(zip(titles, maps, strict=True)):
         left = 20 + index * 355
         draw.text((left, 23), title, fill=INK, font=font(23))
         draw.rounded_rectangle((left, 70, left + 335, 701), radius=8, fill=(225, 230, 237))
         item = item.copy()
         item.thumbnail((309, 599), Image.Resampling.LANCZOS)
         result.paste(item, (left + (335 - item.width) // 2, 86 + (599 - item.height) // 2), item)
-        draw.text((left, 722), caption, fill=MUTED, font=font(16))
     return result
 
 
@@ -183,12 +171,16 @@ def main():
             )
 
         frames = []
-        for index in range(72):
-            horizontal = 0.5 - 0.27 * math.cos(2 * math.pi * index / 72)
+        frame_count = ANIMATION_FPS * ANIMATION_SECONDS
+        for index in range(frame_count):
+            horizontal = 0.5 - 0.27 * math.cos(2 * math.pi * index / frame_count)
             view.set_placement(horizontal, 1.01, 0.97)
             frame = Image.fromarray(view.render_rgba((768, 432))).convert("RGB")
             frames.append(frame)
-        durations = [round((i + 1) * 1000 / 24) - round(i * 1000 / 24) for i in range(72)]
+        durations = [
+            round((i + 1) * 1000 / ANIMATION_FPS) - round(i * 1000 / ANIMATION_FPS)
+            for i in range(frame_count)
+        ]
         frames[0].save(
             args.output / "moving-light.webp",
             save_all=True,
@@ -205,6 +197,8 @@ def main():
                 encoded.seek(index)
                 if not np.array_equal(np.asarray(encoded.convert("RGB")), np.asarray(expected)):
                     raise RuntimeError(f"Animation frame {index} changed colors during export")
+                if encoded.info.get("duration") != durations[index]:
+                    raise RuntimeError(f"Animation frame {index} changed timing during export")
         metadata = {
             "source": "Ren'Py tutorial/game/images/eileen happy.png",
             "source_sha256": hashlib.sha256(sprite.read_bytes()).hexdigest(),
@@ -212,6 +206,7 @@ def main():
             "form": form.metadata,
             "comparison_changed_pixels": int(np.any(before != after, axis=2).sum()),
             "animation_frames": len(frames),
+            "animation_fps": ANIMATION_FPS,
             "animation_duration_ms": sum(durations),
             "normal_display": "X/Y from stored channels; Z reconstructed from unit length",
             "height_display": "Stored height channel, without contrast stretching",
