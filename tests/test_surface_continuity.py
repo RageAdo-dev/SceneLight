@@ -32,3 +32,24 @@ def test_surface_preparation_keeps_source_pixels_and_transparency():
     assert sprite.tobytes() == before
     assert maps.metadata["map_size"] == [64, 80]
     assert maps.normal_noise.size == sprite.size
+
+
+def test_fine_painted_relief_survives_without_spreading_across_the_surface():
+    size = 256
+    alpha = np.zeros((size, size), dtype=np.float32)
+    alpha[16:240, 32:224] = 1
+    srgb = np.full((size, size, 3), 0.6, dtype=np.float32)
+    y, x = np.mgrid[:size, :size]
+    radius_squared = (x - 96) ** 2 + (y - 128) ** 2
+    highlight = np.exp(-radius_squared / (2 * 4**2)).astype(np.float32)
+    detailed = srgb + 0.25 * highlight[..., None]
+
+    height, *normal = _pseudo_surface(alpha, srgb, 0.72)
+    detail_height, *detail_normal = _pseudo_surface(alpha, detailed, 0.72)
+    change = np.linalg.norm(np.stack(detail_normal) - np.stack(normal), axis=0)
+
+    # A small painted feature must affect local relief without becoming a
+    # broad blob. Filtering the complete height at silhouette scale fails this.
+    assert change.max() > 0.1
+    assert np.max(np.abs(detail_height - height)) > 0.03
+    assert change[radius_squared > 32**2].max() < 0.001

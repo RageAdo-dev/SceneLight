@@ -15,8 +15,9 @@ are actual Preview renders with the default lighting settings.
 ![Original sprite, estimated height, normals and occlusion](media/surface-maps.png)
 
 **Height** is a shallow estimate made from the transparent outline and the
-image’s existing shading. It is smoothed before deriving surface directions so
-the outline does not create sharp artificial creases through the character.
+image’s existing shading. The broad shape inferred from the outline is smoothed
+separately from the finer painted relief. This removes artificial creases while
+keeping detail in the surface directions.
 Brighter values in the diagram mean higher parts of that estimated surface.
 
 **Normals** describe the direction the surface faces at each point. Their colors

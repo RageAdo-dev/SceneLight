@@ -2,9 +2,10 @@
 
 ## 1.0.0 — private development
 
-- Smooths artificial height ridges and corrects the directional color blend
-  that made them appear as sharp lines across sprites. Existing installations
-  rebuild character maps when updated to form-map version 4.
+- Smooths artificial silhouette ridges separately from finer painted relief,
+  and corrects the directional color blend that made ridges appear as sharp
+  lines across sprites. Existing installations rebuild character maps when
+  updated to form-map version 5.
 - Adds rendered examples, a guide to height and normal maps, and shorter setup
   instructions. The project remains private; no public release has been made.
 

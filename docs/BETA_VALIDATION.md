@@ -5,17 +5,18 @@ and a successful install is not a complete game playthrough.
 
 ## Current validation
 
-The local Windows suite passed 600 tests on 2026-09-11, with no failures,
+The local Windows suite passed 601 tests on 2026-09-11, with no failures,
 errors or skips. Lint, formatting, package builds, dependency checks and the
 configured static/dependency audits are also release gates. GitHub CI runs the
 committed source on Windows and Linux, with a separate player-only installation
 job that excludes the optional Preview stack.
 
-The surface-seam correction was checked against the selected Eileen render:
-the production output matches it pixel for pixel. The optimized and fallback
-shader paths also match on that scene. Ren'Py 7.7.1 and 8.5.3 completed movement,
-colored-light mode changes, a fixed midpoint transition, and save/load using the
-new form maps. Form-map version 4 rebuilds older maps during an update. The
+The surface-seam correction smooths the silhouette separately from finer painted
+relief. Regression checks require both a smooth center across flat paint and a
+local normal response to a small painted feature. The optimized and fallback
+shader paths match pixel for pixel on the Eileen example. Ren'Py 7.7.1 and 8.5.3
+completed movement, colored-light mode changes, a fixed midpoint transition, and
+save/load using the new form maps. Version 5 rebuilds older maps during an update. The
 older Radeon machine was unavailable for this follow-up; the hardware results
 below describe the preceding optimization pass, not a new measurement of this fix.
 

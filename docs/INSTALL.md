@@ -53,7 +53,8 @@ or downloading a newer package does not update that game automatically.
 Open the newer Setup, select the existing game and use its update action.
 Compatible preparation is reused; changed art or a new surface-map version
 requires rebuilding the affected maps. The smooth-surface correction in form-map
-version 4 needs that rebuild to remove the old height ridges.
+version 5 needs that rebuild to remove the old height ridges while retaining
+finer surface detail.
 
 For a developer installation, open **For mod developers → Check new assets**,
 review any new character families, then choose **Update SceneLight**. An added

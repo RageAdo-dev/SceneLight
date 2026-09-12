@@ -30,21 +30,21 @@ def _pre_effect_fixture(mode: str) -> Image.Image:
 
 
 def test_form_maps_preserve_the_reviewed_smooth_surface_texels() -> None:
-    # v4 smooths the inferred height ridges before normal reconstruction.
+    # v5 smooths the silhouette ridges while retaining painted relief.
     # Keep this reviewed surface stable across packing and optional-FX changes.
     expected = {
         "opaque": {
-            "normal_noise": "a7d09d9f121700fe164b03581279e182db92cc75af205b2d7c7be2d4d8426eea",
-            "height_ao_edge": "c362e890dd1ac50dfd93199b95ae4216d9f055cca6d5267b7aa8a7ac6f384d13",
-            "response": "d17bc4082a8941719be73b5b6822c392d06bc5164116c16e36691c5711de35ba",
+            "normal_noise": "6d8ac47a60a81563fcfd07d719301eaab8e0526e369c6d0102b9291cf2760ca2",
+            "height_ao_edge": "93dbb612dc5b151e37848507c4fd8a0bfc01204d5b272400da74a2f470102e4b",
+            "response": "25ac194245434fe6790ebd3b415980b7dbb1dcc53f682d3aab1f96857ec8b7a1",
         },
         "sprite": {
-            "normal_noise": "76d3751e6aa1683c1bf07fdad4eb88b829ddfa78a476204e41afd63ed181c13f",
-            "height_ao_edge": "194cc97568f0ec4d264b9a522748c49928e449093896a0b2d511216b8d38ee37",
-            "response": "d6b22ba76ef0d8b2da451f79d7a0b635b180b06f547419303710b493be4df3ff",
+            "normal_noise": "00f808d3ae58eb73cd618fdde80b86ff2aa56cc9b318d5b1102ba1ca4efdfbb6",
+            "height_ao_edge": "138c4c998c0ab1b7dead4e33e117cd3d1d854c7e23ee931dd4fdd8f7416f7231",
+            "response": "074bfcb91b65cdeb71fbbc53e5d934d0933c29eeeaf896b9f4d7507bb289d275",
         },
     }
-    assert FORM_MAP_VERSION == 4
+    assert FORM_MAP_VERSION == 5
     for mode, hashes in expected.items():
         maps = build_sprite_form_maps(_pre_effect_fixture(mode))
         normal = np.asarray(maps.normal_noise.convert("RGB"), dtype=np.uint8)

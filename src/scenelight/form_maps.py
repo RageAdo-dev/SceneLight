@@ -25,7 +25,7 @@ from .engine import (
     _surface_ambient_occlusion,
 )
 
-FORM_MAP_VERSION = 4
+FORM_MAP_VERSION = 5
 FORM_ANALYSIS_MAX_DIMENSION = 512
 HEIGHT_MIN = -0.25
 HEIGHT_MAX = 1.25
