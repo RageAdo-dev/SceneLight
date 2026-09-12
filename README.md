@@ -3,7 +3,7 @@
 Automatic character lighting for Ren’Py. Sprites respond to the background’s
 light and color as they move through a scene.
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/actions/runs/34671176058/artifacts/10290749456)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/actions/runs/34672742068/artifacts/10290799496)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
 
 ![Character lighting before and after SceneLight](docs/media/lighting-comparison.png)
 
