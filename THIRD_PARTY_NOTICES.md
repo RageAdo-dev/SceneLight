@@ -14,11 +14,15 @@ the official Ren'Py 7.7.1 runtime solely as a compatibility layer for legacy Ren
 `LICENSE.txt` is retained inside `compatibility-runtime/`. The verified SDK may
 include Ren'Py's own launcher and samples; no third-party game content is bundled.
 
-SceneLight does not download or bundle third-party game or mod content. Its
-setup window can invoke Python's package manager only after a user accepts the
+The documentation includes renders and surface diagrams using Piroshki's Eileen
+sprite from the Ren'Py tutorial, distributed under the demo artwork's MIT terms.
+The source, attribution and license are in `docs/media/CREDITS.md` and
+`docs/media/RENPY_ART_LICENSE.txt`. No user game or mod content is bundled.
+
+SceneLight's setup window can invoke Python's package manager only after a user accepts the
 shown dependency list. Package provenance and license details remain available
 from the configured Python package index and each dependency's upstream
-project. The source ZIP keeps those packages in a dedicated per-user virtual
+project. The source ZIP installs those packages in a dedicated per-user virtual
 environment instead of changing the global Python package set.
 
 SceneLight is an independent, unofficial project. It is not affiliated with

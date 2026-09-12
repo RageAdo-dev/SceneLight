@@ -1,6 +1,12 @@
 # Changelog
 
-## 1.0.0 — first public release
+## 1.0.0 — private development
+
+- Smooths artificial height ridges and corrects the directional color blend
+  that made them appear as sharp lines across sprites. Existing installations
+  rebuild character maps when updated to form-map version 4.
+- Adds rendered examples, a guide to height and normal maps, and shorter setup
+  instructions. The project remains private; no public release has been made.
 
 - Fixes a Ren'Py type-substitution bug that rejected JSON animation data and
   silently froze lighting on the first field. Uses the visible source state
@@ -11,9 +17,8 @@
   Windows worker/child cancellation. Bounds atlas allocation to the supported
   texture limit and improves character-list wheel and text-key behavior.
 
-- Establishes SceneLight 1.0.0 as the first stable public GitHub release. All
-  earlier 1.x-numbered packages were internal development builds and were never
-  public releases.
+- Reserves SceneLight 1.0.0 for the first public version. Earlier 1.x-numbered
+  packages were internal development builds, not public releases.
 - Detects clean versionless installations as **pre-1.0 internal builds** instead
   of silently launching them. Player and developer workflows now present an
   explicit update action and confirmation, with a choice to keep and launch the

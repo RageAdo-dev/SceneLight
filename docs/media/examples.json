@@ -1,0 +1,41 @@
+{
+  "source": "Ren'Py tutorial/game/images/eileen happy.png",
+  "source_sha256": "536f034b266f735c23a6dba1267d0e5e25f1bb86f26788919b98bf55730288b1",
+  "shader_sha256": "f9bf9d893461c61b564caf9102659e89c2890fa9b6c36c18421d638ebaf2e646",
+  "form": {
+    "version": 4,
+    "source_size": [
+      320,
+      720
+    ],
+    "map_size": [
+      320,
+      720
+    ],
+    "source_sha256": "2218c130156c30098d27792fcca21afedf05938d88a0a9bca5d2cf50c5cce8b8",
+    "center": [
+      0.49216301,
+      0.50486787
+    ],
+    "mean_form_visibility": 0.9700029,
+    "contrast_mid": 0.2286398,
+    "height_range": [
+      -0.25,
+      1.25
+    ],
+    "noise_range": 4.0,
+    "response_size": [
+      64,
+      64
+    ],
+    "surface_depth": 0.72,
+    "seed": 947
+  },
+  "comparison_changed_pixels": 146145,
+  "animation_frames": 72,
+  "animation_duration_ms": 3000,
+  "normal_display": "X/Y from stored channels; Z reconstructed from unit length",
+  "height_display": "Stored height channel, without contrast stretching",
+  "occlusion_display": "Inverted stored amount: white is open, dark is occluded",
+  "animation_encoding": "Animated WebP, lossless RGB"
+}

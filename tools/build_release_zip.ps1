@@ -111,10 +111,13 @@ if ($Source) {
     $payloadRoot = $packageRoot
 } else {
     foreach ($item in @(
-        "SceneLight.bat", "scenelight.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"
+        "SceneLight.bat", "scenelight.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
+        "CONTRIBUTING.md", "SECURITY.md", "VALIDATION.md", "VALIDATION_RESULTS.md", "CHANGELOG.md"
     )) {
         Copy-Item -LiteralPath (Join-Path $root $item) -Destination $packageRoot -Force
     }
+    # Keep the README's guides, images and artwork notices available offline.
+    Copy-Item -LiteralPath (Join-Path $root "docs") -Destination $packageRoot -Recurse -Force
     $payloadRoot = Join-Path $packageRoot "_scenelight"
     New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
     foreach ($item in @("src", "runtime-installer")) {

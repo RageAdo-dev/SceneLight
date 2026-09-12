@@ -13,8 +13,9 @@ Every release archive must also be installed into a temporary Python
 environment from the archive itself. Run scan/install/verify/remove against an
 original synthetic project, hash the selected project before and afterward,
 and confirm the hashes are identical. The archive inventory must contain no
-private game assets, generated maps, caches, user-specific paths, or local
-development artifacts. Dependency-install validation must redirect
+private game assets, runtime maps, caches, user-specific paths, or local
+development artifacts. Redistributable documentation figures must include their
+source and license notices. Dependency-install validation must redirect
 `SCENELIGHT_COMPONENT_ROOT` into the temporary test root, prove the selected
 project hash is unchanged, and remove that temporary component environment at
 the end.

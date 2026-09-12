@@ -2,8 +2,10 @@
 
 SceneLight accepts focused fixes, compatibility improvements, documentation,
 tests, and renderer work that remains general across characters and projects.
-Do not submit copyrighted game archives, extracted art, generated maps, save
-files, usernames, absolute local paths, or proprietary validation captures.
+Do not submit game archives, extracted user art, runtime caches, save files,
+usernames, absolute local paths, or proprietary validation captures. Documentation
+images may use artwork licensed for redistribution; include its source, license
+and credits, as in `docs/media/CREDITS.md`.
 
 ## Development setup
 
