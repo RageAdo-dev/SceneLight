@@ -1,151 +1,83 @@
-# Beta validation and compatibility
+# Compatibility and validation
 
-SceneLight is a private beta candidate. Automatic discovery does not cover every Ren'Py game,
-and a successful install is not a complete game playthrough.
+Coverage recorded on 11 September 2026. Automatic discovery does not recognize
+every game, and a successful installation is not a complete playthrough.
 
 ## Current validation
 
-The local Windows suite passed 601 tests on 2026-09-11, with no failures,
-errors or skips. Lint, formatting, package builds, dependency checks and the
-configured static/dependency audits are also release gates. GitHub CI runs the
-committed source on Windows and Linux, with a separate player-only installation
-job that excludes the optional Preview stack.
+The local suite passed **601 tests**, with no failures or skips. Windows/Linux CI,
+lint, formatting, dependency checks and package builds passed. A fresh source-package
+installation completed scan, install, verify and remove without changing the
+synthetic game's original files.
 
-The surface-seam correction smooths the silhouette separately from finer painted
-relief. Regression checks require both a smooth center across flat paint and a
-local normal response to a small painted feature. The optimized and fallback
-shader paths match pixel for pixel on the Eileen example. Ren'Py 7.7.1 and 8.5.3
-completed movement, colored-light mode changes, a fixed midpoint transition, and
-save/load using the new form maps. Version 5 rebuilds older maps during an update. The
-older Radeon machine was unavailable for this follow-up; the hardware results
-below describe the preceding optimization pass, not a new measurement of this fix.
+| Area | Recorded coverage |
+| --- | --- |
+| Player setup | Install, verify, update, launch, save/load, remove and reinstall |
+| Author setup | Embed, inspect, source edit, refresh and unembed |
+| Native engines | Opening-story checks on 7.4.8 and 8.5.3; animation/save-load labs on 7.7.1 and 8.5.3 |
+| Legacy games | A disposable Ren'Py 6 mod through the 7.7.1 compatibility runtime |
+| Animation | GIF playback/export in Preview; ATL and VP9/WebM playback in Ren'Py |
+| Surface maps | Smooth silhouette regions, retained painted detail, v5 cache migration |
+| Source protection | Original hashes and isolated save sentinels preserved |
 
-The default player package was installed in an empty Python environment and
-prepared all frames of a test movie. Qt Essentials and FFmpeg are required player
-components; the full Qt Preview interface and PyOpenGL remain optional. Missing
-preparation components cause an actionable installation error instead of silently
-selecting a more expensive live playback path.
+Fourteen of fifteen games in the regression corpus passed automatic install and
+verification. **Axiom** produced no background/sprite mappings and is not counted
+as automatically compatible. Opening-story checks covered eight dialogue
+interactions each in Amy, Still With You and Crossing Over. Full routes and every
+custom asset were not exercised. [Detailed corpus results](history/validation-2026-09-11.md).
 
-Unchanged managed installs now reuse complete raw captures. Generated Ren'Py
-bytecode is excluded from the capture identity only when the managed-copy record
-identifies its existing authored source; bytecode supplied by the author remains
-an input. Native tests verified cache hits, invalidation for same-size/same-time
-script edits, changed captured pixels, and restoration of the original pixels.
-One shared content hash also replaces two full game-file hashing passes per
-capture request.
-
-| Area | Tested scope |
-|---|---|
-| Packages | Wheel, source ZIP and Windows ZIP player/developer workflows |
-| Player workflow | Install, verify, edit, update, launch, save/load, remove and reinstall |
-| Developer workflow | Embed, status, source edit, refresh and unembed |
-| Edits | Add/remove/rename and pixel changes preserving file size and timestamp |
-| Native engines | Opening-story probes on 7.4.8 and 8.5.3; animation/save-load labs on 7.7.1 and 8.5.3 |
-| Legacy DDLC | Disposable mod launched through the 7.7.1 compatibility runtime |
-| Animation | Actual GIF playback/export in Preview; corresponding ATL and VP9 movie playback in Ren'Py |
-| Source protection | Original source/archive hashes and isolated save sentinels preserved |
-
-Fourteen of fifteen unrelated games passed automatic install/verify in the
-regression corpus: A Short Story Of Amy, Daisy, Gobo Adventure, Still with you,
-Nonsense and Stuff, RECONSTRUCT_ME.exe, Six Hours at Joe's, TURNED ON!, Beyond Silence,
-Vampliar, Crossing Over, Pippy's Ultimate Quest for Friendship (and Lessons)!!!,
-A Maimed Rite and Motherly. Titles identify test
-inputs, not endorsements or bundled content. Axiom produced no automatic
-background/sprite mappings and is **not counted as a default-compatible game**.
-The mapping requirement was not removed to force a pass.
-
-Opening-story checks covered eight dialogue interactions each in Amy,
-Still With You and Crossing Over. Other corpus coverage consists of native
-capture/preflight, install and verification. Full stories, every optional route,
-arbitrary Python-generated assets and all cross-version saves remain outside
-that evidence.
+Form-map v5 passed movement, lighting-mode, transition and save/load checks on
+Ren'Py 7.7.1 and 8.5.3. The vertex and fallback shaders produced identical pixels
+for the Eileen example. The older Radeon machine was unavailable for this final
+surface follow-up; its measurements below concern the preceding optimization pass.
 
 ## Playback and hardware
 
-The shared Preview/Ren'Py shader now samples lighting values that are constant
-across a character in the vertex stage. It keeps the same lighting formulas,
-texture resolution, light count and source frames. Unsupported varying/texture
-limits or a rejected combined shader select the original implementation. Games
-using Ren'Py's custom shader-part filter also retain the original implementation,
-so their filter receives the established public shader name.
+Windows is the supported Setup platform. Live analysis requires OpenGL 3.3 or
+OpenGL ES 3.0 with the required floating-point rendering operations. Compatible
+integrated graphics can work; CUDA and a dedicated GPU are not required. The CPU
+analysis fallback does not turn playback into a CPU-only renderer.
 
-On the older Radeon HD 6700M, an ABBA GPU timer comparison at 2160x1215 measured
-14.62/14.61 ms for the original draw and 11.98/11.98 ms for vertex sampling: about
-18% less GPU drawing time. This is not a measurement of GPU utilization or power.
-Four 70-second real-game playback runs remained around 22 presented movie frames
-per second for a 24-fps video, with the same 128,010,714-byte engine texture count.
-The reduced shader work did not remove that machine's remaining playback limit.
+| Older Radeon HD 6700M measurement | Result |
+| --- | --- |
+| GPU drawing at 2160×1215 | 14.62 ms → 11.98 ms with vertex sampling (about 18% less) |
+| 24 fps movie playback | About 22 presented frames/s |
+| 30-minute run | 28 scene cycles and two save/load cycles, no renderer errors |
+| Private memory after warm-up | Five-minute medians of 499.4–525.3 MiB; peak 541.0 MiB |
+| Final engine texture counter | 154.4 MiB after the transition-memory fix |
 
-All 18 synthetic Preview comparisons were pixel-identical on both tested GPUs.
-Native Ren'Py 7.7.1 and 8.5.3 comparisons on NVIDIA covered two sprites, rotation,
-scaling, transparency, physical/separate light colors, transition snapshots and
-actual save/load; the captured pixels matched exactly. A game shader-filter test
-and deliberately rejected optional shaders preserved original rendering and
-save/load. On the old AMD driver, real-game captures had tiny rounding differences:
-at most 305 of 921,600 pixels differed, with a maximum channel difference of 4/255.
-Visual equivalence, rather than universal bit identity across shader stages, is
-the accepted target; no resolution or lighting-detail reduction was introduced.
+That iMac runs **Windows**, so these are not macOS results. The figures do not
+establish performance for every laptop or procedural effect, and GPU elapsed time
+is not a utilization or power measurement.
 
-Prepared movie playback keeps the same lighting calculation, resolution and
-light count. The resulting shader inputs are cached losslessly. Tests observed
-prepared frames advancing while live-analysis evaluations stayed flat, including
-after loading a save. Ambiguous decoded frames and visually transformed movies
-retain live analysis of the actual rendered background.
+Eighteen synthetic comparisons were pixel-identical on the tested NVIDIA and AMD
+GPUs. Real-game AMD captures differed by at most 4/255 in a channel on 305 of
+921,600 pixels. Driver and engine differences therefore prevent a universal
+bit-identity claim. [Full numerical and memory record](history/validation-2026-09-11.md).
 
-The transition texture fix passed native playback and actual save/load on
-Ren'Py 7.7.1 and 8.5.3, including saving during an active transition and loading
-that save. Ten settled captures and six fixed-time transition
-captures were pixel-identical to their respective pre-change references.
-The original form-map hashes also pass on Windows and Linux with AVX-512 enabled;
-the small sRGB lookup-table initialization no longer depends on float32 SIMD power
-rounding. Per-frame shader calculations and approved map bytes are unchanged.
+Prepared movie lighting is lossless and retains the analysis resolution and light
+count. Frame advances were verified after loading saves. Movies whose transforms
+or decoded-frame signatures cannot select a valid cached result use live analysis.
+See [prepared playback](prepared-playback.md) and [performance](performance.md).
 
-The older iMac test machine runs **Windows**, not macOS. Earlier measurements
-showed that its live analyzer was too slow for smooth movies; prepared playback
-addressed that workload. The final 30-minute retest completed 28 scene cycles and
-two actual save/load cycles with lighting active and no renderer errors. The
-last five-minute median of process-private memory fell from 762.3 MiB before the
-transition fix to 525.3 MiB after it (31% lower). After warm-up, five-minute medians
-spanned 499.4–525.3 MiB; peak private memory was 541.0 MiB. The final engine texture
-counter fell from 432.5 to 154.4 MiB (64% lower).
-
-The snapshot ownership trace found no unowned engine texture bytes after the fix.
-Separate 80-cycle/160-transition tests filled rollback history on both engines:
-late texture variation was under 0.2 MiB on Ren'Py 7 and zero on Ren'Py 8. These
-checks passed the candidate's memory-stability gate. Prepared movie-frame advances
-averaged 22.0/s after the fix versus 22.5/s before it for the 24-fps test movie;
-this is not a 60-fps performance claim or a measurement of GPU utilization.
-Those results do not establish performance for every low-end laptop or procedural effect.
-
-The vertex-sampling candidate also completed a 194.5-second iMac scene-cycle
-check: ten movie/static cycles, one actual save/load, 3,023 prepared frames and no
-renderer failures. Peak sampled private memory was 541.7 MiB; final engine texture
-storage was 154,255,899 bytes. This shorter check supplements the earlier memory
-tests rather than replacing the 30-minute result.
-
-Rendering uses Ren'Py's graphics renderer. A compatible integrated GPU can be
-sufficient; CPU-only rendering and zero GPU usage are not promised. Native GIF
-files are not used as animated Ren'Py images in the test lab: the lab uses decoded
-ATL frames, while Preview opens the actual GIF. Desktop Ren'Py does not decode
-H.264; the native fixture uses VP9/WebM.
+Ren'Py 7.8.7 is excluded as the supplied compatibility runtime because its texture
+leak was reproduced. The current pinned runtime is **7.7.1**. Historical tests using
+7.8.7 do not recommend that version for new installations.
 
 ## Reproduction and reporting
 
-Run the repository's test/CI commands and generate the original procedural lab
-with `python examples/synthetic/make_release_lab.py <new-directory>`.
-Use `--ddlc` only to create an overlay for a disposable, separately obtained DDLC
-copy. No commercial game, third-party game art, saves or private captures are
-included in the source or release artifacts.
+Generate an original lab with:
 
-With the optional Preview dependencies installed, run
-`python tools/audit_vertex_sampling.py <lab>/game/scenelight_lab <new-output-directory>`
-to reproduce the 18 exact-image checks and the offscreen ABBA GPU timer comparison.
-The report records the production shader hash and retains images if a comparison
-differs. The command requires an OpenGL 3.3 context and does not measure total game
-frame rate or GPU utilization.
+```text
+python examples/synthetic/make_release_lab.py <new-directory>
+python tools/audit_vertex_sampling.py <lab>/game/scenelight_lab <new-output-directory>
+```
 
-When reporting a problem, include the SceneLight version, Ren'Py version, OS,
-GPU/driver, input format and a short reproduction. Describe whether the issue
-occurs in Preview or in a game and whether it starts after a scene change,
-resize or save/load. Review logs before sharing them, since they can contain
-local paths. Use a minimal original fixture where possible.
+The second command needs Preview dependencies and OpenGL 3.3. It checks images and
+GPU draw time, not total game frame rate. Use `--ddlc` on the lab generator only
+for an overlay in a disposable, separately obtained DDLC copy.
+
+For a bug report, include SceneLight and Ren'Py versions, OS, GPU/driver, input
+format and a short reproduction. State whether it occurs in Preview or a game,
+and whether a scene change, resize or save/load triggers it. Review logs for local
+paths before sharing. [Validation procedure](../VALIDATION.md).

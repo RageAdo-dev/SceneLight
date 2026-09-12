@@ -1,44 +1,41 @@
-# Validation matrix
+# Validation
 
-Every release must pass all three integration categories:
+Run these checks for changes that affect installation, rendering or distribution.
+The [results page](VALIDATION_RESULTS.md) records completed coverage; this checklist
+does not imply that every target has passed for the current change.
+
+## Integration matrix
 
 | Target | Required checks |
-|---|---|
-| Generic Ren'Py | Original synthetic project installs, compiles, opens, and the moving sprite's sampled lighting changes with position. |
-| Local DDLC project | Scanner finds the four stock Character image tags without name presets; installed runtime compiles/lints and transition/movement checks pass. |
-| Independent DDLC mod | Clean third-party checkout remains unmodified outside the local validation copy; SceneLight installs from local assets, compiles, and renders a controlled scene. |
-| Preview & Calibrator | Production shader compiles in OpenGL; default Relit matches the runtime; Original is unchanged; calibration round-trips into a versioned manifest. |
+| --- | --- |
+| Synthetic Ren'Py project | Install, compile, launch and verify lighting changes as a character moves |
+| Local DDLC fixture | Discover character tags without name presets; check movement and transitions |
+| Independent mod | Install in a disposable copy, render a controlled scene and preserve the original source |
+| Preview & Calibrator | Compile the production shader; compare Relit, Original and Split; round-trip calibration |
 
-Every release archive must also be installed into a temporary Python
-environment from the archive itself. Run scan/install/verify/remove against an
-original synthetic project, hash the selected project before and afterward,
-and confirm the hashes are identical. The archive inventory must contain no
-private game assets, runtime maps, caches, user-specific paths, or local
-development artifacts. Redistributable documentation figures must include their
-source and license notices. Dependency-install validation must redirect
-`SCENELIGHT_COMPONENT_ROOT` into the temporary test root, prove the selected
-project hash is unchanged, and remove that temporary component environment at
-the end.
+Use both legacy and current Ren'Py generations when a change affects them.
+Renderer changes need image comparisons as well as numerical and timing checks.
 
-The exact base, Preview, packaging-tool, and optional CUDA dependency sets must
-pass the configured vulnerability audit. Generated Windows launchers must also
-be tested with spaces, percent signs, and environment-variable-like text in
-their paths so a path cannot become a batch command or variable expansion.
+## Package checks
 
-Before a public release, complete the disposable Windows procedure in
-`docs/FRESH_MACHINE_VALIDATION.md`. A virtualized-GPU result is a compatibility
-check only; retain a separate physical-GPU shader compile and visual parity
-result.
+1. Run the commands in [Contributing](CONTRIBUTING.md), including the dependency audit.
+2. Install the built archive into a temporary Python environment.
+3. Scan, install, verify and remove a synthetic project. Compare source hashes before and after.
+4. Redirect `SCENELIGHT_COMPONENT_ROOT` into the test directory and confirm dependencies do not change global Python.
+5. Inspect archives for private game data, runtime caches, local paths and debug output. Licensed documentation figures must retain their credits and notices.
+6. Verify checksums and exercise launcher paths containing spaces, percent signs and environment-variable-like text.
+7. Remove the temporary component environment after testing. Record cleanup or verification steps that could not complete.
 
-Optional effects additionally require:
+Before public distribution, complete the [fresh Windows checks](docs/FRESH_MACHINE_VALIDATION.md).
+Keep physical GPU validation separate from virtual-machine compatibility checks.
+Audit the exact base, Preview, packaging and optional CUDA dependency sets.
 
-- a real GL2 capture with every effect disabled that is byte-identical to the
-  protected pre-effects capture;
-- live visual captures for rain/wetness and glitch/corruption;
-- scene-wide and character-specific state checks with multiple characters;
-- actual Ren'Py save/load and rollback restoration, skip stability, saved-game
-  procedural timing, and transition stability; and
-- a player-panel capture confirming that only supported effects are exposed.
+## Optional effects
 
-Validation projects, downloaded mods, source game assets, generated maps, and
-captures are deliberately not part of the public repository.
+Check disabled-effect image parity, enabled rain/glitch rendering, scene and
+character scopes, movement, transitions, save/load, rollback and skip behavior.
+Verify that the disabled player panel and hotkey stay absent. Custom packs need
+separate checks against their intended sprites and renderer.
+
+Keep private fixtures, saves and captures outside the repository. Record engine,
+GPU, source identity, method and limitations alongside each result.

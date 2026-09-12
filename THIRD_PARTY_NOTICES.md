@@ -1,38 +1,29 @@
 # Third-party notices
 
-SceneLight depends on NumPy, Pillow, OpenCV, psutil, PySide6-Essentials and
-imageio-ffmpeg. The optional Preview & Calibrator additionally uses the full
-PySide6 package and PyOpenGL.
-Optional NVIDIA acceleration uses CuPy. Their licenses are not replaced by
-SceneLight's MIT license. Binary distributions must reproduce the applicable
-notices, including the license information for the FFmpeg executable supplied
-by imageio-ffmpeg.
+SceneLight uses NumPy, Pillow, OpenCV, psutil, PySide6-Essentials and imageio-ffmpeg.
+Preview also uses PySide6 and PyOpenGL; optional NVIDIA acceleration uses CuPy.
+Their licenses are separate from SceneLight's MIT license. Binary distributions
+must retain the applicable notices, including those for FFmpeg.
 
-The normal Windows ZIP and optional offline release include an unmodified copy of
-the official Ren'Py 7.7.1 runtime solely as a compatibility layer for legacy Ren'Py
-6/Python 2 games. Ren'Py is licensed under the MIT license. Its original
-`LICENSE.txt` is retained inside `compatibility-runtime/`. The verified SDK may
-include Ren'Py's own launcher and samples; no third-party game content is bundled.
+## Ren'Py
 
-The documentation includes renders and surface diagrams using Piroshki's Eileen
-sprite from the Ren'Py tutorial, distributed under the demo artwork's MIT terms.
-The source, attribution and license are in `docs/media/CREDITS.md` and
-`docs/media/RENPY_ART_LICENSE.txt`. No user game or mod content is bundled.
+Windows packages include the official **Ren'Py 7.7.1** compatibility runtime for
+legacy games. Its MIT license and other dependency notices remain in
+`compatibility-runtime/LICENSE.txt`. The SDK may include Ren'Py's own launcher
+and samples; no user game or mod content is bundled.
 
-SceneLight's setup window can invoke Python's package manager only after a user accepts the
-shown dependency list. Package provenance and license details remain available
-from the configured Python package index and each dependency's upstream
-project. The source ZIP installs those packages in a dedicated per-user virtual
-environment instead of changing the global Python package set.
+## Documentation artwork
 
-SceneLight is an independent, unofficial project. It is not affiliated with
-Ren'Py, Team Salvato, or Dan Salvato.
+The examples use **Eileen by Piroshki**, from the Ren'Py tutorial, under the demo
+artwork's MIT terms. See [credits and source details](docs/media/CREDITS.md) and
+[the retained notice](docs/media/RENPY_ART_LICENSE.txt).
 
-No *Doki Doki Literature Club!* image, audio, script, font, archive, or derived
-runtime texture is included in this repository or its release archives. The
-installer reads the user's local project and generates non-portable derived
-maps locally. Users and mod authors remain responsible for the rights to all
-content in their projects.
+## Independent project
 
-DDLC projects must separately follow Team Salvato's current IP Guidelines:
-<https://teamsalvato.com/ip-guidelines>
+SceneLight is not affiliated with Ren'Py, Team Salvato or Dan Salvato. No *Doki
+Doki Literature Club!* image, audio, script, font, archive or derived runtime
+texture is included in this repository or its packages.
+
+SceneLight reads the user's project and generates its runtime data locally.
+Users and authors are responsible for the rights to their project content.
+DDLC projects must follow [Team Salvato's IP Guidelines](https://teamsalvato.com/ip-guidelines).

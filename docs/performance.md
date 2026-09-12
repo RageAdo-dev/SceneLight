@@ -1,21 +1,10 @@
-# Live lighting performance
+# Performance
 
-SceneLight keeps the lighting model, analysis resolution, field resolution, and
-animation timing when selecting faster implementations. It does not lower
-quality to reach a frame-rate target.
+SceneLight reuses prepared movie lighting and sprite maps, and avoids repeated
+shader work. These optimizations retain lighting resolution, detail and timing.
+See [prepared playback](prepared-playback.md) and [older-hardware results](BETA_VALIDATION.md#playback-and-hardware).
 
-The live analyzer now uses shared-memory integer histograms and parallel prefix
-sums for quantiles, shared-memory FFTs for wide Gaussian filters and convolution,
-and single-channel 32-bit storage for scalar fields. Scalar texture swizzles
-preserve the original four-channel sampling behavior. Compute shaders are
-optional: the equivalent raster implementation remains available.
-
-Live playback also retains light identities when physical emitter scores are
-nearly tied. This separately fixes temporal direction jumps; it intentionally
-changes the ordering that caused those jumps. Current-frame light values are
-not averaged or delayed. The historical byte-parity measurements below concern
-the stateless optimization path, not a guarantee that an unstable old animation
-must remain unchanged. See [live continuity](live-continuity.md).
+## Live analysis measurements
 
 On 9 September 2026, an alternating old/new comparison on a Ryzen 7800X3D and
 RTX 4090 measured the following. These are desktop measurements, not a guarantee
@@ -36,10 +25,15 @@ every possible input or graphics driver. Native Ren'Py 7.7.1 animation and
 save/load/rollback checks passed; a three-minute Ren'Py 8.5.2 run retained bounded
 memory and live lighting.
 
-GPU utilization percentages depend on clock speed, scheduling, and other active
-applications. Lower frame cost does not imply a fixed percentage reduction in a
-Task Manager graph. Prefer GPU elapsed time, frame pacing, and measured power
-when comparing a specific machine.
+These comparisons use stateless analysis. [Light continuity](live-continuity.md)
+separately fixes direction jumps by keeping nearly tied lights in a stable order;
+it uses current-frame values without averaging or delaying brightness changes.
+
+The analyzer uses shared-memory histograms, parallel quantiles, FFT filters and
+single-channel float storage. Texture swizzles preserve sampling behavior.
+Compute shaders are optional; equivalent raster passes remain available.
+
+## CPU and graphics requirements
 
 The existing CPU reference remains unsuitable for per-frame live analysis. On
 the same desktop, complete field generation with the default single-worker
@@ -51,10 +45,14 @@ Preview still uses OpenGL and must not be described as CPU-only.
 Modern Ren'Py requires working graphics acceleration and supports integrated
 graphics; a dedicated graphics card is not required. See
 [Ren'Py's graphics requirements](https://www.renpy.org/doc/html/problems.html).
-No integrated adapter was exposed on the test computer. Low-end laptop frame
-rates and battery use therefore still require measurements on those laptops.
+The desktop benchmark did not expose an integrated adapter. Its results cannot
+establish low-end laptop frame rates or battery use.
 
-Reproduction tools:
+GPU utilization depends on clocks, scheduling and other applications. Compare GPU
+elapsed time, frame pacing and measured power on the same machine; draw time does
+not translate to a fixed Task Manager percentage.
+
+## Reproduction tools
 
 - `tools/profile_live_analysis.py`: CPU stages, complete analysis latency,
   instrumented GPU passes, and texture allocations.

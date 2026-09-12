@@ -44,6 +44,6 @@ Windows and compatible graphics. A dedicated GPU is not required. Supports
 Ren’Py 7 and 8, with a compatibility runtime for some older games.
 [Compatibility details](docs/BETA_VALIDATION.md).
 
-[MIT license](LICENSE) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+[Documentation](docs/README.md) · [MIT license](LICENSE) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 Example artwork: **Eileen by Piroshki**, from the Ren’Py tutorial. [Credits](docs/media/CREDITS.md).

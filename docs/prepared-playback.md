@@ -1,12 +1,11 @@
 # Prepared movie lighting
 
-On supported GL renderers, SceneLight prepares every video frame when an animated
-background is imported in the Preview. Normal player installations also prepare
-movies when live analysis is selected. The required Qt Essentials and FFmpeg
-components are included in player setup; opening Preview is not required.
-Preparation uses the production GPU analyzer, in source order,
-with the existing light-continuity history. Lighting resolution, light count,
-transport, form reconstruction, calibration, and contact shadows are unchanged.
+SceneLight prepares lighting for every supported movie frame during installation
+or Preview import. With the default live-analysis setting and compatible graphics,
+preparation uses the production GPU analyzer in source order, including light
+continuity. Resolution, light count, transport, calibration and shadows are unchanged.
+
+## Storage and playback
 
 The resulting `.slframes` archive stores losslessly compressed copies of the
 four shader inputs, including the transport metadata row. It costs 189,440 bytes
@@ -21,6 +20,8 @@ signatures across every frame. A signature shared by different lighting results
 is ambiguous and cannot select cached lighting. The sample identifies a frame;
 it does not reduce the resolution or quality of the lighting calculation.
 
+## Cache validity
+
 Caches include the source content hash and analyzer identity. Changed media or
 analyzer code requires preparation again. Incomplete archives are never published,
 and reopening a valid Preview cache requires no analysis. Cancelling preparation
@@ -33,10 +34,11 @@ live analysis of the actual rendered background. This preserves their appearance
 it does not guarantee that procedural effects will reach movie playback speed on
 old hardware. Rendering still uses Ren'Py's normal graphics renderer.
 
-The default Python package includes the preparation components. The `preview`
-extra adds the full Preview interface. If required playback components were
-removed or installation used `--no-deps`, movie installation reports how to repair
-them instead of silently selecting a more expensive playback path.
+## Components
+
+Player setup includes Qt Essentials and FFmpeg for preparation; opening Preview is
+not required. The `preview` extra adds the full interface. If components are
+missing, installation reports how to repair them before preparing movies.
 
 The sprite shader also skips unused form-lighting work on transparent canvas
 pixels. The original alpha threshold and contact-shadow calculation remain in

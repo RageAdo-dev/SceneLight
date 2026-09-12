@@ -1,25 +1,20 @@
-# Contributing to SceneLight
+# Contributing
 
-SceneLight accepts focused fixes, compatibility improvements, documentation,
-tests, and renderer work that remains general across characters and projects.
-Do not submit game archives, extracted user art, runtime caches, save files,
-usernames, absolute local paths, or proprietary validation captures. Documentation
-images may use artwork licensed for redistribution; include its source, license
-and credits, as in `docs/media/CREDITS.md`.
+Fixes, compatibility work, tests and documentation improvements are welcome.
+Renderer changes should work across characters and projects without rules tied
+to a particular game's names or artwork.
 
 ## Development setup
 
-Use Python 3.10 or newer in an isolated environment:
+Use Python 3.10 or newer in a virtual environment:
 
 ```text
 python -m pip install -e ".[dev,preview]"
 ```
 
-Minimal Ubuntu environments also need the system graphics library `libegl1`
-(`sudo apt-get install libegl1`) before importing Qt's GUI/OpenGL modules. CI
-installs it explicitly; a Python wheel does not supply this operating-system library.
+Minimal Ubuntu installations also need `libegl1` for Qt/OpenGL imports.
 
-Before opening a pull request, run:
+## Before submitting a change
 
 ```text
 ruff check .
@@ -30,19 +25,13 @@ python -m pip_audit -r requirements-preview.txt --progress-spinner off
 python -m build
 ```
 
-Renderer or runtime changes also require the relevant Ren'Py validation from
-`VALIDATION.md`. Preserve the established SceneLight Studio output and test both
-legacy and current Ren'Py generations when the change can affect either path.
-Do not make a regression pass by weakening an assertion, suppressing a security
-finding, or replacing the transport/form pipeline with fixed tinting.
+Add focused regression coverage and explain what changed, why, and how it was
+verified. Renderer changes also need the relevant [Ren'Py and image comparisons](VALIDATION.md).
+Keep useful assertions and security checks intact; record any check that could
+not run.
 
-## Pull requests
+Keep game archives, extracted user art, saves, caches, private captures and local
+machine paths out of commits. Documentation artwork must permit redistribution
+and include its source, license and credits. See [the example credits](docs/media/CREDITS.md).
 
-Keep a pull request scoped to one coherent problem. Explain the user-visible
-behavior, the root cause, the validation performed, and any compatibility or
-performance tradeoff. Add focused tests for fixes and new behavior. Generated
-release archives, dependency environments, caches, and test-game copies belong
-outside Git; the repository's `.gitignore` covers the standard locations.
-
-For security-sensitive reports, follow `SECURITY.md` instead of opening a public
-issue.
+[Documentation index](docs/README.md) · [Security reports](SECURITY.md)

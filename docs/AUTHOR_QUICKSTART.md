@@ -1,215 +1,76 @@
-# SceneLight author quick start
+# Author quickstart
 
-This guide is for a Ren'Py mod author who wants SceneLight active throughout a
-project while retaining direct control from `.rpy` scripts.
+## Install
 
-## 1. Install the author integration
+1. Open **SceneLight.bat → For mod developers** and select the project containing `game/`.
+2. Scan the project and select its character image tags. Leave UI, stickers and props unchecked.
+3. Add any missing tag, then choose **Install developer API**.
 
-1. Extract the SceneLight release.
-2. Run **SceneLight.bat** and choose **For mod developers**.
-3. Select the project folder that contains `game/`.
-4. Run the compatibility check.
-5. In **Which image families are characters?**, check only actual character
-   image tags. For example:
+SceneLight installs under `game/scenelight_runtime` without rewriting your story
+scripts. Existing `scene`, `show`, `hide`, ATL and transitions continue to work.
 
-   - `sayori`
-   - `zack`
-   - `monika`
-
-   Do not check effect, overlay, or interface families such as `magic`,
-   `console_bg`, `console_caret`, or `console_text`.
-6. Add any missing character tag in the text field. This is useful for
-   archive-backed images and custom characters that static source discovery
-   cannot preview.
-7. Save the selection and choose **Install developer API**.
-
-The installation adds SceneLight under `game/scenelight_runtime`. It does not
-rewrite `story.rpy`, transforms, or other authored scripts.
-
-For a selection that should travel with the project, place `scenelight.json`
-beside the `game/` folder:
+To keep character selection in source control, put `scenelight.json` beside `game/`:
 
 ```json
 {
   "character_selection": "manual",
-  "character_tags": ["sayori", "zack", "monika"]
+  "character_tags": ["hero", "companion"]
 }
 ```
 
-Preview's **Export config** can also write its complete lighting look here.
-For example, the Cinematic look stores both its calibration and its 0.72
-strength; installing the project reproduces the Preview result exactly.
+Preview's **Export config** can save lighting settings and strength into the same
+project configuration. Tags refer to Ren'Py image names: selecting `hero` covers
+`hero happy`, `hero worried` and its other expressions.
 
-## 2. Ordinary story code does not change
+## Set the lighting
 
-Existing Ren'Py statements keep their normal syntax:
-
-```renpy
-scene bg hallway
-show zack dp
-show sayori teeth at wf21
-z "I'm not going to take all of it away."
-```
-
-SceneLight recognizes the selected image tags at runtime. Pose and expression
-attributes remain part of the same family, so selecting `sayori` covers
-`sayori teeth`, `sayori ep l`, and other Sayori images.
-
-## 3. Existing custom transforms and shaders
-
-SceneLight is inserted inside an existing character transform. The authored
-transform then operates on the relit sprite. For example:
+Automatic lighting needs no script calls. Add defaults or change a sequence when needed:
 
 ```renpy
-transform IntenseAberate:
-    mesh True
-    shader "MakeVisualNovels.StillAberration"
-    u_aberrationAmount 50.0
+init python:
+    scenelight.configure(strength=1.0, color_adaptation=0.78)
 
-show sayori at IntenseAberate
-```
-
-The order is:
-
-1. SceneLight relights Sayori using the current background and final placement.
-2. `IntenseAberate` applies its chromatic-aberration shader to that result.
-3. Ren'Py composites the transformed character into the scene.
-
-ATL movement, entrances, exits, replacements, hides, dissolves, and transforms
-on the `master` layer remain owned by Ren'Py. SceneLight forwards the complete
-transform lifecycle rather than replacing it.
-
-Effect and interface images remain unchanged as long as their first image tag
-was not selected as a character:
-
-```renpy
-show console_bg zorder 100
-show console_caret zorder 100
-show console_text "Scan bg current" as ctext zorder 100
-show magic balls at t21
-```
-
-## 4. Whole-mod and per-scene control
-
-No API call is required for automatic whole-mod lighting. An optional baseline
-can be set once near the beginning of the story:
-
-```renpy
-label start:
-    $ scenelight.configure(strength=1.0, color_adaptation=0.78)
-    jump chapter_one
-```
-
-Adjust one scene before showing its characters:
-
-```renpy
-label red_emergency_room:
-    scene bg red_room
-    $ scenelight.scene(
-        exposure_bias=-0.20,
-        color_adaptation=0.92,
-        rim_strength=0.80,
-        light_mode="physical",
-    )
-    show sayori worried at t11
-    s "Something feels wrong."
-
-    # A restrained midpoint between physical and fully exaggerated colors.
-    $ scenelight.scene(light_mode="cinematic")
-    s "Colored sources remain distinct without the full separate-light look."
-
+label evening:
+    scene bg street_night
+    $ scenelight.scene(exposure_bias=-0.2, light_mode="cinematic")
+    show hero worried at left
+    "The streetlights came on."
     $ scenelight.clear_scene()
     return
 ```
 
-`clear_scene()` is important. It removes only the current scene override and
-returns to the analyzed automatic lighting.
-
-## 5. Deliberately unlit sequences
-
-Disable SceneLight for flat UI, special composites, or an effect that should
-retain its authored colors:
-
-```renpy
-$ scenelight.off()
-show special_fullscreen_effect
-pause 0.5
-hide special_fullscreen_effect
-$ scenelight.clear_scene()
-```
-
-For a reusable exception, disable one tag or exact image during init:
+`clear_scene()` removes the temporary override and restores inherited rules.
+Rules can also target a background, character or exact image:
 
 ```renpy
 init python:
-    scenelight.character("sayori_sticker", enabled=False)
-    scenelight.image("sayori special_flat_cutin", enabled=False)
+    scenelight.background("street_night", exposure_bias=-0.2)
+    scenelight.character("companion", strength=0.9)
+    scenelight.image("hero happy", rim_strength=0.8)
+    scenelight.character("hero_sticker", enabled=False)
 ```
 
-## 6. Reusable rules
+The order is defaults → background → scene → character → exact image.
+Use `scenelight.off()` to bypass lighting for a sequence and
+`scenelight.clear_scene()` to restore it. Rules support save/load and rollback.
 
-Rules can target a background, character family, or exact image:
+## Transforms and shaders
 
-```renpy
-init python:
-    scenelight.background(
-        "bg red_room",
-        exposure_bias=-0.20,
-        color_adaptation=0.92,
-    )
-    scenelight.character("zack", strength=0.94)
-    scenelight.image("sayori teeth", rim_strength=0.90)
-```
+An outer `show hero at CustomShader` transform receives the lit sprite. A shader
+inside an image declaration runs before SceneLight. Model shader transforms should
+use `mesh True` to keep their rendering passes separate.
 
-The order from broadest to most specific is whole-mod defaults, background,
-current scene, character tag, then exact image name.
+The [Make Visual Novels! shader pack](https://makevisualnovels.itch.io/make-visual-novels-rspv1)
+was tested with this ordering. See the [API reference](MOD_AUTHOR_API.md#shaders-and-transforms)
+for composition and bypass examples.
 
-## 7. Add backgrounds, poses, or characters later
+## Update and check your project
 
-SceneLight managed copies detect changed scripts, images, videos, and profiles
-before launch and reuse every unchanged cache automatically.
+After adding assets, use **For mod developers → Check new assets → Update SceneLight**.
+Review new character tags. Existing poses can use the generic fallback until their
+own maps are prepared. Updates stop if SceneLight-owned files were edited.
 
-For a direct developer installation, reopen SceneLight in **For mod developers**.
-It compares the project against the source inventory recorded at installation:
+Before distributing a game, check movement, expression changes, scene transitions,
+custom shaders, unlit UI and save/load/rollback with your own assets.
 
-1. Choose **Check new assets**.
-2. If a new semantic `Character` or `LayeredImage` family appears, check its tag
-   in the character review. Unknown UI/effect families remain unchecked; a fully
-   custom tag can be typed into **Add image tag**.
-3. Choose **Update SceneLight**.
-
-SceneLight checks the current installation before analysis and keeps it working
-until the update is complete. If an installed file was edited, the update stops
-and leaves the project unchanged. Story files, artwork, and saves are never
-rewritten.
-
-An added pose under an already selected tag can use SceneLight's generic form
-fallback immediately, but refresh is what gives that pose an exact reconstructed
-surface map. A new background must be refreshed so SceneLight can measure its
-own transport; it is never assigned another scene's lighting data.
-
-## 8. Verify the integration
-
-Test at least these cases before shipping the mod:
-
-1. A character enters and leaves with ATL or a dissolve.
-2. A character moves from the left side to the right side.
-3. The expression changes without changing the background.
-4. The background changes with and without a transition.
-5. A custom transform such as `IntenseAberate` is applied.
-6. A `master`-layer transform is applied.
-7. Stickers, console overlays, and full-screen effects remain unlit.
-8. Save, load, and rollback preserve the current SceneLight rules.
-
-Use **Settings → Review character families** in the setup app whenever the mod
-adds a new character tag. The updated selection is enforced during the next
-analysis and installation.
-
-## Compatibility boundary
-
-Normal ATL transforms and model-based Ren'Py shaders compose with SceneLight as
-described above. A project still needs a specific compatibility test if it
-replaces Ren'Py's scene-list internals, manually rewrites registered character
-displayables after SceneLight initializes, or uses a custom shader that ignores
-or replaces its child texture. Those behaviors are outside ordinary transform
-composition and cannot be proven from script screenshots alone.
+[Full API reference](MOD_AUTHOR_API.md) · [Installation and removal](INSTALL.md) · [Compatibility](BETA_VALIDATION.md)

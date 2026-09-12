@@ -1,93 +1,66 @@
-# Releasing
+# Release checklist
 
-The current repository and its artifacts must remain private. Run CI and build
-draft candidates there; public availability requires a separate owner decision.
+For maintainers. Keep the repository and artifacts private until the owner
+approves public distribution.
 
-1. Run `ruff check .`, `ruff format --check .`, `pytest`, `bandit -r src -ll`, the dependency
-   vulnerability audit, and `python -m build`.
-   Also upgrade one clean versionless/pre-1.0 direct installation and one current
-   separate copy. Confirm the explicit prompt, rollback/source safety, and a
-   second unchanged run that reuses compatible analysis.
-2. Run the Ren'Py validation matrix documented in `VALIDATION.md`.
-3. Run the Preview & Calibrator with the default profile and confirm that
-   Relit matches the game capture, Original is unchanged, and split comparison
-   compiles with the production shader hash.
-4. Inspect the SceneLight payload; it must contain no third-party game assets,
-   generated atlases, form maps, `.rpa` files, validation captures, or backups.
-   Windows ZIPs also contain the audited Ren'Py 7 compatibility SDK passed
-   explicitly to the release builder, including its original `LICENSE.txt` and
-   any of Ren'Py's own launcher/sample files in that unmodified SDK.
-5. Search the release tree for developer-machine paths, private assets,
-   temporary captures, and development-only wording.
-   Confirm `pyproject.toml`, `scenelight.__version__`, the archive name, and both
-   generated install manifests report the same public version.
-6. Exercise the online ZIP with `SCENELIGHT_COMPONENT_ROOT` redirected to a
-   temporary folder; install dependencies there, then prove the folder can be
-   removed without changing the selected test project or global Python.
-7. Run a vulnerability audit against the fully resolved private environment
-   and a medium/high static source scan. Review each narrow suppression against
-   its documented input restrictions; update any
-   affected pin or code and repeat the complete matrix before release.
-8. Create an annotated `vX.Y.Z` tag.
-9. On Windows, run `.\tools\build_release_zip.ps1 -CompatibilityRuntime <audited-renpy-7-runtime>`
-   for the normal Windows ZIP. It includes the verified runtime; Python and player
-   dependencies are downloaded on first setup when needed.
-   Build the optional offline ZIP with
-   `.\tools\build_release_zip.ps1 -PythonInstaller <official-installer> -Wheelhouse <pinned-wheels> -CompatibilityRuntime <audited-renpy-7-runtime>`.
-   The builder must reject a partial bundle, an invalid Authenticode signature,
-   a signer other than the Python Software Foundation, or a compatibility
-   runtime that is incomplete or not Ren'Py 7. Upload each readable, versioned
-   ZIP and `.sha256` file alongside the Python wheel/sdist. Use `-Source` only
-   when a separately labeled source snapshot is needed.
-10. State supported Ren'Py versions and link Team Salvato's current guidelines
-   when describing DDLC use.
+## Validate
 
-The tag workflow downloads and verifies the pinned runtime, builds the same
-Windows ZIP plus a source ZIP, and creates a draft prerelease. Review its CI,
-artifact hashes and validation notes before publishing the beta. Keep the
-workflow visible and reproducible. If a native Windows
-executable is introduced, state plainly that unsigned/new binaries can show an
-"unrecognized app" warning; never instruct users to disable SmartScreen or
-antivirus. Once signing is configured, sign before hashing and do not alter the
-signed executable afterward.
+- Run [the development checks](../CONTRIBUTING.md) and [integration matrix](../VALIDATION.md).
+- Complete the [fresh Windows procedure](FRESH_MACHINE_VALIDATION.md) from the built archive.
+- Exercise updates from a versionless installation and a current installation.
+  Verify recovery and reuse of unchanged analysis.
+- Compare Preview and native rendering with the intended calibration. Record
+  numerical differences, hardware, frame pacing and memory limits.
+- Check archives for private game assets, generated runtime maps, saves, caches,
+  local paths and debug files. Keep documentation artwork's licenses and credits.
+- Confirm the SceneLight version in package metadata, the module, archive names
+  and installation records agrees. Schema and surface-map versions are separate.
+  Confirm behavior changes update the shipped-content fingerprint.
 
-The compatibility launcher binary is built from `tools/native_launcher.c` with
-the Visual C++ toolchain. From a Developer Command Prompt, use:
+## Build packages
+
+Run on Windows from the repository root:
+
+```powershell
+.\tools\build_release_zip.ps1 -CompatibilityRuntime <verified-renpy-runtime>
+.\tools\build_release_zip.ps1 -Source
+```
+
+For an offline package, also provide `-PythonInstaller <installer>` and
+`-Wheelhouse <pinned-wheels>`. The builder must reject incomplete bundles, invalid
+Python signatures and incompatible runtime versions. Distribute the ZIP checksums
+alongside the packages, wheel and source distribution.
+
+The current compatibility runtime is **Ren'Py 7.7.1**. Its SDK ZIP SHA-256 is:
+
+```text
+767fb21aed2e689bfba04e2a7db0e30003f0b6825538cca5ab66a1ab4dbb8d2e
+```
+
+Keep the version and digest aligned with `src/scenelight/compatibility.py`.
+Do not substitute 7.8.7: its texture-finalizer leak was reproduced. Preserve the
+runtime executables, `lib/`, `module/`, `renpy/` and original `LICENSE.txt`.
+
+## GitHub distribution
+
+**Build release ZIP** can be run manually without creating a release. A pushed
+`vX.Y.Z` tag runs the same build and creates a **draft prerelease**. Review its
+checksums, CI and validation record before publishing.
+
+GitHub Actions downloads expire. Keep the current download link pointed at a
+valid package; use a permanent release asset for public distribution. Public
+visibility and publication remain separate owner decisions.
+
+## Native launcher
+
+Build from a Visual C++ Developer Command Prompt:
 
 ```text
 cl /nologo /O2 /W4 /DUNICODE /D_UNICODE tools\native_launcher.c /Fe:src\scenelight\assets\scenelight-launcher.exe /link /SUBSYSTEM:WINDOWS user32.lib /Brepro
 ```
 
-Review the compiler warnings, rerun `tests/test_launch_safety.py`, and record the
-resulting binary hash before packaging.
+Review warnings, run `tests/test_launch_safety.py` and record the binary hash.
+If signing is used, sign before hashing and do not modify the binary afterward.
+Never instruct users to disable SmartScreen or antivirus.
 
-GitHub rejects individual Git objects larger than 100 MiB. SceneLight's public
-source should be far below that limit; generated project data belongs only in
-the user's local project.
-
-Before signing a release candidate, also verify that:
-
-- every expensive scan phase presents current/total progress, percentage,
-  elapsed time, and ETA rather than an indeterminate wait;
-- player attachment completes the native Ren'Py empty-request preflight before
-  any long background or sprite analysis;
-- Intel, AMD, and NVIDIA systems use Ren'Py's supported GPU renderer for live
-  gameplay, while optional first-time CUDA analysis remains clearly labeled as
-  NVIDIA-only; and
-- the exact CPU fallback remains available and output-equivalent when optional
-  acceleration is unavailable;
-- the release fingerprint changes when shipped runtime behavior changes, while
-  unchanged input and matching capture/transport/form contracts reuse the
-  external analysis cache; and
-- scene transitions never call `renpy.screenshot_to_bytes`; before/after sides
-  containing lit sprites are flattened on the GPU and replayed through a real
-  dissolve or wipe without a story-advance hitch.
-
-The pinned compatibility runtime for the current release is the official Ren'Py 7.7.1 SDK
-from <https://www.renpy.org/release/7.7.1>. The downloaded SDK ZIP must have
-SHA-256 `767fb21aed2e689bfba04e2a7db0e30003f0b6825538cca5ab66a1ab4dbb8d2e`.
-Do not substitute 7.8.7: the lifecycle audit reproduced a texture-finalizer leak
-on that runtime. Keep this version and digest aligned with `compatibility.py`.
-The release copy may omit launcher samples, templates, documentation, and the
-SDK UI, but it must preserve `renpy.exe`, `renpy-32.exe`, `renpy.py`, `lib/`,
-`module/`, `renpy/`, and `LICENSE.txt` without modifying their contents.
+[Compatibility results](BETA_VALIDATION.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
