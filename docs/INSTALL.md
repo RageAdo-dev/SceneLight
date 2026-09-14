@@ -1,6 +1,6 @@
 # Installation
 
-[Download the Windows package](https://github.com/RageAdo-dev/SceneLight/actions/runs/34672742068/artifacts/10290799496).
+[Download the Windows package](https://github.com/RageAdo-dev/SceneLight/actions/runs/34824284968/artifacts/10340055494).
 Extract the download, then extract `SceneLight-v1.0.0-Windows.zip` inside it.
 
 ## Add SceneLight to a game
