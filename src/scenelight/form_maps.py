@@ -36,7 +36,7 @@ RESPONSE_SIZE = 64
 def _srgb_u8_table() -> np.ndarray:
     values = np.arange(256, dtype=np.float32) / 255.0
     base = (values + np.float32(0.055)) / np.float32(1.055)
-    # AVX-512's float32 power can differ by one ULP from the approved table.
+    # AVX-512's float32 power can differ by one ULP from the reference table.
     # Evaluate only this 256-entry table in double precision, retaining the
     # original float32 base/exponent and rounding back once. Per-pixel lookup
     # and the live analyzer keep their existing fast paths.
@@ -177,7 +177,7 @@ def build_sprite_form_maps(
     source_size: tuple[int, int] | None = None,
     source_sha256: str | None = None,
 ) -> SpriteFormMaps:
-    """Derive the static half of the approved CPU lighting model."""
+    """Derive the static surface maps for the CPU lighting model."""
 
     settings = (settings or RelightSettings()).normalized()
     rgba = sprite if sprite.mode == "RGBA" else sprite.convert("RGBA")

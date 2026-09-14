@@ -298,7 +298,7 @@ def _wrap_map(path: Path) -> np.ndarray:
 
     source = Image.open(path).convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS)
     linear = _srgb_to_linear(np.asarray(source, dtype=np.float32) / 255.0)
-    # 18 px at 720p matches the approved 960 px sprite canvas at the default
+    # 18 px at 720p matches the reference 960 px sprite canvas at the default
     # 0.92 scene height. The operation remains scene-only and universal.
     blurred = cv2.GaussianBlur(linear, (0, 0), sigmaX=18.0, sigmaY=18.0)
     reduced = cv2.resize(blurred, TILE_SIZE, interpolation=cv2.INTER_AREA)
@@ -365,7 +365,7 @@ def _cached_transport_geometry(
     def gaussian_weights(key: tuple[float, float, float, float]) -> np.ndarray:
         target_x, target_y, sigma_x, sigma_y = key
         # This is intentionally the same single float64 exp followed by the
-        # same float32 cast used by the approved analyzer. It is cached, not
+        # same float32 cast used by the reference analyzer. It is cached, not
         # approximated or made separable.
         return np.exp(
             -0.5 * (((probe_x - target_x) / sigma_x) ** 2 + ((probe_y - target_y) / sigma_y) ** 2)
@@ -701,7 +701,7 @@ def _transport_maps_accelerated(
     This is the low-latency path used by Studio 2. Image-independent GPU
     geometry builds while the CPU performs the exact connected-component
     decisions. The final LUT is the same production CUDA transport used by a
-    full project build; machines without CUDA retain the approved CPU path.
+    full project build; machines without CUDA retain the CPU reference path.
     """
 
     from .cuda_backend import (

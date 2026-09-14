@@ -215,8 +215,7 @@ class MainWindow(QMainWindow):
         self._background_label = QLabel("No background loaded")
         self._sprite_label = QLabel("No sprite loaded")
         self._analysis_label = QLabel(
-            "Open any background and transparent sprite. Derived transport/form data is cached; "
-            "final lighting is never prebaked."
+            "Open a background and a transparent sprite to preview the lighting."
         )
         self._analysis_label.setWordWrap(True)
         self._gpu_label = QLabel("Creating OpenGL 3.3 renderer…")
@@ -230,12 +229,9 @@ class MainWindow(QMainWindow):
             0, 150, round(profile_strength * 100.0), self._strength_changed
         )
         self._lighting_look = QComboBox()
-        self._lighting_look.addItems(
-            ("Current / custom", "Approved physical", "Cinematic", "Separate colored lights")
-        )
+        self._lighting_look.addItems(("Custom", "Physical", "Cinematic", "Separate colored lights"))
         self._lighting_look.setToolTip(
-            "Apply a complete lighting look. Cinematic keeps restrained colored "
-            "sources with compressed scene exposure."
+            "Choose a lighting preset. Cinematic reduces lighting strength and exposure."
         )
         self._lighting_look.currentIndexChanged.connect(self._lighting_look_changed)
         self._horizontal_value = QLabel("50%")
@@ -283,7 +279,7 @@ class MainWindow(QMainWindow):
         panel_layout = QVBoxLayout(panel)
         title = QLabel("SceneLight Preview")
         title.setObjectName("title")
-        subtitle = QLabel("live GPU preview and calibration")
+        subtitle = QLabel("Adjust lighting and character placement")
         subtitle.setObjectName("subtitle")
         panel_layout.addWidget(title)
         panel_layout.addWidget(subtitle)
@@ -296,7 +292,7 @@ class MainWindow(QMainWindow):
         form.addRow("Horizontal", self._control(self._horizontal_slider, self._horizontal_value))
         form.addRow("Baseline", self._control(self._baseline_slider, self._baseline_value))
         form.addRow("Character height", self._control(self._height_slider, self._height_value))
-        form.addRow("Quick lighting look", self._lighting_look)
+        form.addRow("Lighting preset", self._lighting_look)
         form.addRow("Lighting strength", self._control(self._strength_slider, self._strength_value))
         controls = QFrame()
         controls.setObjectName("section")
@@ -313,7 +309,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(body, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage("Ready — no final-lit-sprite prebaking")
+        self.statusBar().showMessage("Ready")
         if profile_error:
             self.statusBar().showMessage(f"Calibration profile ignored: {profile_error}")
         self._install_shortcuts(open_background)
@@ -524,9 +520,7 @@ class MainWindow(QMainWindow):
             self._analysis_label.setText("Lighting follows the displayed background frame.")
             self.statusBar().showMessage("Background opened · live lighting active")
             return
-        self.statusBar().showMessage(
-            f"Analyzing {path.name}; exact animated playback will start when ready…"
-        )
+        self.statusBar().showMessage(f"Preparing lighting for {path.name}…")
         analysis_path = media.reference_path
         # Display the unmodified background while the exact 16x9 transport is
         # computed. Never install an approximate transport field that visibly
@@ -615,8 +609,7 @@ class MainWindow(QMainWindow):
                 if "done" in value and self._preparation_process is process:
                     dialog.setValue(value["done"])
                     dialog.setLabelText(
-                        "Preparing full-quality lighting: %d / %d frames"
-                        % (value["done"], value["total"])
+                        "Preparing lighting: %d / %d frames" % (value["done"], value["total"])
                     )
 
         def finished(code, _status):
@@ -652,7 +645,7 @@ class MainWindow(QMainWindow):
             self._background_animation_ready = True
             self._temporal_playback_started = True
             self._restart_background_animation()
-            self._analysis_label.setText("Full-quality lighting cached for every frame.")
+            self._analysis_label.setText("Lighting prepared for every frame.")
             self.statusBar().showMessage("Prepared playback ready")
 
         def cancel():
@@ -668,7 +661,7 @@ class MainWindow(QMainWindow):
         process.start(
             sys.executable, ["-u", "-m", "scenelight.prepared", str(media.source), str(destination)]
         )
-        self._analysis_label.setText("Preparing every frame once for full-quality playback…")
+        self._analysis_label.setText("Preparing video lighting. This is only needed once…")
 
     def _scene_finished(self, generation: int, path: Path, future) -> None:
         try:
@@ -687,7 +680,7 @@ class MainWindow(QMainWindow):
             # Legacy cache compatibility only: never install provisional
             # transport into the viewport. Keep the untouched background up
             # until the byte-identical final field is available.
-            self.statusBar().showMessage("Finishing exact background analysis…")
+            self.statusBar().showMessage("Finishing background analysis…")
             future = self._scene_executor.submit(self._cache.scene, path)
             future.add_done_callback(
                 lambda completed: self._scene_finished(generation, path, completed)
@@ -700,18 +693,12 @@ class MainWindow(QMainWindow):
         cache_text = (
             "cache hit" if artifacts.cached else f"analyzed in {artifacts.build_seconds:.2f}s"
         )
-        self._analysis_label.setText(
-            f"{_active_light_count(metadata)} lights · "
-            f"{len(metadata.get('probe_transport', ()))} irradiance probes · {cache_text}. "
-            "All position changes now execute only on the GPU."
-        )
+        self._analysis_label.setText(f"{_active_light_count(metadata)} lights · {cache_text}")
         self.statusBar().showMessage(f"Background ready · {cache_text}")
         media = self._background_media
         if media is not None and media.animated:
             self._analysis_label.setText(
-                f"{_active_light_count(metadata)} lights · "
-                f"{len(metadata.get('probe_transport', ()))} irradiance probes · {cache_text}. "
-                "Video playback is live; exact temporal lighting is caching in the background."
+                f"{_active_light_count(metadata)} lights · preparing animation lighting…"
             )
             self._temporal_start_allowed = True
             self._maybe_start_background_animation()
@@ -906,9 +893,7 @@ class MainWindow(QMainWindow):
         self._temporal_lookahead_seconds = plan.lookahead_seconds
         self._update_temporal_horizon()
         self._analysis_label.setText(
-            f"Video playing · building exact temporal lighting · "
-            f"{len(self._temporal_scenes)}/{len(anchors)} anchors ready · "
-            f"adaptive lead {plan.lookahead_seconds:.2f}s."
+            f"Preparing animation lighting: {len(self._temporal_scenes)}/{len(anchors)} samples"
         )
         self._maybe_start_background_animation()
 
@@ -925,10 +910,7 @@ class MainWindow(QMainWindow):
         ready = len(self._temporal_scenes)
         total = len(self._temporal_anchors)
         state = "Video playing" if self._temporal_playback_started else "Video ready"
-        self._analysis_label.setText(
-            f"{state} · exact temporal scene {ready}/{total} anchors · light detection, "
-            "emitters, irradiance, probes, and 26-plane transport update together."
-        )
+        self._analysis_label.setText(f"{state} · lighting samples ready: {ready}/{total}")
         self._maybe_start_background_animation()
 
     def _on_temporal_complete(
@@ -952,11 +934,8 @@ class MainWindow(QMainWindow):
             return
         self._background_animation_ready = True
         self._maybe_start_background_animation()
-        self._analysis_label.setText(
-            f"Full temporal lighting cached · {len(anchors)} complete scene anchors · "
-            "cuts and flashes protected."
-        )
-        self.statusBar().showMessage("Exact animated SceneLight playback ready")
+        self._analysis_label.setText(f"Animation lighting ready · {len(anchors)} samples saved")
+        self.statusBar().showMessage("Animation ready")
 
     def _apply_temporal_scene(self, frame_index: int) -> None:
         if getattr(self, "_prepared_reader", None) is not None:
@@ -989,9 +968,7 @@ class MainWindow(QMainWindow):
         if not self._temporal_playback_started:
             self._temporal_playback_started = True
             self._restart_background_animation()
-            self.statusBar().showMessage(
-                "Video playback started · exact temporal lighting is caching in the background"
-            )
+            self.statusBar().showMessage("Video playing · preparing lighting in the background")
 
     def _restart_background_animation(self) -> None:
         if getattr(self, "_exporting_animation", False):
@@ -1056,7 +1033,7 @@ class MainWindow(QMainWindow):
             f"animated image · {media.frame_count} frames" if media.animated else "still image"
         )
         self._sprite_label.setText(f"{path.name}\n{media_text}")
-        self.statusBar().showMessage(f"Reconstructing {path.name}'s scene-independent form once…")
+        self.statusBar().showMessage(f"Preparing surface maps for {path.name}…")
         form_path = media.reference_path
         future = self._form_executor.submit(self._cache.form, form_path)
         future.add_done_callback(
@@ -1111,9 +1088,7 @@ class MainWindow(QMainWindow):
                 f"{self._sprite_path.name if self._sprite_path else path.name}\n"
                 f"{size[0]}×{size[1]} · animated forms {ready}/{media.frame_count}"
             )
-            self.statusBar().showMessage(
-                f"Animated sprite live · exact form maps {ready}/{media.frame_count}"
-            )
+            self.statusBar().showMessage(f"Sprite frames prepared: {ready}/{media.frame_count}")
         else:
             self._sprite_label.setText(
                 f"{self._sprite_path.name if self._sprite_path else path.name}\n"
@@ -1258,7 +1233,7 @@ class MainWindow(QMainWindow):
         if not self._gpu_live_background or now - self._last_live_status < 0.5:
             return
         self._last_live_status = now
-        self._analysis_label.setText("Live lighting · no video preparation required.")
+        self._analysis_label.setText("Live lighting active")
 
     def _on_live_analysis_failed(self, message: str) -> None:
         self._gpu_live_background = False
@@ -1389,7 +1364,7 @@ class MainWindow(QMainWindow):
             progress.show()
             _export_checkpoint(progress, export_cancel)
             while self._preparation_process is not None:
-                progress.setLabelText("Preparing full-quality movie lighting before export…")
+                progress.setLabelText("Preparing movie lighting before export…")
                 _export_checkpoint(progress, export_cancel)
                 time.sleep(0.01)
             if (
@@ -1436,7 +1411,7 @@ class MainWindow(QMainWindow):
                 timeline_ms, timeline_durations = composite_gif_timeline(background, sprite)
             total_work = len(missing_anchors) + len(missing_forms) + len(timeline_ms)
             progress.setRange(0, max(total_work, 1))
-            progress.setLabelText("Preparing exact temporal lighting…")
+            progress.setLabelText("Preparing animation lighting…")
             progress.setValue(0)
             completed = 0
 
@@ -1452,9 +1427,7 @@ class MainWindow(QMainWindow):
                 prepared_anchors += 1
                 completed += 1
                 progress.setValue(completed)
-                progress.setLabelText(
-                    f"Exact temporal scene {prepared_anchors}/{len(missing_anchors)}"
-                )
+                progress.setLabelText(f"Lighting sample {prepared_anchors}/{len(missing_anchors)}")
                 _export_checkpoint(progress, export_cancel)
 
             for offset in range(0, len(uncached_anchors), 16):
@@ -1486,7 +1459,7 @@ class MainWindow(QMainWindow):
                         completed += 1
                         progress.setValue(completed)
                         progress.setLabelText(
-                            f"Exact temporal scene {prepared_anchors}/{len(missing_anchors)}"
+                            f"Lighting sample {prepared_anchors}/{len(missing_anchors)}"
                         )
                         _export_checkpoint(progress, export_cancel)
                 finally:
@@ -1498,7 +1471,7 @@ class MainWindow(QMainWindow):
                 form_by_frame[index] = self._cache.form(sprite.frame_path(index))
                 completed += 1
                 progress.setValue(completed)
-                progress.setLabelText(f"Exact animated sprite form {position}/{len(missing_forms)}")
+                progress.setLabelText(f"Preparing sprite frame {position}/{len(missing_forms)}")
                 _export_checkpoint(progress, export_cancel)
 
             # Export may be the operation that finishes warming an animation.

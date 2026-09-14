@@ -348,9 +348,7 @@ def test_playback_starts_as_soon_as_exact_first_scene_is_ready() -> None:
     assert window._background_animation_ready
     assert window._temporal_playback_started
     assert restarted == [True]
-    assert statuses == [
-        "Video playback started · exact temporal lighting is caching in the background"
-    ]
+    assert statuses == ["Video playing · preparing lighting in the background"]
 
 
 def test_playback_can_start_from_a_complete_exact_streaming_prefix() -> None:

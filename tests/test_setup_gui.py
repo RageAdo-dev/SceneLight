@@ -1077,7 +1077,7 @@ def test_character_review_explains_that_suggestions_come_from_the_game() -> None
         encoding="utf-8"
     )
 
-    assert "not a built-in name list" in source
+    assert "Suggestions come from this game's images." in source
     assert "detected in this game" in source
 
 

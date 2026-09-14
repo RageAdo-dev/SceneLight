@@ -445,7 +445,7 @@ class ArtifactCache:
         CPU component classification is the expensive, independently
         parallel part. A hardware-sized persistent process pool avoids paying
         Windows spawn cost per video or chunk. CUDA hosts use zero-copy shared
-        preparations; CPU-only hosts run the same approved complete analyzer
+        preparations; CPU-only hosts run the same complete reference analyzer
         in parallel. Every yielded artifact is the same
         complete product as :meth:`temporal_scene`; no reduced preview exists.
         """

@@ -1002,7 +1002,7 @@ def format_progress_status(
     elapsed_seconds: float,
     completed_since_start: int,
 ) -> str:
-    """Create a compact, honest status line with elapsed time and ETA."""
+    """Format progress with elapsed time and an estimated time remaining."""
 
     percent = 100.0 * progress.current / progress.total
     parts = [
@@ -2474,7 +2474,7 @@ class SceneLightSetup(tk.Tk):
                 assert status is not None
                 self.installation_var.set(
                     f"SceneLight found {len(status.changed_sources)} changed project file(s). "
-                    "Refresh before testing."
+                    "Update SceneLight before playing."
                 )
                 self.installation_status.configure(foreground="#f0b66d")
             elif inspection is not None and inspection.direct_install_ready:
@@ -2729,8 +2729,7 @@ class SceneLightSetup(tk.Tk):
                 if inspection is not None and inspection.direct_refresh_required:
                     self.workflow_title_var.set("Project changes detected")
                     self.workflow_subtitle_var.set(
-                        "Review new character families, then update exact background transport "
-                        "and sprite form maps."
+                        "Review new characters, then update lighting data and surface maps."
                     )
                 elif self._scan_ok:
                     self.workflow_title_var.set("Ready to update SceneLight")
@@ -2905,9 +2904,9 @@ class SceneLightSetup(tk.Tk):
         tk.Label(
             page,
             text=(
-                "Suggestions come from this game's Character and LayeredImage definitions, "
-                "registered images, and compiled story usage—not a built-in name list. Only "
-                "checked families receive character lighting."
+                "Suggestions come from this game's images. Select the characters to light; "
+                "each family includes its poses and expressions. Leave backgrounds, UI and "
+                "props unchecked."
             ),
             background="#0d1014",
             foreground="#98a4b1",
@@ -2936,7 +2935,7 @@ class SceneLightSetup(tk.Tk):
         controls = tk.Frame(page, background="#0d1014")
         controls.grid(row=3, column=0, sticky="ew", pady=(0, 8))
         controls.grid_columnconfigure(0, weight=1)
-        count_var = tk.StringVar(value=f"{len(candidates)} candidate families")
+        count_var = tk.StringVar(value=f"{len(candidates)} image families")
         tk.Label(
             controls,
             textvariable=count_var,
@@ -3074,8 +3073,8 @@ class SceneLightSetup(tk.Tk):
             tk.Label(
                 rows,
                 text=(
-                    "No source-level families were visible. Add the image tag used by the "
-                    "game (for example: sayori), or choose automatic suggestions."
+                    "No image families found. Add a character's image tag "
+                    "(for example: hero), or choose automatic suggestions."
                 ),
                 background="#12161c",
                 foreground="#aab3bf",
@@ -3121,7 +3120,7 @@ class SceneLightSetup(tk.Tk):
             add_candidate(parts[0], None)
             tag_vars[parts[0]].set(True)
             add_var.set("")
-            count_var.set(f"{len(tag_vars)} candidate families")
+            count_var.set(f"{len(tag_vars)} image families")
             canvas.update_idletasks()
             canvas.yview_moveto(1.0)
 

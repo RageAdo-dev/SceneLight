@@ -442,7 +442,7 @@ def _detect_components_for_layout(
     """Classify exact sources without materializing 144 dense annuli.
 
     ``base_source_weights`` is exactly zero outside the saliency support. The
-    approved expression multiplies that sparse field by a dense placement
+    reference expression multiplies that sparse field by a dense placement
     annulus, so evaluating the annulus only at non-zero coordinates produces
     the identical full ``source_weights`` array while avoiding roughly 140 MB
     of geometry reads and allocations for every analysis shape.

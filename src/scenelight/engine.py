@@ -293,7 +293,7 @@ def _linear_quantile(
     requested quantiles are fixed constants, so public validation and generic
     axis reduction are pure overhead. This is the same partition, indexing,
     and two-sided interpolation used by ``np.quantile(method="linear")``.
-    Scalar quantiles inherit a floating input's dtype, preserving the approved
+    Scalar quantiles inherit a floating input's dtype, preserving the reference
     float32 threshold decisions bit for bit.
     """
 

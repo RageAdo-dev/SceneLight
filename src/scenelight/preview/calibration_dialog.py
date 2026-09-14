@@ -39,8 +39,8 @@ _ADVANCED = (
     ("wrap_strength", "Edge integration", 0.0, 2.0, 0.01),
     ("grain_match", "Grain match", 0.0, 2.0, 0.01),
     ("shadow_strength", "Shadow strength", 0.0, 2.0, 0.01),
-    ("individual_light_colors", "Individual light colors (creative)", 0.0, 2.0, 0.01),
-    ("adaptive_light_colors", "Adaptive separated light colors", 0.0, 2.0, 0.01),
+    ("individual_light_colors", "Source color separation", 0.0, 2.0, 0.01),
+    ("adaptive_light_colors", "Automatic color separation", 0.0, 2.0, 0.01),
 )
 
 
@@ -65,7 +65,7 @@ class CalibrationDialog(QDialog):
         layout.addWidget(tabs)
 
         buttons = QHBoxLayout()
-        reset = QPushButton("Restore approved defaults")
+        reset = QPushButton("Restore defaults")
         reset.clicked.connect(lambda: self._set_calibration(Calibration()))
         buttons.addWidget(reset)
         buttons.addStretch(1)
@@ -91,10 +91,7 @@ class CalibrationDialog(QDialog):
                     "1.00 always emphasizes every detected source color."
                 )
             if name == "adaptive_light_colors":
-                control.setToolTip(
-                    "Automatically separates colors only when multiple strong "
-                    "emitters are both spatially and chromatically distinct."
-                )
+                control.setToolTip("Separates strong lights with different colors and positions.")
             control.valueChanged.connect(self._changed)
             self._controls[name] = control
             form.addRow(label, control)

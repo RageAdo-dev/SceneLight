@@ -1,9 +1,8 @@
 # Developer effect packs
 
-Effect packs add authored GPU effects through JSON and the `scenelight_fx` API.
-The compiler and runtime support are present; the player effects panel and hotkey
-are disabled. Example packs are included in the source package, not the normal
-Windows package.
+Add custom GPU effects with JSON packs and the `scenelight_fx` API. Packs are
+controlled from your game's scripts; the player effects panel and hotkey are
+disabled. The source package includes example packs.
 
 ## Add a pack
 
