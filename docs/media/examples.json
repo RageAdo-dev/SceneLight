@@ -38,5 +38,46 @@
   "normal_display": "X/Y from stored channels; Z reconstructed from unit length",
   "height_display": "Stored height channel, without contrast stretching",
   "occlusion_display": "Inverted stored amount: white is open, dark is occluded",
-  "animation_encoding": "Animated WebP, lossless RGB"
+  "animation_encoding": "Animated WebP, lossless RGB",
+  "animation_size": [
+    1920,
+    1080
+  ],
+  "encodings": {
+    "moving-light.webp": {
+      "bytes": 51422070,
+      "sha256": "589c3924ef7eaea8829cd25a873c88b15e328e0d8a98aec911439bb7ba1cea88",
+      "frames": 240,
+      "duration_ms": 3999,
+      "frame_durations_ms": [
+        16,
+        17
+      ]
+    },
+    "moving-light.mp4": {
+      "bytes": 911278,
+      "sha256": "69e3e684ccb270f074ffabd71de1c11631717401ded1e89baff7f5d8e47ccb5b",
+      "frames": 240,
+      "fps": 60.0
+    },
+    "moving-light.gif": {
+      "bytes": 26611849,
+      "sha256": "60e31c533d070ac9d1fdd18980170a29e2eab027d3b8da92a5c6722b8ea72dcd",
+      "frames": 200,
+      "duration_ms": 4000,
+      "frame_durations_ms": [
+        20
+      ]
+    },
+    "moving-light-preview.webp": {
+      "bytes": 4115532,
+      "sha256": "e005805d9937b257dfe7efa23957ad006e9c2d0cc5c85e51b3f8e50669d5e7e4",
+      "frames": 240,
+      "duration_ms": 3999,
+      "frame_durations_ms": [
+        16,
+        17
+      ]
+    }
+  }
 }

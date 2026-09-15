@@ -1,5 +1,8 @@
 # Author quickstart
 
+Keep a backup of your project and saves before installing. You can restore it if
+setup is interrupted or your project needs a compatibility adjustment.
+
 ## Install
 
 1. Open **SceneLight.bat → For mod developers** and select the project containing `game/`.

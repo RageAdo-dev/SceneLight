@@ -3,6 +3,8 @@
 Automatic character lighting for Ren’Py. Sprites respond to the background’s
 light and color as they move through a scene.
 
+> **Before you start:** Back up your game or project folder and saves. That gives you an easy way back if setup is interrupted or your game needs a compatibility adjustment.
+
 **[Download for Windows](https://github.com/RageAdo-dev/SceneLight/actions/runs/34824284968/artifacts/10340055494)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
 
 ![Character lighting before and after SceneLight](docs/media/lighting-comparison.png)
@@ -15,12 +17,35 @@ light and color as they move through a scene.
 
 Launch the game normally. Videos are prepared once during setup for faster playback.
 
+## Example scenes
+
+Monika in a sunlit forest, rendered with SceneLight’s default settings.
+
+![Monika lit by the warm light in a forest](docs/media/forest-example.png)
+
+<details>
+<summary>Compare without SceneLight</summary>
+
+![The same forest scene without SceneLight](docs/media/forest-example-original.png)
+
+</details>
+
+The same character with a moving background:
+
+![Monika beside a flowing forest waterfall](docs/media/waterfall-example-preview.webp)
+
+[1080p video](docs/media/waterfall-example.mp4) · [1080p GIF](docs/media/waterfall-example.gif)
+
+Monika © Team Salvato. These are unofficial examples. [Artwork and background credits](docs/media/CREDITS.md).
+
 ## Preview & Calibrator
 
 Load a background and sprite, move the character, and adjust the lighting.
 Open it from **Settings → Tools → Open Preview & Calibrator**.
 
-![Character lighting changing between warm and blue lamps](docs/media/moving-light.webp)
+![Character lighting changing between warm and blue lamps](docs/media/moving-light-preview.webp)
+
+[1080p video](docs/media/moving-light.mp4) · [1080p GIF](docs/media/moving-light.gif)
 
 ## Surface maps
 
@@ -46,4 +71,4 @@ Ren’Py 7 and 8, with a compatibility runtime for some older games.
 
 [Documentation](docs/README.md) · [MIT license](LICENSE) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-Example artwork: **Eileen by Piroshki**, from the Ren’Py tutorial. [Credits](docs/media/CREDITS.md).
+Eileen by Piroshki, from the Ren’Py tutorial. [Credits](docs/media/CREDITS.md).

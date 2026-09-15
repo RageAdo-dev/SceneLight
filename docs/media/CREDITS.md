@@ -1,5 +1,26 @@
 # Example artwork and renders
 
+## Forest and waterfall
+
+**Monika** is from *Doki Doki Literature Club!*, © Team Salvato. These are
+unofficial demonstrations of SceneLight, with no affiliation or endorsement.
+DDLC artwork is not covered by SceneLight’s MIT license. See
+[Team Salvato’s IP Guidelines](https://teamsalvato.com/ip-guidelines).
+
+The sprite is the original `monika 1a` composite: `monika/1l.png`,
+`monika/1r.png` and `monika/a.png`, layered at `(0, 0)` on a 960×960 canvas.
+The original game assets and generated character maps stay outside the repository.
+
+- Forest photograph: **Joyce G**, [Unsplash source](https://unsplash.com/photos/green-trees-on-brown-grass-field-during-daytime-HjUxMTsq4GM), under the [Unsplash License](https://unsplash.com/license). Cropped to 16:9 around the sunlit path.
+- Waterfall footage: **Lana Kravchenko**, [Pexels source](https://www.pexels.com/video/tranquil-waterfall-in-lush-green-forest-32728606/), under the [Pexels License](https://www.pexels.com/license/). The example uses the first two seconds of the 2560×1440, 60 fps download, without audio.
+
+[`tools/build_scene_examples.py`](https://github.com/RageAdo-dev/SceneLight/blob/main/tools/build_scene_examples.py)
+renders both scenes through Preview’s production analyzer and lighting shader,
+with default calibration. No lighting is painted onto the results. The adjacent
+JSON files record source hashes, framing, settings and encoded frame counts.
+
+## Eileen and surface maps
+
 Eileen’s sprite is by **Piroshki**, distributed with the Ren’Py tutorial. The
 source is `tutorial/game/images/eileen happy.png` from the Ren’Py 8.5.3 SDK.
 The tutorial credits Piroshki in `tutorial/game/script.rpy`.
@@ -14,13 +35,28 @@ renders the comparison and animation through SceneLight’s Preview renderer and
 unpacks the surface-map channels for the diagram.
 
 `examples.json` records the source image hash, shader hash, map settings and
-animation encoding. The animation uses lossless WebP. The PNG comparison and
-map diagram are lossless images, laid out and scaled for documentation.
+animation encoding. The PNG comparison and map diagram are lossless images,
+laid out and scaled for documentation.
+
+## Animation formats
+
+The README uses 1280×720, 60 fps WebP previews. The downloadable GIFs and MP4
+videos are 1920×1080. GIF uses 50 fps with even 20 ms frame durations; the full-color
+MP4 and WebP versions use 60 fps. GIF’s palette has fewer colors than the video.
+
+Original rendered frames are retained as PNGs in the scratch folder during the
+build. Eileen’s full-size WebP is lossless; the waterfall WebP uses quality 90.
+MP4 uses H.264 at CRF 16. Rendering and encoding stream through disk rather than
+holding the whole animation in memory.
+
+## Rebuilding
 
 To regenerate the examples with the Preview dependencies installed:
 
 ```text
 python tools/build_docs_media.py /path/to/renpy-sdk /path/to/scratch
+python tools/build_scene_examples.py /path/to/forest.png /path/to/sprite.png /path/to/scratch --name forest-example --crop-y 0.47
+python tools/build_scene_examples.py /path/to/waterfall.mp4 /path/to/sprite.png /path/to/scratch --name waterfall-example --horizontal 0.73 --seconds 2
 ```
 
 An OpenGL 3.3 context is required. The SDK and scratch cache stay outside the

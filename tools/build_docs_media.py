@@ -10,9 +10,11 @@ import argparse
 import hashlib
 import json
 import math
+import tempfile
 from pathlib import Path
 
 import numpy as np
+from build_scene_examples import SIZE, encode_animation
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtGui import QOffscreenSurface, QOpenGLContext, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
@@ -170,44 +172,27 @@ def main():
                 args.output / "surface-maps.png", optimize=True
             )
 
-        frames = []
+        frames = Path(tempfile.mkdtemp(prefix="moving-light-", dir=args.work))
         frame_count = ANIMATION_FPS * ANIMATION_SECONDS
         for index in range(frame_count):
             horizontal = 0.5 - 0.27 * math.cos(2 * math.pi * index / frame_count)
             view.set_placement(horizontal, 1.01, 0.97)
-            frame = Image.fromarray(view.render_rgba((768, 432))).convert("RGB")
-            frames.append(frame)
-        durations = [
-            round((i + 1) * 1000 / ANIMATION_FPS) - round(i * 1000 / ANIMATION_FPS)
-            for i in range(frame_count)
-        ]
-        frames[0].save(
-            args.output / "moving-light.webp",
-            save_all=True,
-            append_images=frames[1:],
-            duration=durations,
-            loop=0,
-            lossless=True,
-            method=6,
+            frame = Image.fromarray(view.render_rgba(SIZE)).convert("RGB")
+            frame.save(frames / f"{index:05d}.png", compress_level=1)
+        encodings = encode_animation(
+            frames, args.output / "moving-light", ANIMATION_FPS, frame_count, lossless=True
         )
-        with Image.open(args.output / "moving-light.webp") as encoded:
-            if encoded.n_frames != len(frames):
-                raise RuntimeError("The animation lost frames during export")
-            for index, expected in enumerate(frames):
-                encoded.seek(index)
-                if not np.array_equal(np.asarray(encoded.convert("RGB")), np.asarray(expected)):
-                    raise RuntimeError(f"Animation frame {index} changed colors during export")
-                if encoded.info.get("duration") != durations[index]:
-                    raise RuntimeError(f"Animation frame {index} changed timing during export")
         metadata = {
             "source": "Ren'Py tutorial/game/images/eileen happy.png",
             "source_sha256": hashlib.sha256(sprite.read_bytes()).hexdigest(),
             "shader_sha256": production_shader_sha256(),
             "form": form.metadata,
             "comparison_changed_pixels": int(np.any(before != after, axis=2).sum()),
-            "animation_frames": len(frames),
+            "animation_frames": frame_count,
             "animation_fps": ANIMATION_FPS,
-            "animation_duration_ms": sum(durations),
+            "animation_duration_ms": ANIMATION_SECONDS * 1000,
+            "animation_size": list(SIZE),
+            "encodings": encodings,
             "normal_display": "X/Y from stored channels; Z reconstructed from unit length",
             "height_display": "Stored height channel, without contrast stretching",
             "occlusion_display": "Inverted stored amount: white is open, dark is occluded",

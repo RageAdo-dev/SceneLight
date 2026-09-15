@@ -18,11 +18,16 @@ The examples use **Eileen by Piroshki**, from the Ren'Py tutorial, under the dem
 artwork's MIT terms. See [credits and source details](docs/media/CREDITS.md) and
 [the retained notice](docs/media/RENPY_ART_LICENSE.txt).
 
+The forest and waterfall examples also show **Monika from Doki Doki Literature
+Club!**, © Team Salvato. The forest photograph is by **Joyce G** on Unsplash;
+the waterfall footage is by **Lana Kravchenko** on Pexels. Their respective
+terms apply to that artwork, independently of SceneLight's MIT license.
+
 ## Independent project
 
-SceneLight is not affiliated with Ren'Py, Team Salvato or Dan Salvato. No *Doki
-Doki Literature Club!* image, audio, script, font, archive or derived runtime
-texture is included in this repository or its packages.
+SceneLight is not affiliated with or endorsed by Ren'Py, Team Salvato or Dan
+Salvato. DDLC artwork appears only in the rendered documentation examples.
+Original DDLC assets, game files and reusable character maps are not bundled.
 
 SceneLight reads the user's project and generates its runtime data locally.
 Users and authors are responsible for the rights to their project content.
