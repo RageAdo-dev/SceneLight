@@ -187,7 +187,7 @@ def test_transport_blends_light_hypotheses_across_confidence_boundaries():
     for confidence in np.linspace(0.72, 0.90, 25):
         left, right = encode(confidence - 0.00001), encode(confidence + 0.00001)
         assert np.abs(left.astype(int) - right.astype(int)).max() <= 1
-        assert np.all(left[2, ..., 2] == 255)
+        assert np.all(left[2, ..., 2] == 191)
         mixes.append(int(left[2, 0, 0, 1]))
     assert mixes[0] == 0 and mixes[-1] == 255
     assert len(set(mixes)) >= 6

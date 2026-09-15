@@ -72,7 +72,7 @@ def test_authored_matrix_grade_suppresses_only_duplicate_environment_adaptation(
     assert "float sc_authored_grade = clamp(u_sc_authored_grade" in source
     assert "float sc_environment_adaptation = 1.0 - sc_authored_grade" in source
     assert "auto_amount * sc_environment_adaptation" in source
-    assert "source_tint = mix(vec3(1.0), source_tint, sc_environment_adaptation)" in source
+    assert "vec3(u_sc_calibration0.w * auto_amount * sc_environment_adaptation)" in source
     assert "probe_tint = mix(vec3(1.0), probe_tint, sc_environment_adaptation)" in source
     assert "ground_chroma = mix(vec3(1.0), ground_chroma, sc_environment_adaptation)" in source
     assert "form_light = mix(1.0, clamp(form_light" in source
@@ -88,7 +88,7 @@ def test_generated_specular_requires_source_detail_receiver_confidence() -> None
     assert "float form_detail_span" in detail_region
     assert "smoothstep(0.018, 0.110, form_detail_span)" in detail_region
     assert "step(0.5, u_sc_has_form)" in detail_region
-    assert "float form_light = 0.73 + lambert * diffuse_span" in source
+    assert "float form_light = diffuse_fill + lambert * diffuse_span" in source
     assert "* form_detail_visibility * u_sc_strength" in source
     assert "lighting_lambert" not in source
     assert "(form_light - 1.0) * form_detail_visibility" not in source

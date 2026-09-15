@@ -6,6 +6,20 @@ from scenelight.engine import _pseudo_surface
 from scenelight.form_maps import build_sprite_form_maps
 
 
+def test_surface_direction_does_not_flatten_at_higher_resolution():
+    samples = []
+    for size in (256, 512, 960):
+        alpha = np.zeros((size, size), np.float32)
+        alpha[size // 8 : 7 * size // 8, size // 4 : 3 * size // 4] = 1
+        paint = np.full((size, size, 3), 0.6, np.float32)
+        _, nx, ny, nz = _pseudo_surface(alpha, paint, 0.72)
+        points = [(size // 2, round(size * x)) for x in (0.32, 0.4, 0.6, 0.68)]
+        samples.append(np.array([[nx[y, x], ny[y, x], nz[y, x]] for y, x in points]))
+    # Resizing the same artwork must not change the inferred surface angles.
+    for normals in samples[1:]:
+        np.testing.assert_allclose(normals, samples[0], atol=0.025)
+
+
 @pytest.mark.parametrize("size", [256, 512])
 def test_flat_paint_has_no_silhouette_medial_crease(size):
     alpha = np.zeros((size, size), dtype=np.float32)
@@ -32,6 +46,20 @@ def test_surface_preparation_keeps_source_pixels_and_transparency():
     assert sprite.tobytes() == before
     assert maps.metadata["map_size"] == [64, 80]
     assert maps.normal_noise.size == sprite.size
+
+
+def test_painted_color_boundary_cannot_become_a_deep_surface_crease():
+    size = 512
+    alpha = np.zeros((size, size), np.float32)
+    alpha[32:480, 64:448] = 1
+    paint = np.full((size, size, 3), 0.4, np.float32)
+    striped = paint.copy()
+    striped[:, 240:272] = 0.98
+    _, *base = _pseudo_surface(alpha, paint, 0.72)
+    _, *detail = _pseudo_surface(alpha, striped, 0.72)
+    change = np.linalg.norm(np.stack(detail) - np.stack(base), axis=0)
+    # The printed stripe may add shallow relief, not a near-sideways normal.
+    assert 0.1 < change.max() < 0.30
 
 
 def test_fine_painted_relief_survives_without_spreading_across_the_surface():

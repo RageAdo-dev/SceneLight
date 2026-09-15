@@ -8,20 +8,24 @@ Extract the download, then extract `SceneLight-v1.0.0-Windows.zip` inside it.
 
 ## Add SceneLight to a game
 
-1. Open **SceneLight.bat** and select your game folder.
+1. Open **SceneLight.exe** and select your game folder.
 2. Scan the game and review the detected characters.
 3. Choose **Add to this game** or **Create separate copy**.
 4. Let setup finish, then launch the game normally.
 
-Setup installs any required components with your permission. An internet
-connection is needed the first time. Video preparation can take a while;
-completed work is reused on later launches.
+The Windows package includes the components needed for Setup and Preview.
+Video preparation can take a while; completed work is reused on later launches.
+Optional components are installed only with your permission.
 
 ## Open Preview
 
 Choose **Settings → Tools → Open Preview & Calibrator**. Load a background and
 sprite, then drag to move the character or scroll to resize it. Use **Calibrate**
 to adjust the lighting and **Save profile** to keep your settings.
+
+Export at 720p, 1080p or 4K. A small JSON file beside the export records its
+settings for reproduction. Videos retain their frame rate; GIFs retain their
+frame timings within the format's 10 ms precision.
 
 ## Update
 

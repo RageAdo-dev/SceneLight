@@ -1,5 +1,10 @@
 # Lighting continuity
 
+The current analyzer integrates four overlapping spatial regions instead of
+using connected bright patches as light identities. A patch splitting in two
+therefore cannot suddenly replace the main light or introduce a new light slot.
+These measurements use the current frame; flashes and cuts are not delayed.
+
 Moving backgrounds must change the lighting without turning detection thresholds
 into visible flashes. The analyzer retains a source's measured position and color
 when its emission score changes. Reflected illumination still has a direction;
@@ -15,14 +20,17 @@ Preview uses the full per-frame exposure result directly. Its older local-frame
 meter now applies only when full analysis is unavailable, matching the game's
 behavior for live and prepared fields.
 
-## Physical source ordering
+## Earlier source-ordering approach
+
+The following implementation and measurements describe the previous detector,
+before fixed spatial regions replaced connected components.
 
 Two similarly strong fixtures could exchange the primary-light slot when their
 scores crossed by less than one percent. Because the primary light also controls
 key shadows and rim direction, that slot swap produced a large visible change
 even with analysis running on every decoded frame.
 
-The shared live analyzer now matches physical emitters against the previous
+That analyzer matched physical emitters against the previous
 frame by position and color. For near-tied scores it retains their ordering.
 The matching intensity threshold is 0.95; intensities are square roots of
 normalized detection scores, so this gives about a ten-percent score margin.

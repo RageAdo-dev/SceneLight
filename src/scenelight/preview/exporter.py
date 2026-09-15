@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 from itertools import pairwise
 from math import lcm
 from pathlib import Path
 from typing import TypeVar
 
 import numpy as np
-from PIL import Image
+from PIL import GifImagePlugin, Image
 
 _Writer = TypeVar("_Writer", bound="MP4Writer")
 
@@ -58,24 +60,61 @@ def save_gif(
 ) -> None:
     if not frames:
         raise ValueError("Cannot export an empty GIF")
-    images = [
-        Image.fromarray(np.asarray(frame[..., :3], dtype=np.uint8), "RGB").quantize(
-            colors=256,
-            method=Image.Quantize.MEDIANCUT,
-            dither=Image.Dither.FLOYDSTEINBERG,
+    with GIFWriter(destination, durations_ms) as writer:
+        for frame in frames:
+            writer.write(frame)
+
+
+class GIFWriter:
+    """Encode one full frame at a time, retaining each frame's own palette."""
+
+    def __init__(self, destination: Path, durations_ms: tuple[int, ...]):
+        if not durations_ms or any(duration < 10 for duration in durations_ms):
+            raise ValueError("GIF frames need durations of at least 10 ms")
+        self.destination = destination
+        self.durations = durations_ms
+        self.count = 0
+        self.size = None
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, path = tempfile.mkstemp(
+            prefix=destination.name + ".", suffix=".partial", dir=destination.parent
         )
-        for frame in frames
-    ]
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    images[0].save(
-        destination,
-        save_all=True,
-        append_images=images[1:],
-        duration=list(durations_ms),
-        loop=0,
-        disposal=2,
-        optimize=False,
-    )
+        self.temporary = Path(path)
+        self.stream = os.fdopen(fd, "wb")
+
+    def __enter__(self) -> "GIFWriter":
+        return self
+
+    def write(self, rgba: np.ndarray) -> None:
+        if self.count >= len(self.durations):
+            raise ValueError("More GIF frames than declared durations")
+        image = Image.fromarray(np.asarray(rgba[..., :3], dtype=np.uint8)).quantize(
+            colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG
+        )
+        if self.size is not None and image.size != self.size:
+            raise ValueError("GIF frame dimensions changed")
+        if self.count == 0:
+            self.size = image.size
+            header, _ = GifImagePlugin.getheader(image, info={"loop": 0, "optimize": False})
+            for block in header:
+                self.stream.write(block)
+        for block in GifImagePlugin.getdata(
+            image, duration=self.durations[self.count], disposal=2, include_color_table=True
+        ):
+            self.stream.write(block)
+        self.count += 1
+
+    def __exit__(self, kind, value, traceback) -> None:
+        try:
+            if kind is None:
+                if self.count != len(self.durations):
+                    raise ValueError("Incomplete GIF export")
+                self.stream.write(b";")
+                self.stream.close()
+                os.replace(self.temporary, self.destination)
+        finally:
+            self.stream.close()
+            self.temporary.unlink(missing_ok=True)
 
 
 class MP4Writer:
@@ -99,7 +138,14 @@ class MP4Writer:
                 "Video export needs imageio-ffmpeg. Install SceneLight's preview dependencies."
             ) from error
         self.destination = destination
+        self.size = size
+        self._published = False
         destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(
+            prefix=destination.stem + ".", suffix=".mp4", dir=destination.parent
+        )
+        os.close(fd)
+        self.temporary = Path(name)
         command = [
             get_ffmpeg_exe(),
             "-y",
@@ -133,25 +179,42 @@ class MP4Writer:
             "aac",
             "-b:a",
             "192k",
+            "-af",
+            "apad",
             "-shortest",
-            str(destination),
+            "-movflags",
+            "+faststart",
+            str(self.temporary),
         ]
-        self._process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            self._process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        except OSError:
+            self.temporary.unlink(missing_ok=True)
+            raise
 
     def write(self, rgba: np.ndarray) -> None:
         if self._process.stdin is None:
             raise RuntimeError("Video encoder is already closed")
+        if rgba.shape[:2] != (self.size[1], self.size[0]):
+            raise ValueError("Video frame dimensions changed")
         rgb = np.ascontiguousarray(rgba[..., :3], dtype=np.uint8)
         self._process.stdin.write(rgb.tobytes())
 
     def close(self) -> None:
+        if self._published:
+            return
         if self._process.stdin is not None:
-            self._process.stdin.close()
+            try:
+                self._process.stdin.close()
+            except BrokenPipeError:
+                # Read FFmpeg's actual error below instead of losing it to a
+                # pipe-close exception after the encoder has already exited.
+                pass
             self._process.stdin = None
         stderr = self._process.stderr.read() if self._process.stderr is not None else b""
         return_code = self._process.wait()
@@ -159,8 +222,10 @@ class MP4Writer:
             self._process.stderr.close()
             self._process.stderr = None
         if return_code:
-            self.destination.unlink(missing_ok=True)
+            self.temporary.unlink(missing_ok=True)
             raise RuntimeError(stderr.decode("utf-8", "replace").strip() or "FFmpeg failed")
+        os.replace(self.temporary, self.destination)
+        self._published = True
 
     def __enter__(self: _Writer) -> _Writer:
         return self
@@ -170,11 +235,14 @@ class MP4Writer:
             self.close()
             return
         if self._process.stdin is not None:
-            self._process.stdin.close()
+            try:
+                self._process.stdin.close()
+            except BrokenPipeError:
+                pass
             self._process.stdin = None
         self._process.kill()
         self._process.wait()
         if self._process.stderr is not None:
             self._process.stderr.close()
             self._process.stderr = None
-        self.destination.unlink(missing_ok=True)
+        self.temporary.unlink(missing_ok=True)

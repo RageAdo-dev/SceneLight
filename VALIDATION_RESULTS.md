@@ -3,22 +3,24 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Automated checks:** 618 tests passed locally on 15 September 2026, with no
-  failures or skips. All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939242237)
-  passed for the animation correction. Hosted runners skip tests that require
-  unavailable graphics features; Linux also skips the Windows process check.
-- **Windows package:** the [package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939254926)
-  passed. The downloaded ZIP's checksum and 88 code/documentation files matched
-  the tested commit, including the refreshed examples.
-- **Native rendering:** Ren'Py 7.7.1 and 8.5.3 checks covered movement,
-  transitions and save/load with form-map version 5.
-- **Installation:** a fresh environment installed the source package, scanned,
-  installed, verified and removed a synthetic game without changing its source files.
-- **Older hardware:** recorded Radeon measurements predate the final surface-map
-  correction. That follow-up could not be repeated while the machine was offline.
-- **Animation correction:** twelve video and synthetic cases; identical live and
-  prepared replay; native 7.7.1/8.5.3 prepared playback and save/load, plus DDLC and
-  Amy integration checks. The older Radeon host was unreachable for this revision.
+- **Local candidate:** 629 tests passed on 15 September 2026, with no failures
+  or skips. Ruff checks and formatting passed; Bandit reported no medium/high
+  severity findings, and the dependency audit found no known vulnerabilities.
+  Wheel and source-distribution builds passed.
+- **Directional lighting:** regression tests cover direction reversal, surface-map
+  resolution, painted-edge relief, dark scenes and continuity as bright regions meet.
+- **Exports:** the Preview export path produced all 1,799 colored-background frames
+  and all 900 storm frames at 1920 × 1080 and the original frame rates.
+- **Native rendering:** fresh Ren'Py 7.7.1 and 8.5.3 fixtures passed movement,
+  transitions, prepared animation and save/load with form-map version 6. Original
+  authored files were preserved.
+- **Performance:** repeated analysis measured about 20% faster on the development
+  PC. This is analysis time, not total frame rate, GPU utilization or power.
+  The older Radeon machine was unreachable for this revision.
+- **Previous published build:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939242237)
+  and the [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939254926)
+  passed for the preceding animation correction. Those hosted results do not
+  validate the current local candidate.
 
 A successful installation or short playback test does not establish compatibility
 with every route, asset or custom displayable in a game.

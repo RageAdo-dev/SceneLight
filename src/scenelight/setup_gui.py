@@ -76,7 +76,7 @@ BASE_DEPENDENCIES = {
 CUDA_REQUIREMENT = "cupy-cuda12x==13.4.1"
 PREVIEW_DEPENDENCIES = {
     **BASE_DEPENDENCIES,
-    "PySide6.QtOpenGLWidgets": "PySide6==6.9.2",
+    "PySide6.QtOpenGLWidgets": "PySide6-Essentials==6.9.2",
     "OpenGL": "PyOpenGL==3.1.9",
 }
 
@@ -302,6 +302,11 @@ def component_environment_root() -> Path:
 
 
 def component_python() -> Path:
+    from .desktop import bundled_python
+
+    bundled = bundled_python()
+    if bundled is not None:
+        return bundled
     root = component_environment_root()
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
@@ -309,6 +314,11 @@ def component_python() -> Path:
 def preferred_runtime_python() -> Path:
     """Use SceneLight's isolated environment when the source release created one."""
 
+    from .desktop import bundled_python
+
+    bundled = bundled_python()
+    if bundled is not None:
+        return bundled
     private_python = component_python()
     if SDK_LAUNCHER.is_file() and private_python.is_file():
         return private_python
@@ -569,8 +579,14 @@ def dependency_install_commands(
 ) -> list[list[str]]:
     """Build shell-free install commands, isolating source-release dependencies."""
 
+    from .desktop import bundled_python
+
     source = SDK_LAUNCHER.is_file() if source_mode is None else source_mode
     host_python = Path(system_python or sys.executable)
+    bundled = bundled_python() if system_python is None and environment_root is None else None
+    if bundled is not None:
+        host_python = bundled
+        source = False
     selected_requirements = requirements_path or (
         PREVIEW_REQUIREMENTS if include_preview else REQUIREMENTS
     )
@@ -582,6 +598,8 @@ def dependency_install_commands(
         else []
     )
     commands: list[list[str]] = []
+    if bundled is not None:
+        commands.append([str(host_python), "-m", "ensurepip", "--upgrade"])
     if source:
         private_root = Path(environment_root or component_environment_root())
         private_python = private_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

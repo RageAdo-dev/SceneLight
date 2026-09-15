@@ -16,11 +16,12 @@ def analyzer():
     ):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
-    from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext, QSurfaceFormat
+    from PySide6.QtGui import QOffscreenSurface, QOpenGLContext, QSurfaceFormat
+    from PySide6.QtWidgets import QApplication
 
     from scenelight.runtime.live_gpu import Analysis
 
-    application = QGuiApplication.instance() or QGuiApplication([])
+    application = QApplication.instance() or QApplication([])
     surface_format = QSurfaceFormat()
     surface_format.setVersion(3, 3)
     surface_format.setProfile(QSurfaceFormat.CoreProfile)

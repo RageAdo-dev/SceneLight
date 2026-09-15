@@ -2405,160 +2405,70 @@ class Analysis(object):
         )
 
     def physical_components(self, name, weights, linear, residual):
-        result_name = name
-        # Only the small global/camera results need separate storage.
-        name = "source_components"
-        labels = self.component_labels(name, weights)
-        statistics, candidates, total = self.component_statistics(
-            name, labels, weights, linear, residual
-        )
-        ordered = self.compact_candidates(name, candidates)
-        if self.device.gl.compute_active or not self.device.gl.es:
-            if self.device.opencl is not None:
-                quantiles = self.device.opencl.component_quantiles(
-                    name, labels, ordered, linear, (self.width, self.height)
-                )
-            elif self.device.gl.compute_active:
-                quantiles = self.compute_component_quantiles(name, labels, ordered, linear)
-            else:
-                quantiles = self.raster_component_quantiles(name, labels, ordered, linear)
-            scored = self.run(
-                name + "_all_scored",
-                COMMON
-                + """
-                void main(){int i=int(gl_FragCoord.x);vec4 candidate=texelFetch(t0,ivec2(i,0),0);
-                    if(candidate.r<=0.0){color=vec4(0.0);return;}
-                    int root=int(candidate.g)-1;ivec2 size=textureSize(t2,0);
-                    vec4 component=texelFetch(t1,ivec2(i,0),0);
-                    float ring=texelFetch(t1,ivec2(i,1),0).r;
-                    float texture_mean=texelFetch(t2,ivec2(root%size.x,root/size.x),0).r/max(candidate.b,1.0);
-                    float contrast=clamp((component.g-ring)/(component.g+0.03),0.0,1.0);
-                    float ratio=texture_mean/(component.r+0.03);
-                    float emission=clamp((contrast-0.28)/0.55,0.0,1.0)*exp(-7.0*clamp(ratio,0.0,1.0));
-                    color=vec4(candidate.r*(0.20+0.80*emission),candidate.r,candidate.g,emission);}
-            """,
-                128,
-                1,
-                (ordered, quantiles, statistics[2]),
-            )
-            best = self.sort_candidates(name + "_effective", scored, "b")
-            self.fields[result_name + "_component_batches"] = 0
-        else:
-            best = self.run(name + "_empty", COMMON + "void main(){color=vec4(0.0);}", 6, 1)
-            for batch in range(16):
-                selection = self.run(
-                    name + "_selected",
-                    COMMON
-                    + """
-                    uniform float offset;
-                    void main(){color=texelFetch(t0,ivec2(int(gl_FragCoord.x)+int(offset),0),0);}
-                """,
-                    8,
-                    1,
-                    (ordered,),
-                    (("offset", float(batch * 8)),),
-                )
-                component = self.component_quantiles(
-                    name + "_component_quantiles", labels, selection, linear, statistics[3]
-                )
-                ring = self.component_quantiles(
-                    name + "_ring_quantiles", labels, selection, linear, statistics[3], True
-                )
-                scored = self.run(
-                    name + "_scored",
-                    COMMON
-                    + """
-                    void main(){ int i=int(gl_FragCoord.x);
-                        vec4 candidate=texelFetch(t0,ivec2(i,0),0);
-                        if(candidate.r<=0.0) {color=vec4(0.0);return;}
-                        int root=int(candidate.g)-1; ivec2 size=textureSize(t3,0);
-                        vec4 component=texelFetch(t1,ivec2(i,0),0);
-                        float ring=texelFetch(t2,ivec2(i,0),0).r;
-                        float texture_mean=texelFetch(t3,ivec2(root%size.x,root/size.x),0).r/max(candidate.b,1.0);
-                        float contrast=clamp((component.g-ring)/(component.g+0.03),0.0,1.0);
-                        float ratio=texture_mean/(component.r+0.03);
-                        float emission=clamp((contrast-0.28)/0.55,0.0,1.0)*exp(-7.0*clamp(ratio,0.0,1.0));
-                        color=vec4(candidate.r*(0.20+0.80*emission),candidate.r,candidate.g,emission);
-                    }
-                """,
-                    8,
-                    1,
-                    (selection, component, ring, statistics[2]),
-                )
-                best = self.run(
-                    name + "_best%d" % (batch % 2),
-                    COMMON
-                    + """
-                    void main(){
-                        vec4 values[14]; bool removed[14];
-                        for(int i=0;i<14;i++){
-                            values[i]=i<6 ? texelFetch(t0,ivec2(i,0),0) : texelFetch(t1,ivec2(i-6,0),0);
-                            removed[i]=false;
-                        }
-                        vec4 chosen=vec4(0.0);
-                        for(int rank=0;rank<=int(gl_FragCoord.x);rank++){
-                            int best=-1;
-                            for(int i=0;i<14;i++) {
-                                if(removed[i]) continue;
-                                if(best<0 || values[i].r>values[best].r || (values[i].r==values[best].r && values[i].b<values[best].b)) best=i;
-                            }
-                            chosen=values[best]; removed[best]=true;
-                        }
-                        color=chosen;
-                    }
-                """,
-                    6,
-                    1,
-                    (best, scored),
-                )
-                finished = self.run(
-                    name + "_finished",
-                    COMMON
-                    + """
-                    void main(){ float last=texelFetch(t1,ivec2(7,0),0).r;
-                        color=vec4(last<=0.0 || texelFetch(t0,ivec2(5,0),0).r>last ? 1.0 : 0.0); }
-                """,
-                    1,
-                    1,
-                    (best, selection),
-                )
-                if self.control_flag(finished):
-                    break
-            self.fields[result_name + "_component_batches"] = batch + 1
-        lights = self.run(
-            result_name + "_lights",
+        # Integrate a partition of unity instead of segmenting bright blobs.
+        # Fixed slots preserve direction when a bright region splits or merges.
+        rows = self.run(
+            name + "_basis_rows",
             COMMON
             + """
             void main(){
-                int i=int(gl_FragCoord.x), row=int(gl_FragCoord.y);
-                vec4 score=texelFetch(t0,ivec2(i,0),0);
-                if(score.r<=0.0) {color=vec4(0.0);return;}
-                float intensity=clamp(sqrt(score.r/(texelFetch(t0,ivec2(0),0).r+EPS)),0.12,1.0);
-                // Retain measured geometry even when emission is uncertain.
-                // The scene solver blends its directional support continuously.
-                ivec2 size=textureSize(t1,0); int root=int(score.b)-1;
-                ivec2 p=ivec2(root%size.x,root/size.x);
-                vec4 moments=texelFetch(t1,p,0);
-                vec2 center=moments.gb/(score.g+EPS);
-                float spread=max(texelFetch(t4,p,0).g/(score.g+EPS),0.0);
-                float radius=clamp(sqrt(spread)*4.0,0.035,1.0);
-                float confidence=clamp((0.28+0.46*(1.0-radius)+0.26*min(score.g/(texelFetch(t3,ivec2(0),0).r+EPS)*3.0,1.0))*(0.58+0.42*score.a),0.0,1.0);
-                vec3 c=display_chroma(texelFetch(t2,p,0).rgb/(score.g+EPS));
-                color=row==0 ? vec4(clamp(center*vec2(size)/vec2(max(size-1,ivec2(1))),0.0,1.0),radius,intensity) :
-                      (row==1 ? vec4(c,confidence) : vec4(score.a,1.0,0.0,1.0));
+                ivec2 p=ivec2(gl_FragCoord.xy),size=textureSize(t0,0);
+                int slot=p.x%4,kind=p.x/4;
+                vec4 sum=vec4(0.0);
+                for(int x=0;x<size.x;x++){
+                    ivec2 q=ivec2(x,p.y);
+                    vec2 uv=vec2(q)/max(vec2(size-1),vec2(1.0));
+                    float wx=slot%2==0 ? 1.0-uv.x : uv.x;
+                    float wy=slot<2 ? 1.0-uv.y : uv.y;
+                    float weight=texelFetch(t0,q,0).r*wx*wy;
+                    sum+=kind==0 ? vec4(weight,uv*weight,dot(uv,uv)*weight)
+                        : vec4(texelFetch(t1,q,0).rgb*weight,0.0);
+                }
+                color=sum;
             }
-        """,
+            """,
+            8,
+            self.height,
+            (weights, linear),
+        )
+        moments = self.run(
+            name + "_basis_moments",
+            COMMON
+            + """
+            void main(){
+                vec4 sum=vec4(0.0);int x=int(gl_FragCoord.x);
+                for(int y=0;y<textureSize(t0,0).y;y++)sum+=texelFetch(t0,ivec2(x,y),0);
+                color=sum;
+            }
+            """,
+            8,
+            1,
+            (rows,),
+        )
+        lights = self.run(
+            name,
+            COMMON
+            + """
+            void main(){
+                ivec2 p=ivec2(gl_FragCoord.xy);
+                float maximum=0.0,total=0.0;
+                for(int i=0;i<4;i++){float e=texelFetch(t0,ivec2(i,0),0).r;maximum=max(maximum,e);total+=e;}
+                if(p.x>=4 || total<=EPS){color=vec4(0.0);return;}
+                vec4 m=texelFetch(t0,ivec2(p.x,0),0);
+                vec2 center=m.gb/(m.r+EPS);
+                float variance=max(m.a/(m.r+EPS)-dot(center,center),0.0);
+                float radius=clamp(sqrt(variance)*3.2,0.055,1.0);
+                vec3 c=display_chroma(texelFetch(t0,ivec2(p.x+4,0),0).rgb/(m.r+EPS));
+                color=p.y==0 ? vec4(center,radius,sqrt(m.r/(maximum+EPS)))
+                    : (p.y==1 ? vec4(c,0.35+0.60*(1.0-radius))
+                    : vec4(1.0-smoothstep(0.10,0.45,radius),1.0,0.0,1.0));
+            }
+            """,
             6,
             3,
-            (best, statistics[0], statistics[1], total, statistics[2]),
+            (moments,),
         )
-        total = self.run(
-            result_name + "_total_value",
-            COMMON + "void main(){color=texelFetch(t0,ivec2(0),0);}",
-            1,
-            1,
-            (total,),
-        )
+        total = self.reduce(name + "_basis_total", weights, (self.width, self.height))
         return lights, total
 
     def creative_components(self, name, linear):
@@ -3304,12 +3214,9 @@ class Analysis(object):
                     // Reflected illumination retains direction; emission only
                     // controls point-source falloff in the surface shader.
                     support[i]=1.0-lower*daylight*broad_reflection;
-                    if(support[i]>EPS){emitters[emitter_count]=i;emitter_count++;}
+                    emitters[emitter_count]=i;emitter_count++;
                 }
                 bool broad=emitter_count==0;
-                bool isolated=false;
-                if(emitter_count>=2) isolated=components[emitters[0]].emission>=0.55 && components[emitters[1]].emission>=0.55 && components[emitters[1]].position.a>=0.45;
-                int maximum=broad ? 1 : ((isolated || global.a>=0.82 || (mean<0.11 && global.a>=0.50)) ? 4 : (global.a>=0.52 ? 2 : 1));
                 vec2 position=vec2(0.5,0.2);vec3 light_linear=vec3(1.0,0.96,0.9);
                 float radius=1.0,confidence=0.0;
                 if(source_total>EPS){
@@ -3360,18 +3267,15 @@ class Analysis(object):
                 vec3 light_display=clamp(display_rgb(light_chroma*0.5),0.0,1.0);
                 vec3 shadow_display=clamp(display_rgb(shadow_chroma*0.5),0.0,1.0);
                 Light lights[4];for(int i=0;i<4;i++) lights[i]=disabled();
-                lights[0].position=vec4(position,radius,1.0);lights[0].color=vec4(light_display,confidence);
+                lights[0].position=vec4(position,radius,broad ? 1.0 : components[emitters[0]].position.a);lights[0].color=vec4(light_display,confidence);
                 lights[0].emission=broad ? 0.0 : components[emitters[0]].emission*primary_support;
                 int count=1;
                 for(int i=1;i<6;i++){
                     if(i>=emitter_count) break;
                     Light v=components[emitters[i]];
                     v.position.a*=support[emitters[i]];
-                    if(v.position.a<(maximum==4 ? 0.27 : 0.42)) continue;
-                    bool distinct=true;
-                    for(int j=0;j<4;j++) if(j<count && length(v.position.xy-lights[j].position.xy)<=0.055) distinct=false;
-                    if(distinct && count<4){lights[count]=v;count++;}
-                    if(count>=maximum) break;
+                    if(count<4){lights[count]=v;count++;}
+                    if(count>=4) break;
                 }
                 Light families[3];
                 for(int i=0;i<3;i++){families[i]=disabled();families[i].creative=true;}
@@ -3402,9 +3306,9 @@ class Analysis(object):
                         creative_evidence=max(creative_evidence,pair);
                     }
                 }
-                float nominal=clamp(adaptation*0.82+0.028,0.018,0.58);
-                float exposure=clamp((nominal+0.035)/0.256169,0.18,2.15)*pow(2.0,-0.42*global.b);
-                float target=clamp(exposure*0.256169-0.035,0.018,0.58);
+                float nominal=clamp(0.82*(adaptation+0.65*max(mean-adaptation,0.0)*(1.0-smoothstep(0.025,0.12,adaptation))),0.0,0.58);
+                float exposure=clamp(nominal/0.221169,0.0001,2.15)*pow(2.0,-0.42*global.b);
+                float target=clamp(exposure*0.221169,0.0,0.58);
                 float chroma_guard=smoothstep(0.30,0.46,mean)*smoothstep(0.62,0.90,radius)*
                     (1.0-smoothstep(0.34,0.60,confidence))*(1.0-smoothstep(0.12,0.35,lights[0].emission));
                 if(row==0) color=vec4(clamp(mean,0.0,1.0),clamp(adaptation,0.0,1.0),clamp(contrast,0.0,2.0),clamp(saturation,0.0,1.0));
@@ -3449,7 +3353,7 @@ class Analysis(object):
                 vec3 value=vec3(0.0);
                 if(plane==0){vec4 v=texelFetch(t0,ivec2(index,0),0);value=vec3(v.b/2.0,v.a,v.r);}
                 else if(plane==1) value=chroma(linear_rgb(texelFetch(t0,ivec2(index,1),0).rgb),2.4)/2.4;
-                else if(plane==2) value=vec3(texelFetch(t0,ivec2(index,25),0).r/0.58,texelFetch(t2,ivec2(0),0).r,1.0);
+                else if(plane==2) value=vec3(sqrt(texelFetch(t0,ivec2(index,25),0).r/0.58),texelFetch(t2,ivec2(0),0).r,0.75);
                 else if(plane<15){
                     int slot=(plane-3)/3, kind=(plane-3)%3;
                     int row=3+slot*3;
@@ -3591,8 +3495,6 @@ class Analysis(object):
                 (small,),
                 storage=RGBA8,
             )
-            if previous:
-                physical = self.stabilize_light_order(physical, history_image, previous)
         meters = self.meters(prepared)
         probes = self.probes(prepared["linear"])
         global_stats = self.global_statistics(prepared)
@@ -3838,9 +3740,9 @@ class Analysis(object):
             void main(){ivec2 p=ivec2(gl_FragCoord.xy);vec4 value=texelFetch(t0,p,0)/(texelFetch(t1,p,0).r+EPS);
                 vec3 ambient=chroma(max(value.rgb,vec3(0.0)),2.4);
                 float adaptation=max(exp(value.a)*0.008-0.008,0.0);
-                float nominal=clamp(adaptation*0.82+0.028,0.018,0.58);
-                float exposure=clamp((nominal+0.035)/0.256169,0.18,2.15)*pow(2.0,-0.42*texelFetch(t2,ivec2(0),0).b);
-                float target=clamp(exposure*0.256169-0.035,0.018,0.58);
+                float nominal=clamp(0.82*(adaptation+0.65*max(dot(value.rgb,vec3(0.2126,0.7152,0.0722))-adaptation,0.0)*(1.0-smoothstep(0.025,0.12,adaptation))),0.0,0.58);
+                float exposure=clamp(nominal/0.221169,0.0001,2.15)*pow(2.0,-0.42*texelFetch(t2,ivec2(0),0).b);
+                float target=clamp(exposure*0.221169,0.0,0.58);
                 color=q8(vec4(ambient/2.4,target/0.58));}
         """,
             160,

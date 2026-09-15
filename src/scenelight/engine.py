@@ -577,202 +577,43 @@ def _detect_source_components(
     crop_components: bool = False,
     creative_fields: tuple[np.ndarray, np.ndarray, tuple[np.ndarray, ...]] | None = None,
 ) -> tuple[DetectedLight, ...]:
-    """Split the saliency field into spatially distinct screen-space emitters."""
+    """Integrate light over four overlapping, fixed spatial basis functions.
 
-    positive = source_weights[source_weights > EPSILON]
-    if positive.size == 0:
-        return ()
+    The weights sum to one at every pixel. Regions may merge, split or cross
+    without changing the identity or count of the lighting representation.
+    """
     h, w = source_weights.shape
-    cutoff = max(
-        float(np.max(positive)) * 0.035,
-        float(_linear_quantile(positive, 0.16, overwrite_input=True)),
-    )
-    binary = (source_weights >= cutoff).astype(np.uint8)
-    kernel = np.ones((3, 3), dtype=np.uint8)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    if coordinate_grid is None:
-        yy, xx = np.mgrid[0:h, 0:w]
-    else:
-        yy, xx = coordinate_grid
-    total_energy = float(np.sum(source_weights)) + EPSILON
-    energy_candidates: list[tuple[float, int]] = []
-    minimum_area = max(4, int(h * w * 0.000035))
-    if luma is None:
-        luma = _luminance(linear)
-    if texture_residual is None:
-        texture_residual = np.abs(luma - cv2.GaussianBlur(luma, (0, 0), sigmaX=1.2))
-    if ring_kernel is None:
-        ring_size = max(5, (min(h, w) // 46) | 1)
-        ring_kernel = np.ones((ring_size, ring_size), dtype=np.uint8)
-
-    # First collect exact raw energies. A component's effective energy can
-    # never exceed this value, so descending raw energy provides a strict
-    # branch-and-bound for the final top six. This avoids doing ring
-    # morphology and quantiles for components that mathematically cannot
-    # survive the final sort, without approximating or changing a decision.
-    for label in range(1, count):
-        if int(stats[label, cv2.CC_STAT_AREA]) < minimum_area:
-            continue
-        if crop_components:
-            left = int(stats[label, cv2.CC_STAT_LEFT])
-            top = int(stats[label, cv2.CC_STAT_TOP])
-            width = int(stats[label, cv2.CC_STAT_WIDTH])
-            height = int(stats[label, cv2.CC_STAT_HEIGHT])
-            component_y = slice(top, top + height)
-            component_x = slice(left, left + width)
-            component_mask = labels[component_y, component_x] == label
-            weights = source_weights[component_y, component_x] * component_mask
-            energy = float(np.sum(weights))
-            if energy < total_energy * 0.009:
-                continue
-
-        else:
-            weights = source_weights * (labels == label)
-            energy = float(np.sum(weights))
-            if energy < total_energy * 0.009:
-                continue
-        energy_candidates.append((energy, label))
-
-    scored_candidates: list[tuple[float, int, float, float]] = []
-    for energy, label in sorted(energy_candidates, key=lambda item: item[0], reverse=True):
-        if len(scored_candidates) >= 6:
-            current_sixth = sorted(
-                scored_candidates,
-                key=lambda item: (-item[0], item[1]),
-            )[5][0]
-            if energy < current_sixth:
-                break
-
-        if crop_components:
-            left = int(stats[label, cv2.CC_STAT_LEFT])
-            top = int(stats[label, cv2.CC_STAT_TOP])
-            width = int(stats[label, cv2.CC_STAT_WIDTH])
-            height = int(stats[label, cv2.CC_STAT_HEIGHT])
-            component_y = slice(top, top + height)
-            component_x = slice(left, left + width)
-            component_mask = labels[component_y, component_x] == label
-
-            ring_pad = ring_kernel.shape[0] // 2
-            ring_left = max(0, left - ring_pad)
-            ring_top = max(0, top - ring_pad)
-            ring_right = min(w, left + width + ring_pad)
-            ring_bottom = min(h, top + height + ring_pad)
-            ring_y = slice(ring_top, ring_bottom)
-            ring_x = slice(ring_left, ring_right)
-            expanded_mask = labels[ring_y, ring_x] == label
-            ring = cv2.dilate(expanded_mask.astype(np.uint8), ring_kernel).astype(bool)
-            ring &= ~expanded_mask
-            component_values = luma[component_y, component_x][component_mask]
-            ring_values = luma[ring_y, ring_x][ring]
-            texture_values = texture_residual[component_y, component_x][component_mask]
-        else:
-            component_mask = labels == label
-            ring = cv2.dilate(component_mask.astype(np.uint8), ring_kernel).astype(bool)
-            ring &= ~component_mask
-            component_values = luma[component_mask]
-            ring_values = luma[ring]
-            texture_values = texture_residual[component_mask]
-
-        component_median, peak = (
-            float(value)
-            for value in _linear_quantile(
-                component_values,
-                (0.50, 0.90),
-                overwrite_input=True,
-            )
-        )
-        ring_median = (
-            float(_linear_quantile(ring_values, 0.50, overwrite_input=True))
-            if ring_values.size
-            else 0.0
-        )
-        surround_contrast = _clamp_scalar(
-            (peak - ring_median) / (peak + 0.03),
-            0.0,
-            1.0,
-        )
-        texture_ratio = float(np.mean(texture_values) / (component_median + 0.03))
-        # Emission needs a bright core that separates smoothly from its
-        # surround. Repeated hard-edged white texture (petals, foam, snow) is
-        # reflectance, not a lamp, and receives a strong texture penalty.
-        emission_score = float(
-            _clamp_scalar((surround_contrast - 0.28) / 0.55, 0.0, 1.0)
-            * np.exp(-7.0 * _clamp_scalar(texture_ratio, 0.0, 1.0))
-        )
-        effective_energy = energy * (0.20 + 0.80 * emission_score)
-        scored_candidates.append((effective_energy, label, energy, emission_score))
-
-    selected = sorted(
-        scored_candidates,
-        key=lambda item: (-item[0], item[1]),
-    )[:6]
-    if not selected:
+    total = float(source_weights.sum())
+    if total <= EPSILON:
         return ()
-    maximum_energy = selected[0][0]
-    lights: list[DetectedLight] = []
-    for effective_energy, label, energy, emission_score in selected:
-        # Preserve measured positions/colors across the emission confidence
-        # range. The scene solver controls how strongly they affect lighting.
-        if crop_components:
-            left = int(stats[label, cv2.CC_STAT_LEFT])
-            top = int(stats[label, cv2.CC_STAT_TOP])
-            width = int(stats[label, cv2.CC_STAT_WIDTH])
-            height = int(stats[label, cv2.CC_STAT_HEIGHT])
-            component_y = slice(top, top + height)
-            component_x = slice(left, left + width)
-            component_mask = labels[component_y, component_x] == label
-            weights = source_weights[component_y, component_x] * component_mask
-            component_xx = xx[component_y, component_x]
-            component_yy = yy[component_y, component_x]
-            component_linear = linear[component_y, component_x]
-        else:
-            component_mask = labels == label
-            weights = source_weights * component_mask
-            component_xx = xx
-            component_yy = yy
-            component_linear = linear
-        cx = float(np.sum(component_xx * weights) / (energy + EPSILON))
-        cy = float(np.sum(component_yy * weights) / (energy + EPSILON))
-        spread = float(
-            np.sum(
-                (((component_xx - cx) / max(w, 1)) ** 2 + ((component_yy - cy) / max(h, 1)) ** 2)
-                * weights
-            )
-            / (energy + EPSILON)
-        )
-        color = _display_chromaticity(_weighted_rgb(component_linear, weights, energy))
-        radius = _clamp_scalar(np.sqrt(max(spread, 0.0)) * 4.0, 0.035, 1.0)
-        concentration = 1.0 - radius
-        confidence = _clamp_scalar(
-            (0.28 + 0.46 * concentration + 0.26 * min(energy / total_energy * 3.0, 1.0))
-            * (0.58 + 0.42 * emission_score),
-            0.0,
-            1.0,
-        )
+    yy, xx = np.mgrid[:h, :w] if coordinate_grid is None else coordinate_grid
+    x = xx / max(w - 1, 1)
+    y = yy / max(h - 1, 1)
+    weights = [source_weights * wx * wy for wy in (1.0 - y, y) for wx in (1.0 - x, x)]
+    energy = [float(weight.sum()) for weight in weights]
+    maximum = max(energy)
+    lights = []
+    for weight, amount in zip(weights, energy, strict=True):
+        denominator = amount + EPSILON
+        cx = float(np.sum(weight * x) / denominator)
+        cy = float(np.sum(weight * y) / denominator)
+        variance = float(np.sum(weight * (x * x + y * y)) / denominator) - cx * cx - cy * cy
+        radius = float(np.clip(np.sqrt(max(variance, 0.0)) * 3.2, 0.055, 1.0))
+        color = np.sum(linear * weight[..., None], axis=(0, 1)) / denominator
         lights.append(
             DetectedLight(
-                x=_clamp_scalar(cx / max(w - 1, 1), 0.0, 1.0),
-                y=_clamp_scalar(cy / max(h - 1, 1), 0.0, 1.0),
-                color=color,
-                intensity=_clamp_scalar(
-                    np.sqrt(effective_energy / (maximum_energy + EPSILON)),
-                    0.12,
-                    1.0,
-                ),
+                x=cx,
+                y=cy,
+                color=_display_chromaticity(color),
+                intensity=float(np.sqrt(amount / (maximum + EPSILON))),
                 radius=radius,
-                confidence=confidence,
-                emission_score=emission_score,
+                confidence=0.35 + 0.60 * (1.0 - radius),
+                emission_score=1.0 - _smoothstep_scalar(radius, 0.10, 0.45),
             )
         )
-    physical_lights = tuple(lights)
-    creative_lights = _detect_creative_color_sources(
-        linear,
-        source_weights,
-        (yy, xx),
-        prepared_fields=creative_fields,
+    return tuple(lights) + _detect_creative_color_sources(
+        linear, source_weights, (yy, xx), prepared_fields=creative_fields
     )
-    return physical_lights + creative_lights
 
 
 _PROBE_DIRECTIONS = (
@@ -1080,7 +921,7 @@ def analyze_scene(
         )
         for light in physical_components
     }
-    emissive_lights = tuple(light for light in physical_components if support[light] > EPSILON)
+    emissive_lights = physical_components
     broad_environment = not emissive_lights
     source_total = (
         float(np.sum(source_weights)) if measurements is None else measurements.source_total
@@ -1089,20 +930,7 @@ def analyze_scene(
     # Explicit emitters are meaningful in high-separation or low-key scenes.
     # Bright texture in daylight (foam, flowers, windows) belongs in the
     # environment probes instead of becoming four fake point lights.
-    isolated_emitters = (
-        len(emissive_lights) >= 2
-        and emissive_lights[0].emission_score >= 0.55
-        and emissive_lights[1].emission_score >= 0.55
-        and emissive_lights[1].intensity >= 0.45
-    )
-    if broad_environment:
-        maximum_explicit_lights = 1
-    elif isolated_emitters or separation >= 0.82 or (local_mean < 0.11 and separation >= 0.50):
-        maximum_explicit_lights = 4
-    elif separation >= 0.52:
-        maximum_explicit_lights = 2
-    else:
-        maximum_explicit_lights = 1
+    maximum_explicit_lights = 4
     if source_total <= EPSILON:
         light_x, light_y = 0.5, 0.2
         light_linear = np.array([1.0, 0.96, 0.9], dtype=np.float32)
@@ -1232,7 +1060,7 @@ def analyze_scene(
             x=float(light_x),
             y=float(light_y),
             color=light_display,
-            intensity=1.0,
+            intensity=emissive_lights[0].intensity if emissive_lights else 1.0,
             radius=float(source_size),
             confidence=float(confidence),
             emission_score=0.0
@@ -1240,17 +1068,8 @@ def analyze_scene(
             else emissive_lights[0].emission_score * primary_support,
         )
     ]
-    minimum_secondary_intensity = 0.27 if maximum_explicit_lights == 4 else 0.42
-    for candidate in emissive_lights[1:]:
-        candidate = replace(candidate, intensity=candidate.intensity * support[candidate])
-        if candidate.intensity < minimum_secondary_intensity:
-            continue
-        if all(
-            np.hypot(candidate.x - present.x, candidate.y - present.y) > 0.055 for present in lights
-        ):
-            lights.append(candidate)
-        if len(lights) >= maximum_explicit_lights:
-            break
+    for candidate in emissive_lights[1:maximum_explicit_lights]:
+        lights.append(replace(candidate, intensity=candidate.intensity * support[candidate]))
     probes = environment_probes
     if probes is None:
         probes = _sample_environment_probes(
@@ -1362,10 +1181,20 @@ def _pseudo_surface(
     )
     detail_height = cv2.GaussianBlur(broad_luma, (0, 0), sigmaX=max(1.2, min(alpha.shape) / 260))
     height = 0.76 * silhouette_height + 0.24 * detail_height
-    gx = cv2.Sobel(height, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(height, cv2.CV_32F, 0, 1, ksize=3)
-    strength = 5.5 * depth
-    nx, ny = -gx * strength, -gy * strength
+    # Height is dimensionless, but Sobel differences are per pixel. Express
+    # slope in the same surface coordinates at every input resolution.
+    strength = 5.5 * depth * (min(alpha.shape) / 256.0)
+    shape_x = cv2.Sobel(silhouette_height, cv2.CV_32F, 1, 0, ksize=3) * (0.76 * strength)
+    shape_y = cv2.Sobel(silhouette_height, cv2.CV_32F, 0, 1, ksize=3) * (0.76 * strength)
+    detail_x = cv2.Sobel(detail_height, cv2.CV_32F, 1, 0, ksize=3) * (0.24 * strength)
+    detail_y = cv2.Sobel(detail_height, cv2.CV_32F, 0, 1, ksize=3) * (0.24 * strength)
+    # Painted brightness is uncertain evidence of relief. Preserve small
+    # slopes, but smoothly bound strong albedo edges instead of creating a
+    # cliff through a face or across two differently colored fabrics.
+    detail_budget = max(0.35 * depth, EPSILON)
+    detail_scale = np.sqrt(1.0 + (detail_x * detail_x + detail_y * detail_y) / detail_budget**2)
+    nx = -shape_x - detail_x / detail_scale
+    ny = -shape_y - detail_y / detail_scale
     nz = np.ones_like(nx) * (0.82 + 0.45 * (1.0 - depth))
     norm = np.sqrt(nx * nx + ny * ny + nz * nz) + EPSILON
     return height * mask, nx / norm, ny / norm, nz / norm
@@ -1443,7 +1272,7 @@ def _light_vector(
     dx, dy = light_x - analysis.subject_x, light_y - analysis.subject_y
     direction_norm = max(float(np.hypot(dx, dy)), 0.12)
     lx, ly = dx / direction_norm, dy / direction_norm
-    lz = 0.72 + radius * 0.65
+    lz = 0.18 + radius * 0.90
     vector_norm = float(np.sqrt(lx * lx + ly * ly + lz * lz))
     return lx / vector_norm, ly / vector_norm, lz / vector_norm
 
@@ -1496,17 +1325,24 @@ def diffuse_scene_chroma_guard(analysis: SceneAnalysis) -> float:
     return float(np.clip(high_key * broad * uncertain * diffuse, 0.0, 1.0))
 
 
+def _incident_mid(adaptation, arithmetic):
+    """Retain compact light energy in dark scenes without a constant light floor."""
+    dark = np.clip((0.12 - adaptation) / 0.095, 0.0, 1.0)
+    dark = dark * dark * (3.0 - 2.0 * dark)
+    return np.clip(
+        0.82 * (adaptation + 0.65 * np.maximum(arithmetic - adaptation, 0.0) * dark), 0.0, 0.58
+    )
+
+
 def scene_target_mid(analysis: SceneAnalysis) -> float:
     """Return the palette-independent target midpoint for a scene analysis."""
 
-    nominal_target = float(np.clip(analysis.adaptation_luminance * 0.82 + 0.028, 0.018, 0.58))
-    nominal_exposure = float(
-        np.clip((nominal_target + 0.035) / (REFERENCE_ART_MID + 0.035), 0.18, 2.15)
-    )
+    nominal_target = float(_incident_mid(analysis.adaptation_luminance, analysis.local_luminance))
+    nominal_exposure = float(np.clip(nominal_target / REFERENCE_ART_MID, 0.0001, 2.15))
     guard = diffuse_scene_exposure_guard(analysis)
     corrected_exposure = nominal_exposure * (2.0 ** (-BROAD_DIFFUSE_MAX_STOPS * guard))
-    corrected_target = corrected_exposure * (REFERENCE_ART_MID + 0.035) - 0.035
-    return float(np.clip(corrected_target, 0.018, 0.58))
+    corrected_target = corrected_exposure * REFERENCE_ART_MID
+    return float(np.clip(corrected_target, 0.0, 0.58))
 
 
 def _material_light_response(linear_luma: np.ndarray) -> np.ndarray:
@@ -1610,7 +1446,7 @@ def relight_sprite(
     # A character should usually sit slightly above the local background, not
     # be driven to the value of the brightest windows or sky behind them.
     target_mid = scene_target_mid(analysis)
-    auto_exposure = np.clip((target_mid + 0.035) / (REFERENCE_ART_MID + 0.035), 0.18, 2.15)
+    auto_exposure = np.clip(target_mid / REFERENCE_ART_MID, 0.0001, 2.15)
     exposure = (auto_exposure**settings.auto_strength) * (2.0**settings.exposure_bias)
 
     ambient_chroma = _apply_warmth(
@@ -1696,7 +1532,7 @@ def relight_sprite(
             direction_norm = np.maximum(screen_distance_field, 0.12)
             pixel_lx = dx_field / direction_norm
             pixel_ly = dy_field / direction_norm
-            pixel_lz = np.full_like(pixel_lx, 0.72 + light.radius * 0.65)
+            pixel_lz = np.full_like(pixel_lx, 0.18 + light.radius * 0.90)
             vector_norm = (
                 np.sqrt(pixel_lx * pixel_lx + pixel_ly * pixel_ly + pixel_lz * pixel_lz) + EPSILON
             )
@@ -1777,7 +1613,7 @@ def relight_sprite(
     key_amount = settings.key_strength * confidence
     # Keep the mean close to one. Directional light models form rather than
     # simply multiplying an already bright anime palette into clipping.
-    diffuse = 0.73 + lambert * (0.22 + key_amount * 0.31)
+    diffuse = 0.22 + lambert * (0.22 + key_amount * 1.35)
 
     # A broad positional falloff stabilizes flat painted regions while all
     # coordinates remain relative to the moving subject in the full scene.
@@ -1800,9 +1636,17 @@ def relight_sprite(
     form_visibility = 0.38 + 0.62 * material_response
     diffuse = 1.0 + (diffuse - 1.0) * form_visibility
     diffuse_mean = float(np.sum(diffuse * visible_weight) / (np.sum(visible_weight) + EPSILON))
-    diffuse = np.clip(diffuse / max(diffuse_mean, EPSILON), 0.72, 1.32)
+    diffuse = np.clip(diffuse / max(diffuse_mean, EPSILON), 0.22, 2.2)
 
-    lit = linear * exposure * settings.ambient_strength * tint[None, None, :]
+    direct_fraction = lambert * (0.22 + key_amount * 1.35)
+    direct_fraction /= 0.22 + direct_fraction
+    direct_chroma = source_color_field / np.maximum(lambert[..., None], 0.001)
+    direct_tint = np.power(
+        np.clip(direct_chroma, 0.34, 2.85), settings.color_adaptation * settings.auto_strength
+    )
+    surface_tint = tint[None, None, :] * (1.0 - direct_fraction[..., None])
+    surface_tint += direct_tint * direct_fraction[..., None]
+    lit = linear * exposure * settings.ambient_strength * surface_tint
     lit *= diffuse[..., None]
 
     # Cool/colored shadows and the spatially varying mix of all source colors.
@@ -1810,8 +1654,6 @@ def relight_sprite(
     shadow_mix *= 0.34 + 0.66 * material_response
     shadow_mix = shadow_mix[..., None]
     lit *= (1.0 - shadow_mix) + shadow_mix * np.clip(shadow_chroma, 0.55, 1.75)[None, None, :]
-    source_mix = np.clip((lambert - 0.52) * 0.34 * key_amount, 0.0, 0.32)[..., None]
-    lit *= (1.0 - source_mix) + source_mix * np.clip(source_color_field, 0.58, 2.0)
 
     # Eight environment lobes approximate colored hemispherical irradiance.
     if settings.probe_strength > 0 and analysis.environment_probes:
@@ -1869,7 +1711,7 @@ def relight_sprite(
     if settings.specular_strength > 0:
         dielectric = np.clip(0.18 + (1.0 - _saturation(srgb)) * 0.82, 0.18, 1.0)
         material = dielectric * (0.14 + 0.86 * material_response) * mask
-        lit += specular_field * material[..., None] * settings.specular_strength * 0.13
+        lit += specular_field * material[..., None] * settings.specular_strength * 0.13 * exposure
 
     distance = cv2.distanceTransform((alpha > 0.02).astype(np.uint8), cv2.DIST_L2, 5)
     edge_width = max(2.0, min(sprite.width, sprite.height) * 0.018)
@@ -1886,7 +1728,7 @@ def relight_sprite(
     # DDLC midtones untouched while retaining a restrained dielectric glint on
     # genuinely dark paint.  It depends only on local linear albedo.
     rim *= 0.12 + 0.88 * material_response
-    lit += rim[..., None] * np.clip(light_chroma, 0.55, 2.2)[None, None, :] * 0.52
+    lit += rim[..., None] * np.clip(light_chroma, 0.55, 2.2)[None, None, :] * 0.52 * exposure
 
     # Bring actual nearby scene color into semi-transparent and silhouette pixels.
     if environment_patch is not None and settings.wrap_strength > 0:

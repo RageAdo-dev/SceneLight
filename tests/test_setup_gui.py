@@ -562,7 +562,10 @@ def test_player_components_do_not_make_the_optional_preview_appear_installed(mon
         lambda name: None if name in {"OpenGL", "PySide6.QtOpenGLWidgets"} else object(),
     )
     assert setup_gui.missing_dependencies() == []
-    assert setup_gui.missing_preview_dependencies() == ["PySide6==6.9.2", "PyOpenGL==3.1.9"]
+    assert setup_gui.missing_preview_dependencies() == [
+        "PySide6-Essentials==6.9.2",
+        "PyOpenGL==3.1.9",
+    ]
 
 
 def test_missing_parent_of_preview_module_is_reported_as_missing(monkeypatch):

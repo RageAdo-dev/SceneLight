@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 
 from scenelight.preview.exporter import (
+    GIFWriter,
     MP4Writer,
     composite_gif_timeline,
     export_extension,
@@ -19,6 +20,40 @@ from scenelight.preview.temporal import (
     interpolated_scene,
     interpolated_transport,
 )
+
+
+def test_gif_stream_releases_frames_and_keeps_individual_palettes(tmp_path):
+    import weakref
+
+    destination = tmp_path / "stream.gif"
+    with GIFWriter(destination, (70, 130, 50)) as writer:
+        for color in ((220, 25, 40), (15, 210, 60), (40, 65, 230)):
+            frame = np.full((32, 48, 3), color, np.uint8)
+            reference = weakref.ref(frame)
+            writer.write(frame)
+            del frame
+            assert reference() is None
+    with Image.open(destination) as result:
+        assert result.n_frames == 3
+        for index, duration in enumerate((70, 130, 50)):
+            result.seek(index)
+            assert result.info["duration"] == duration
+            assert (
+                result.convert("RGB").getpixel((20, 20))
+                == ((220, 25, 40), (15, 210, 60), (40, 65, 230))[index]
+            )
+
+
+def test_incomplete_gif_preserves_existing_export(tmp_path):
+    import pytest
+
+    destination = tmp_path / "old.gif"
+    destination.write_bytes(b"previous export")
+    with pytest.raises(ValueError, match="Incomplete"):
+        with GIFWriter(destination, (100, 100)) as writer:
+            writer.write(np.zeros((24, 32, 3), np.uint8))
+    assert destination.read_bytes() == b"previous export"
+    assert not list(tmp_path.glob("*.partial"))
 
 
 def test_transport_interpolates_every_encoded_channel() -> None:
@@ -248,3 +283,54 @@ def test_mp4_writer_streams_gpu_frames_to_a_decodable_video(tmp_path: Path) -> N
         assert decoded is not None
     finally:
         capture.release()
+
+
+def test_short_audio_cannot_truncate_exported_video_frames(tmp_path):
+    import subprocess
+
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    source = tmp_path / "short-audio.m4a"
+    subprocess.run(
+        [
+            get_ffmpeg_exe(),
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.1",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        check=True,
+    )
+    destination = tmp_path / "longer-video.mp4"
+    with MP4Writer(destination, source, (64, 36), 10.0) as writer:
+        for index in range(20):
+            writer.write(np.full((36, 64, 3), index * 10, np.uint8))
+    capture = cv2.VideoCapture(str(destination))
+    count = 0
+    while capture.read()[0]:
+        count += 1
+    capture.release()
+    assert count == 20
+
+
+def test_video_encoder_start_failure_preserves_previous_export(tmp_path, monkeypatch):
+    import pytest
+
+    from scenelight.preview import exporter
+
+    destination = tmp_path / "previous.mp4"
+    destination.write_bytes(b"previous export")
+
+    def fail(*args, **kwargs):
+        raise OSError("encoder unavailable")
+
+    monkeypatch.setattr(exporter.subprocess, "Popen", fail)
+    with pytest.raises(OSError, match="encoder unavailable"):
+        MP4Writer(destination, tmp_path / "source.mp4", (64, 36), 10)
+    assert destination.read_bytes() == b"previous export"
+    assert list(tmp_path.iterdir()) == [destination]

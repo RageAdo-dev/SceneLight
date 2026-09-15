@@ -4,6 +4,10 @@
 
 ### Lighting and playback
 
+- Surface direction is consistent across sprite resolutions, with bounded relief at painted color boundaries.
+- Side lights produce a stronger difference between lit and shaded surfaces.
+- Overlapping light regions prevent jumps when bright areas split or merge.
+- Dark scenes retain their darkness; compact lights still contribute energy and real flashes remain immediate.
 - Background lighting follows character movement, scene changes and supported animations.
 - Supported movies prepare lighting for every frame once, then reuse it during playback.
 - Live analysis handles backgrounds changed by code or visual effects.
@@ -18,7 +22,9 @@
 
 ### Setup and author tools
 
-- One launcher opens Setup and Preview & Calibrator.
+- SceneLight.exe opens Setup and Preview with a bundled Windows runtime.
+- Preview exports at 720p, 1080p or 4K, with settings recorded beside the file.
+- GIF export retains one frame at a time; short audio tracks no longer truncate video exports.
 - Install in place or create a separate playable copy. Review character tags before installation.
 - Updates reuse valid analysis, rebuild changed inputs and preserve recovery data.
 - Large captures resume after interruption and limit workers according to available memory.
@@ -31,7 +37,7 @@
 - Shorter installation and author guides, with rendered surface-map examples.
 - A lossless 60 fps movement demo.
 
-Form-map version 5 requires rebuilding older maps through **Update SceneLight**.
-The animation correction also refreshes scene lighting and prepared movies; valid surface maps are reused.
+Form-map version 6 requires rebuilding older maps through **Update SceneLight**.
+This update also refreshes scene lighting and prepared movies.
 
 [Development history](docs/history/development-changelog.md) · [Compatibility and validation](docs/BETA_VALIDATION.md)

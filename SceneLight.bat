@@ -2,6 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
+if exist "%~dp0SceneLight.exe" (
+  start "" "%~dp0SceneLight.exe"
+  exit /b 0
+)
+
 set "SCENELIGHT_APP=%~dp0_scenelight"
 if not exist "%SCENELIGHT_APP%\scenelight_setup.pyw" set "SCENELIGHT_APP=%~dp0"
 

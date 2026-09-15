@@ -1,9 +1,14 @@
 # Third-party notices
 
 SceneLight uses NumPy, Pillow, OpenCV, psutil, PySide6-Essentials and imageio-ffmpeg.
-Preview also uses PySide6 and PyOpenGL; optional NVIDIA acceleration uses CuPy.
+Preview also uses PyOpenGL; optional NVIDIA acceleration uses CuPy.
 Their licenses are separate from SceneLight's MIT license. Binary distributions
 must retain the applicable notices, including those for FFmpeg.
+
+Windows packages also include CPython and Tcl/Tk. Their notices remain under
+`_scenelight/python`, including `LICENSE.txt` and the Tcl/Tk license files.
+Python dependency notices remain in their installed package and `.dist-info`
+directories under `_scenelight/python/Lib/site-packages`.
 
 ## Ren'Py
 

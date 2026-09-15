@@ -25,6 +25,10 @@ REQUIRED_MODULES = {
 
 
 def _private_pythonw() -> Path | None:
+    from scenelight.desktop import bundled_python
+
+    if bundled_python() is not None:
+        return None
     override = os.environ.get("SCENELIGHT_COMPONENT_ROOT")
     if override:
         environment = Path(override).expanduser()

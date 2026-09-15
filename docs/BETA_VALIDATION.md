@@ -3,9 +3,27 @@
 Coverage updated on 15 September 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
-## Current validation
+## Current local candidate
 
-The local suite passed **618 tests**, with no failures or skips. All six
+The local suite passed **629 tests**, with no failures or skips. Regression checks
+cover side-light reversal, consistent normals across sprite sizes, bounded painted
+relief, dark-scene response and continuity when bright regions meet. Fresh Ren'Py
+7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
+save/load using form-map v6; original authored files were preserved.
+
+The actual Preview export path retained all 1,799 frames of the colored-background
+clip and all 900 storm frames at 1080p and their original frame rates. The Windows
+launcher has been checked with an isolated bundled interpreter; this is not a
+clean Windows virtual-machine test.
+
+Repeated before/after analysis runs on the development PC measured approximately
+4.0–4.2 ms before and 3.27–3.29 ms after. GPU analysis render targets decreased
+from 191 to 160. These short runs measure analysis rather than total game frame
+rate, utilization or power. The older Radeon host was unreachable for this revision.
+
+## Previous published validation
+
+The preceding local suite passed **618 tests**. All six
 [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939242237)
 passed for commit `a5d21bf`: each Windows test job passed 591 tests and skipped 27;
 each Linux test job passed 590 and skipped 28. Hosted runners lack the graphics
@@ -33,7 +51,7 @@ adjustment. It does not hold lighting fixed or reduce the source frame rate.
 | Native engines | Opening-story checks on 7.4.8 and 8.5.3; animation/save-load labs on 7.7.1 and 8.5.3 |
 | Legacy games | A disposable Ren'Py 6 mod through the 7.7.1 compatibility runtime |
 | Animation | GIF playback/export in Preview; ATL and VP9/WebM playback in Ren'Py |
-| Surface maps | Smooth silhouette regions, retained painted detail, v5 cache migration |
+| Surface maps | Previous v5 migration; current v6 resolution and painted-relief checks |
 | Source protection | Original hashes and isolated save sentinels preserved |
 
 Fourteen of fifteen games in the regression corpus passed automatic install and

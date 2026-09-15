@@ -93,6 +93,31 @@ def _lamps(amount):
     return pixels
 
 
+def test_side_light_illuminates_facing_surface_and_swaps_with_direction(renderer):
+    from scenelight.calibration import Calibration
+    from scenelight.engine import _srgb_to_linear
+
+    y, x = np.mgrid[:144, :256]
+    renderer.set_placement(0.5, 1.0, 0.92)
+    renderer.set_calibration(Calibration(specular_strength=0, rim_strength=0, wrap_strength=0))
+    renderer.set_live_analysis_enabled(True)
+    halves = []
+    try:
+        for cx in (0.12, 0.88):
+            glow = np.exp(-(((x / 256 - cx) / 0.055) ** 2 + ((y / 144 - 0.24) / 0.08) ** 2))
+            pixels = np.full((144, 256, 4), 255, np.uint8)
+            pixels[..., :3] = (8 + 247 * glow[..., None]).astype(np.uint8)
+            renderer.set_background_frame(pixels)
+            frame = _srgb_to_linear(renderer.render_rgba((640, 360))[..., :3] / 255.0)
+            halves.append((frame[65:100, 270:290].mean(), frame[65:100, 350:370].mean()))
+        # A uniform tint cannot pass: the brighter surface must swap sides.
+        assert halves[0][0] > halves[0][1] * 1.5, halves
+        assert halves[1][1] > halves[1][0] * 1.5, halves
+    finally:
+        renderer.set_calibration(Calibration())
+        renderer.set_placement(0.65, 1.0, 0.92)
+
+
 def test_video_flag_does_not_remeter_complete_frame_fields(renderer):
     renderer.set_live_analysis_enabled(True)
     renderer.set_background_frame(_lamps(0.6))
@@ -101,6 +126,22 @@ def test_video_flag_does_not_remeter_complete_frame_fields(renderer):
     renderer.set_live_background(True)
     video = renderer.render_rgba((640, 360))
     np.testing.assert_array_equal(video, still)
+
+
+def test_dark_scene_has_no_constant_fill_and_a_flash_reaches_the_sprite(renderer):
+    renderer.set_live_analysis_enabled(True)
+    black = np.zeros((144, 256, 4), np.uint8)
+    black[..., 3] = 255
+    levels = []
+    for value in (0, 4, 8, 16, 255, 0):
+        pixels = black.copy()
+        pixels[..., :3] = value
+        renderer.set_background_frame(pixels)
+        frame = renderer.render_rgba((640, 360))
+        levels.append(float(frame[110:200, 395:425, :3].mean()))
+    assert levels[0] < 5, levels
+    assert all(a < b for a, b in zip(levels[:4], levels[1:5])), levels
+    assert levels[-1] == levels[0], levels
 
 
 def test_prepared_replay_matches_live_and_preserves_flashes_and_cuts(renderer, tmp_path):

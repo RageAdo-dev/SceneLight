@@ -2,6 +2,7 @@ param(
     [string]$PythonInstaller,
     [string]$Wheelhouse,
     [string]$CompatibilityRuntime,
+    [string]$DesktopRuntime,
     [switch]$Source
 )
 
@@ -110,6 +111,8 @@ if ($Source) {
     }
     $payloadRoot = $packageRoot
 } else {
+    Copy-Item -LiteralPath (Join-Path $root "src\scenelight\assets\scenelight-desktop.exe") `
+        -Destination (Join-Path $packageRoot "SceneLight.exe")
     foreach ($item in @(
         "SceneLight.bat", "scenelight.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
         "CONTRIBUTING.md", "SECURITY.md", "VALIDATION.md", "VALIDATION_RESULTS.md", "CHANGELOG.md"
@@ -134,6 +137,20 @@ if ($Source) {
     New-Item -ItemType Directory -Path $payloadTools -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $root "tools\bootstrap_python.ps1") `
         -Destination $payloadTools -Force
+    $desktopDestination = Join-Path $payloadRoot "python"
+    if ([string]::IsNullOrWhiteSpace($DesktopRuntime)) {
+        & python (Join-Path $root "tools\bundle_runtime.py") $desktopDestination
+        if ($LASTEXITCODE -ne 0) { throw "Desktop runtime build failed." }
+    } else {
+        $desktopSource = (Resolve-Path -LiteralPath $DesktopRuntime).Path
+        $record = Get-Content -LiteralPath (Join-Path $desktopSource "scenelight-runtime.json") -Raw | ConvertFrom-Json
+        $requirements = [IO.File]::ReadAllText((Join-Path $root "requirements-preview.txt"))
+        if ($record.requirements.Replace("`r`n", "`n") -ne $requirements.Replace("`r`n", "`n") -or
+            -not (Test-Path -LiteralPath (Join-Path $desktopSource "pythonw.exe"))) {
+            throw "Desktop runtime does not match the current requirements."
+        }
+        Copy-Item -LiteralPath $desktopSource -Destination $desktopDestination -Recurse
+    }
 }
 
 if ($offline) {

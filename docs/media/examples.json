@@ -1,9 +1,9 @@
 {
   "source": "Ren'Py tutorial/game/images/eileen happy.png",
   "source_sha256": "536f034b266f735c23a6dba1267d0e5e25f1bb86f26788919b98bf55730288b1",
-  "shader_sha256": "9c582c72f819c3fecb3b88fd1a952db9a7407f829c42b43e203e4eb03783daac",
+  "shader_sha256": "911e40ee5f3a4f07e6e94c25cf73fd96867a04ebb088e35c90b7dc5873ee62bd",
   "form": {
-    "version": 5,
+    "version": 6,
     "source_size": [
       320,
       720
@@ -31,7 +31,7 @@
     "surface_depth": 0.72,
     "seed": 947
   },
-  "comparison_changed_pixels": 146139,
+  "comparison_changed_pixels": 146404,
   "animation_frames": 240,
   "animation_fps": 60,
   "animation_duration_ms": 4000,
@@ -41,8 +41,8 @@
   ],
   "encodings": {
     "moving-light.webp": {
-      "bytes": 51713434,
-      "sha256": "114a90a9d22f67d30e9490cf4f330e89a751db2e419d66e9bd124c97414c0845",
+      "bytes": 49122558,
+      "sha256": "5f75c7a9658289d2932394c796dda47975b56e229eddcf0014cc4057ce04841c",
       "frames": 240,
       "duration_ms": 3999,
       "frame_durations_ms": [
@@ -51,14 +51,14 @@
       ]
     },
     "moving-light.mp4": {
-      "bytes": 912598,
-      "sha256": "7d94284bb939f72e132be28e6d20cffac84b6abafa98f41d19b1e0a45ae15244",
+      "bytes": 876431,
+      "sha256": "585227d243c8c957b85f18e60a556c1a57e3056aba20177ff8c960dd89f382a2",
       "frames": 240,
       "fps": 60
     },
     "moving-light.gif": {
-      "bytes": 26771504,
-      "sha256": "8dc47dbefe8b056d40c4d2b66f64cb109cc6b04d61b36ad048fe23a850c2cfee",
+      "bytes": 29487209,
+      "sha256": "4061a98443fd0bba6aa780243e9027e12ab0fa69484bd0c6a0c06bf9be950617",
       "frames": 200,
       "duration_ms": 4000,
       "frame_durations_ms": [
@@ -66,8 +66,8 @@
       ]
     },
     "moving-light-preview.webp": {
-      "bytes": 4153058,
-      "sha256": "2bf99665c884bb7320c0a9cd146bcc556ba011e8a5237d340eb420b6fa29ba46",
+      "bytes": 3796598,
+      "sha256": "6a90239735476b37c8e80a8da679a9b280c8980ce1f7ec7b0b7ecc39f82db8b2",
       "frames": 240,
       "duration_ms": 3999,
       "frame_durations_ms": [

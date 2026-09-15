@@ -26,6 +26,11 @@ Run on Windows from the repository root:
 .\tools\build_release_zip.ps1 -Source
 ```
 
+Build with Python 3.11 including Tcl/Tk. The Windows package contains
+`SceneLight.exe` and a private interpreter with pinned dependencies. The source
+archive retains the Python and batch entry points. `-DesktopRuntime <directory>`
+can reuse a runtime built by `tools/bundle_runtime.py`; its requirements must match.
+
 For an offline package, also provide `-PythonInstaller <installer>` and
 `-Wheelhouse <pinned-wheels>`. The builder must reject incomplete bundles, invalid
 Python signatures and incompatible runtime versions. Distribute the ZIP checksums
@@ -52,6 +57,17 @@ valid package; use a permanent release asset for public distribution. Public
 visibility and publication remain separate owner decisions.
 
 ## Native launcher
+
+The desktop entry point is separate from the installed-game launcher. Rebuild
+its checked-in binary with MinGW-w64:
+
+```text
+gcc -O2 -Wall -Wextra -Werror -municode -mwindows -static-libgcc -s tools/desktop_launcher.c -o src/scenelight/assets/scenelight-desktop.exe -luser32
+```
+
+Run `SceneLight.exe --diagnostics <report.json>` from a complete package to check
+the bundled interpreter, GUI imports, Tcl/Tk and dependency routing. Test Setup
+and Preview interactively as well.
 
 Build from a Visual C++ Developer Command Prompt:
 

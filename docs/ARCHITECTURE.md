@@ -19,6 +19,7 @@ flowchart LR
 | Module | Responsibility |
 | --- | --- |
 | `setup_gui.py` | Installation, character review, components and updates |
+| `desktop.py` | Windows EXE entry point and bundled runtime selection |
 | `project.py`, `capture.py` | Source discovery and renderer-backed asset capture |
 | `engine.py`, `form_maps.py` | CPU reference analysis and sprite surface reconstruction |
 | `builder.py`, `cuda_backend.py` | Installation data, offline transport and optional CUDA acceleration |
@@ -64,8 +65,9 @@ separate contracts; changing progress text does not invalidate captured pixels.
 ## Surface maps
 
 `form_maps.py` reconstructs height from the silhouette and painted shading.
-Form-map version 5 smooths the broad silhouette separately from finer relief,
-then derives normals and occlusion. The original color image remains the material
+Form-map version 6 expresses slopes in normalized surface coordinates so larger
+sprites do not become flatter. It bounds the relief inferred from painted color
+edges while retaining shallow detail. The original color image remains the material
 input. Installed game maps have a 512-pixel maximum dimension; source dimensions
 and pixel hashes are recorded separately. Preview can analyze the original import
 size. Both use the same reconstruction algorithm.
@@ -90,11 +92,13 @@ accelerate supported stages; a raster implementation remains available. Capabili
 checks validate the required float rendering operations before activation.
 
 Transport uses 26 planes over a 16×9 placement grid. Live transport also carries a
-metadata row. Light slots have a consistent meaning across the scene, and live
-history stabilizes near-tied source ordering without delaying current light values.
+metadata row. Four overlapping spatial regions integrate the source field with
+weights that sum to one per pixel. Their identities remain fixed when bright
+regions split, merge or exchange brightness.
 The secondary slots blend continuously between physical lights and colored-light
-families. Plane 2 stores the blend in green and a format marker in blue; the shader
-also accepts older fields. This keeps the existing texture and varying counts.
+families. Plane 2 stores square-root-encoded target brightness in red, the blend
+in green and a 191/255 format marker in blue. This retains dark-scene precision.
+The shader also accepts older linear fields. Texture and varying counts are unchanged.
 See [light continuity](live-continuity.md).
 
 With the default `scene_analysis: live`, supported movies are prepared frame by

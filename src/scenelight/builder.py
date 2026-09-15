@@ -34,6 +34,7 @@ from .engine import (
     _detect_source_components,
     _display_chromaticity,
     _environment_probe_specs,
+    _incident_mid,
     _linear_to_srgb,
     _luminance,
     _placement_region,
@@ -61,7 +62,7 @@ TRANSPORT_CHARACTER_HEIGHT = 0.92
 TRANSPORT_LIGHT_BASE = 3
 TRANSPORT_PROBE_BASE = 15
 TRANSPORT_PROBE_SCALAR_BASE = 23
-TRANSPORT_CACHE_VERSION = "13-continuous-light-slots"
+TRANSPORT_CACHE_VERSION = "14-spatial-radiance-basis"
 RUNTIME_MANIFEST_VERSION = 8
 FORM_CHECKPOINT_INTERVAL = 16
 MIB = 1024**2
@@ -626,8 +627,8 @@ def _encode_transport_analyses(
             analysis.local_saturation,
             analysis.local_luminance,
         )
-        values[2, row, column, 0] = scene_target_mid(analysis) / 0.58
-        values[2, row, column, 1:3] = (layout_mix, 1.0)
+        values[2, row, column, 0] = math.sqrt(scene_target_mid(analysis) / 0.58)
+        values[2, row, column, 1:3] = (layout_mix, 0.75)
         chroma_destinations.append((1, row, column))
         chroma_colors.append(analysis.ambient_color)
 
@@ -715,6 +716,8 @@ def _transport_light_layout(transport: np.ndarray) -> str:
         )
     else:
         raise ValueError(f"Unexpected transport shape: {array.shape}")
+    if np.all(planes[:, 2, :, 2] == 191):
+        return "spatial-radiance-v3"
     if np.all(planes[:, 2, :, 2] == 255):
         return "continuous-light-slots-v2"
     for light_index in range(1, 4):
@@ -921,17 +924,17 @@ def _scene_maps(
     # compressed positional drift. Actual emitters still affect direction,
     # color, and key strength through the independently classified field below.
     global_target = scene_target_mid(analysis)
-    nominal_target = np.clip(adaptation_field * 0.82 + 0.028, 0.018, 0.58)
+    nominal_target = _incident_mid(adaptation_field, ambient_luma)
     nominal_exposure = np.clip(
-        (nominal_target + 0.035) / (REFERENCE_ART_MID + 0.035),
-        0.18,
+        nominal_target / REFERENCE_ART_MID,
+        0.0001,
         2.15,
     )
     exposure_guard = diffuse_scene_exposure_guard(analysis)
     corrected_exposure = nominal_exposure * (2.0 ** (-BROAD_DIFFUSE_MAX_STOPS * exposure_guard))
     target_mid = np.clip(
-        corrected_exposure * (REFERENCE_ART_MID + 0.035) - 0.035,
-        0.018,
+        corrected_exposure * REFERENCE_ART_MID,
+        0.0,
         0.58,
     )
     yy, xx = np.mgrid[0 : TILE_SIZE[1], 0 : TILE_SIZE[0]]

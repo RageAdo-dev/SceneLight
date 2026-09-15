@@ -25,9 +25,9 @@ Record Windows, Python, SceneLight, Ren'Py, GPU/driver and renderer versions.
 Then check:
 
 1. The extracted package opens without a development checkout or preinstalled Python.
-2. Setup explains required components, asks before installation, and shows progress and the dependency command.
-3. Python and Ren'Py downloads pass their pinned checksum checks; the Python installer passes its signature check.
-4. Components install under SceneLight's application-data folder without administrator access, PATH changes, services or startup tasks.
+2. The Windows EXE uses its bundled components, even if an unrelated Python installation exists. Optional component installation requires confirmation.
+3. Retain runtime and dependency licenses. For source/bootstrap packages, verify download checksums and the Python installer's signature.
+4. First launch needs no administrator access, PATH changes, services or startup tasks. Optional components remain isolated from system Python.
 5. Static scanning preserves the selected source. Renderer-backed discovery runs in a working copy and completes preflight before long analysis.
 6. A broken renderer produces a clear error and leaves the source unchanged. With virtual graphics disabled, expect a capability check, not CPU-only live rendering.
 7. Both **Add to this game** and **Create separate copy** work and report their destination correctly.

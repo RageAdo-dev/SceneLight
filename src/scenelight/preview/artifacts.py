@@ -45,8 +45,8 @@ from .hardware import (
     detect_hardware_profile,
 )
 
-SCENE_CACHE_VERSION = b"scenelight-gpu-studio-scene-v16-continuous-light-slots\0"
-TEMPORAL_CACHE_VERSION = b"scenelight-gpu-studio-temporal-scene-v13-continuous-light-slots\0"
+SCENE_CACHE_VERSION = b"scenelight-gpu-studio-scene-v17-spatial-radiance-basis\0"
+TEMPORAL_CACHE_VERSION = b"scenelight-gpu-studio-temporal-scene-v14-spatial-radiance-basis\0"
 FORM_CACHE_VERSION = f"scenelight-gpu-studio-form-v{FORM_MAP_VERSION}\0".encode()
 # Stable namespace for the v8 derived-map schema. It intentionally does not
 # follow later shader-only edits: scene/form analysis remains reusable when a

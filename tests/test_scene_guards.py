@@ -16,6 +16,30 @@ from scenelight.engine import (
 )
 
 
+def test_touching_bright_regions_do_not_jump_the_directional_field():
+    from scenelight.engine import _detect_source_components, _light_vector
+
+    scene = SimpleNamespace(subject_x=0.5, subject_y=0.7)
+    normals = np.array([[-0.8, 0, 0.6], [0.8, 0, 0.6], [0, -0.8, 0.6]])
+    radiance = np.full((72, 128, 3), 0.7, np.float32)
+    responses = []
+    for bridge in (0.03499, 0.03501):
+        weights = np.zeros((72, 128), np.float32)
+        weights[20:36, 16:32] = 1
+        weights[20:36, 88:104] = 1
+        weights[26:29, 32:88] = bridge
+        lights = [v for v in _detect_source_components(radiance, weights) if not v.creative_only]
+        response = np.zeros(3)
+        total = 0.0
+        for light in lights:
+            weight = light.intensity * light.confidence
+            direction = _light_vector(light.x, light.y, scene, light.radius)
+            response += np.maximum(normals @ direction, 0) * weight
+            total += weight
+        responses.append(response / total)
+    np.testing.assert_allclose(responses[0], responses[1], atol=0.001)
+
+
 def test_reflected_light_keeps_its_direction_across_emission_classification():
     background = Image.new("RGB", (128, 72), (60, 65, 55))
     ImageDraw.Draw(background).rectangle((12, 8, 30, 25), fill=(210, 210, 205))

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -43,7 +44,7 @@ from ..calibration import (
     profile_path,
     save_profile,
 )
-from ..prepared import engine_identity
+from ..prepared import engine_identity, source_identity
 from ..runtime.prepared import Reader as PreparedReader
 from .artifacts import (
     ArtifactCache,
@@ -52,7 +53,7 @@ from .artifacts import (
     TemporalSceneArtifacts,
 )
 from .calibration_dialog import CalibrationDialog
-from .exporter import MP4Writer, composite_gif_timeline, export_extension, save_gif
+from .exporter import GIFWriter, MP4Writer, composite_gif_timeline, export_extension
 from .gpu_view import SceneLightGPUView
 from .media import MediaClip, MediaFrame, environment_wrap
 from .playback import VideoPlayback
@@ -1303,6 +1304,17 @@ class MainWindow(QMainWindow):
         sprite_media = self._sprite_media
         if media is None or sprite_media is None:
             return
+        sizes = {
+            "1080p (1920 × 1080)": (1920, 1080),
+            "720p (1280 × 720)": (1280, 720),
+            "4K (3840 × 2160)": (3840, 2160),
+        }
+        resolution, accepted = QInputDialog.getItem(
+            self, "Export", "Resolution", list(sizes), 0, False
+        )
+        if not accepted:
+            return
+        size = sizes[resolution]
         extension = export_extension(media.kind, sprite_media.kind)
         suggested = self._background_path.with_name(
             f"{self._background_path.stem}_{self._sprite_path.stem}_gpu_relit{extension}"
@@ -1314,7 +1326,7 @@ class MainWindow(QMainWindow):
         }
         selected, _filter = QFileDialog.getSaveFileName(
             self,
-            "Export full-resolution composite",
+            "Export composite",
             str(suggested),
             filters[extension],
         )
@@ -1325,9 +1337,29 @@ class MainWindow(QMainWindow):
             destination = destination.with_suffix(extension)
         try:
             if extension == ".png":
-                self._view.export_png(destination)
+                self._view.export_png(destination, size)
             else:
-                self._export_animation(destination)
+                self._export_animation(destination, size)
+            record = {
+                "shader_sha256": self._view.shader_sha256,
+                "analysis_sha256": engine_identity(),
+                "background_sha256": source_identity(self._background_path),
+                "sprite_sha256": source_identity(self._sprite_path),
+                "size": list(size),
+                "source_frames": media.frame_count,
+                "source_fps": media.fps,
+                "calibration": self._view._calibration.as_dict(),
+                "strength": self._view._strength,
+                "placement": [
+                    self._view._horizontal,
+                    self._view._baseline,
+                    self._view._character_height,
+                ],
+                "form_version": self._view._form_artifacts.metadata["version"],
+            }
+            destination.with_suffix(destination.suffix + ".json").write_text(
+                json.dumps(record, indent=2) + "\n", encoding="utf-8"
+            )
         except InterruptedError:
             self.statusBar().showMessage("Animation export cancelled")
             return
@@ -1336,7 +1368,7 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Saved {destination}")
 
-    def _export_animation(self, destination: Path) -> None:
+    def _export_animation(self, destination: Path, size: tuple[int, int] = (1920, 1080)) -> None:
         assert self._background_path is not None
         assert self._sprite_path is not None
         self._exporting_animation = True
@@ -1518,7 +1550,7 @@ class MainWindow(QMainWindow):
                         sprite_frame.rgba,
                         form_by_frame[sprite_frame.index],
                     )
-                    write_frame(self._view.render_rgba())
+                    write_frame(self._view.render_rgba(size))
                     completed += 1
                     progress.setValue(completed)
                     progress.setLabelText(
@@ -1530,14 +1562,13 @@ class MainWindow(QMainWindow):
                 with MP4Writer(
                     destination,
                     background.source,
-                    (1280, 720),
+                    size,
                     background.fps,
                 ) as writer:
                     render_frames(writer.write)
             else:
-                gif_frames: list[np.ndarray] = []
-                render_frames(gif_frames.append)
-                save_gif(destination, gif_frames, timeline_durations)
+                with GIFWriter(destination, timeline_durations) as writer:
+                    render_frames(writer.write)
         finally:
             export_cancel.set()
             if progress is not None:

@@ -1966,7 +1966,7 @@ init -50 python:
                     * (0.32 + 0.68 * color.a)
                     * positional_falloff
                     * enabled;
-                float elevation = 0.72 + data.z * 0.65;
+                float elevation = 0.18 + data.z * 0.90;
                 vec2 center_delta = data.xy - v_sc_center;
                 float center_distance = length(center_delta);
                 vec2 center_direction = center_delta / max(center_distance, 0.12);
@@ -2124,7 +2124,7 @@ init -50 python:
                 float distance_to_light = length(delta);
                 vec2 direction = delta / max(distance_to_light, 0.12);
                 direction += fallback_direction * step(distance_to_light, 0.0001) * 0.0001;
-                return normalize(vec3(direction, 0.72 + data.z * 0.65));
+                return normalize(vec3(direction, 0.18 + data.z * 0.90));
             }
 
             float scenelight_filtered_lambert(
@@ -2322,9 +2322,15 @@ init -50 python:
             float local_contrast = mix(u_sc_local_contrast, transport_scalar.r * 2.0, transport_mix);
             float local_saturation = mix(u_sc_local_saturation, transport_scalar.g, transport_mix);
             float local_luminance = mix(u_sc_local_luminance, transport_scalar.b, transport_mix);
+            // New fields encode sqrt(exposure) to retain dark-scene precision.
+            // Older installed fields retain their original linear decoding.
+            float target_sample = transport_global_extra.r;
+            if (transport_global_extra.b > 0.5 && transport_global_extra.b < 0.9) {
+                target_sample *= target_sample;
+            }
             float transported_target_mid = mix(
                 irradiance_sample.a * u_sc_target_range,
-                transport_global_extra.r * u_sc_target_range,
+                target_sample * u_sc_target_range,
                 transport_mix
             );
             // Only the legacy static-field fallback needs local frame metering.
@@ -2492,7 +2498,7 @@ init -50 python:
             vec2 primary_ray_direction = normalize(sc_light0_data.xy - v_sc_center + vec2(0.00001));
             float primary_ray_elevation = normalize(vec3(
                 primary_ray_direction,
-                0.72 + sc_light0_data.z * 0.65
+                0.18 + sc_light0_data.z * 0.90
             )).z;
             float ray_shadow = 0.0;
             if (sc_light0_extra.y > 0.5 && u_sc_calibration2.x > 0.0001) {
@@ -2510,7 +2516,7 @@ init -50 python:
             vec2 secondary_ray_direction = normalize(sc_light1_data.xy - v_sc_center + vec2(0.00001));
             float secondary_ray_elevation = normalize(vec3(
                 secondary_ray_direction,
-                0.72 + sc_light1_data.z * 0.65
+                0.18 + sc_light1_data.z * 0.90
             )).z;
             float secondary_ray_shadow = 0.0;
             if (sc_light1_extra.y > 0.5 && u_sc_calibration2.x > 0.0001) {
@@ -2596,7 +2602,7 @@ init -50 python:
                 + sc_height_dependency
                 + dot(sc_screen_dependency, vec2(1.0))
                 + dot(sc_transport_dependency, vec4(1.0));
-            float scene_exposure = clamp((target_mid + 0.035) / (u_sc_reference_mid + 0.035), 0.18, 2.15);
+            float scene_exposure = clamp(target_mid / u_sc_reference_mid, 0.0001, 2.15);
             float auto_amount = u_sc_calibration0.x * u_sc_strength;
             // A Ren'Py matrixcolor outside this displayable is authored final
             // grading, not unlit material. Keep generated form and direction,
@@ -2635,8 +2641,11 @@ init -50 python:
             // broad-surface response so a complex silhouette cannot become
             // globally brighter merely because it has more reconstructed
             // normals facing the light.
-            float diffuse_span = 0.22 + key_amount * 0.31;
-            float form_light = 0.73 + lambert * diffuse_span;
+            // Share diffuse energy between ambient fill and directional light.
+            // The previous large constant floor overwhelmed normal incidence.
+            float diffuse_fill = 0.22;
+            float diffuse_span = 0.22 + key_amount * 1.35;
+            float form_light = diffuse_fill + lambert * diffuse_span;
             vec2 average_light_direction = normalize(
                 center_light_vector0.xy * base_light_weight0
                     + center_light_vector1.xy * base_light_weight1
@@ -2668,18 +2677,18 @@ init -50 python:
                     + response3 * base_light_weight3
             ) / total_light_weight;
             float expected_lambert = mix(0.72, response.r, step(0.5, u_sc_has_form));
-            float expected_form = 0.73 + expected_lambert * diffuse_span;
+            float expected_form = diffuse_fill + expected_lambert * diffuse_span;
             form_light /= max(expected_form, 0.001);
             float form_visibility = 0.38 + 0.62 * material_response;
             form_light = 1.0 + (form_light - 1.0) * form_visibility;
             if (u_sc_has_form > 0.5) {
                 float mean_after_visibility = 1.0
-                    + (0.73 * u_sc_mean_form_visibility + diffuse_span * response.g)
+                    + (diffuse_fill * u_sc_mean_form_visibility + diffuse_span * response.g)
                         / max(expected_form, 0.001)
                     - u_sc_mean_form_visibility;
                 form_light /= max(mean_after_visibility, 0.001);
             }
-            form_light = mix(1.0, clamp(form_light, 0.72, 1.32), u_sc_strength);
+            form_light = mix(1.0, clamp(form_light, 0.22, 2.2), u_sc_strength);
             float occlusion = clamp(
                 surface_ao * u_sc_calibration2.y * u_sc_strength
                 + ray_shadow * 0.18 * u_sc_calibration2.x * u_sc_strength,
@@ -2712,13 +2721,17 @@ init -50 python:
                 ambient_tint,
                 vec3(mix(1.0, 0.25, sc_extreme_scene_chroma))
             );
-            float source_mix = clamp((lambert - 0.52) * 0.34 * key_amount, 0.0, 0.32);
-            vec3 source_tint = mix(
-                vec3(1.0),
-                clamp(source_color_field, vec3(0.58), vec3(2.0)),
-                source_mix
-            );
-            source_tint = mix(vec3(1.0), source_tint, sc_environment_adaptation);
+            // Direct color belongs to the surfaces receiving that light.
+            // Shaded surfaces retain the environment fill instead of acquiring
+            // the same global tint as surfaces facing the source.
+            vec3 direct_chroma = source_color_field / max(lambert, 0.001);
+            float direct_fraction = lambert * diffuse_span
+                / max(diffuse_fill + lambert * diffuse_span, 0.001);
+            ambient_tint = mix(ambient_tint, pow(
+                clamp(direct_chroma, vec3(0.34), vec3(2.85)),
+                vec3(u_sc_calibration0.w * auto_amount * sc_environment_adaptation)
+            ), direct_fraction);
+            vec3 source_tint = vec3(1.0);
             // The photographed, energy-balanced aggregate remains the normal
             // path. Automatic separation engages for two distinct hue-family
             // sources, or for one strong colored source separated from a
@@ -2986,7 +2999,7 @@ init -50 python:
             // form, but may create a sharp fake specular band unless the source
             // art has nearby structure capable of receiving that highlight.
             lit += specular_field * specular_material * u_sc_calibration3.x * 0.13
-                * form_detail_visibility * u_sc_strength;
+                * form_detail_visibility * u_sc_strength * exposure;
 
             float fallback_edge = max(
                 alpha - texture2D(
@@ -3010,7 +3023,7 @@ init -50 python:
                 clamp(sc_light0_color.rgb, vec3(0.55), vec3(2.2)),
                 sc_environment_adaptation
             );
-            lit += sc_rim_chroma * rim * 0.52;
+            lit += sc_rim_chroma * rim * 0.52 * exposure;
 
             // In creative mode, secondary lights also receive a colored edge
             // response instead of being compressed into the primary rim. The
@@ -3041,7 +3054,7 @@ init -50 python:
                     * (0.12 + 0.88 * material_response)
                     * sc_individual_light_colors;
                 lit += clamp(sc_multi_rim_color, vec3(0.34), vec3(2.85))
-                    * sc_multi_rim * 0.24;
+                    * sc_multi_rim * 0.24 * exposure;
             }
 
             // Exact desktop environment wrap: only the distance-field edge

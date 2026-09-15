@@ -11,7 +11,7 @@ light and color as they move through a scene.
 
 ## Installation
 
-1. Extract `SceneLight-v1.0.0-Windows.zip` and open **SceneLight.bat**.
+1. Extract `SceneLight-v1.0.0-Windows.zip` and open **SceneLight.exe**.
 2. Select your game folder and review the detected characters.
 3. Choose **Add to this game** or **Create separate copy**, then let setup finish.
 
