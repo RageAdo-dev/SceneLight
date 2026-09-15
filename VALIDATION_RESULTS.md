@@ -4,7 +4,12 @@ The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
 - **Automated checks:** 618 tests passed locally on 15 September 2026, with no
-  failures or skips. Earlier Windows/Linux CI results concern the recorded earlier revisions.
+  failures or skips. All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939242237)
+  passed for the animation correction. Hosted runners skip tests that require
+  unavailable graphics features; Linux also skips the Windows process check.
+- **Windows package:** the [package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939254926)
+  passed. The downloaded ZIP's checksum and 88 code/documentation files matched
+  the tested commit, including the refreshed examples.
 - **Native rendering:** Ren'Py 7.7.1 and 8.5.3 checks covered movement,
   transitions and save/load with form-map version 5.
 - **Installation:** a fresh environment installed the source package, scanned,

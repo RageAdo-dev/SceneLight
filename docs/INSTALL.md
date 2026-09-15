@@ -3,7 +3,7 @@
 Back up your game or project folder and saves before installing. It gives you an
 easy way back if setup is interrupted or your game isn’t compatible.
 
-[Download the Windows package](https://github.com/RageAdo-dev/SceneLight/actions/runs/34923985150/artifacts/10378829840).
+[Download the Windows package](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939254926/artifacts/10384098586).
 Extract the download, then extract `SceneLight-v1.0.0-Windows.zip` inside it.
 
 ## Add SceneLight to a game

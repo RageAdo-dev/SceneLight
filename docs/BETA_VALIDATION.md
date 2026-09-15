@@ -5,10 +5,14 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current validation
 
-The local suite passed **618 tests**, with no failures or skips. The prior Windows/Linux CI
-results cover the earlier revision. A fresh source-package
-installation completed scan, install, verify and remove without changing the
-synthetic game's original files.
+The local suite passed **618 tests**, with no failures or skips. All six
+[Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939242237)
+passed for commit `a5d21bf`: each Windows test job passed 591 tests and skipped 27;
+each Linux test job passed 590 and skipped 28. Hosted runners lack the graphics
+features needed by those rendering tests; Linux also skips the Windows process
+check. The full local run covered them. A fresh source-package installation
+completed scan, install, verify and remove without changing the synthetic game's
+original files.
 
 The animation correction was checked across six moving backgrounds and six
 synthetic cases, including fades, flashes and cuts. Live and prepared Preview
