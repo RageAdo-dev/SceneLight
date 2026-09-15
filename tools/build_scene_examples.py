@@ -118,7 +118,7 @@ def encode_animation(
             ".gif",
             [
                 "-filter_complex",
-                "fps=50:eof_action=pass,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3",
+                "[0:v]fps=50:eof_action=pass[v];[v][1:v]paletteuse=dither=bayer:bayer_scale=3",
                 "-loop",
                 "0",
             ],
@@ -147,7 +147,24 @@ def encode_animation(
             continue
         target = destination.with_name(destination.name + suffix)
         print(f"Encoding {target.name}", flush=True)
-        subprocess.run(base + options + [str(target)], check=True)
+        inputs = base
+        if suffix == ".gif":
+            # A split/palettegen graph queues the whole RGB clip while waiting
+            # for its final palette. Two passes keep the second pass streaming.
+            palette = frames / "palette.png"
+            subprocess.run(
+                base
+                + [
+                    "-vf",
+                    "fps=50:eof_action=pass,palettegen=stats_mode=diff",
+                    "-frames:v",
+                    "1",
+                    str(palette),
+                ],
+                check=True,
+            )
+            inputs = base + ["-i", str(palette)]
+        subprocess.run(inputs + options + [str(target)], check=True)
         if target.stat().st_size >= 100 * 1024 * 1024:
             raise RuntimeError(f"{target.name} exceeds the repository's per-file size limit")
         record = {"bytes": target.stat().st_size, "sha256": digest(target)}

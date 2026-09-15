@@ -1,7 +1,7 @@
 # Author quickstart
 
 Keep a backup of your project and saves before installing. You can restore it if
-setup is interrupted or your project needs a compatibility adjustment.
+setup is interrupted or your project isn’t compatible.
 
 ## Install
 
