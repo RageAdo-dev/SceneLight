@@ -20,6 +20,12 @@ signatures across every frame. A signature shared by different lighting results
 is ambiguous and cannot select cached lighting. The sample identifies a frame;
 it does not reduce the resolution or quality of the lighting calculation.
 
+Game caches include separate exact results for OpenCV's conversion and FFmpeg's
+tag-aware conversion. This covers the different RGB output observed in legacy
+and current Ren'Py decoders. Each variant is analyzed in source order. This adds
+preparation time and disk storage; playback still retains only two lighting frames.
+Decoder variants use exact signatures, with the same ambiguity checks.
+
 ## Cache validity
 
 Caches include the source content hash and analyzer identity. Changed media or

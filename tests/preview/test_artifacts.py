@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from scenelight.builder import _transport_light_layout
 from scenelight.preview.artifacts import ArtifactCache
 from scenelight.preview.core import (
     TRANSPORT_GRID_SIZE,
@@ -99,6 +100,7 @@ def test_cpu_hardware_pool_matches_scene_fixed_temporal_path(tmp_path: Path) -> 
             axis=1,
         )
         reference_irradiance, reference_emitter, reference_metadata = _scene_maps(background_path)
+        reference_metadata["light_transport_layout"] = _transport_light_layout(reference_transport)
         single = cache.temporal_scene(background_path, "adaptive:single")
 
         assert np.array_equal(single.irradiance, reference_irradiance)

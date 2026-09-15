@@ -11,7 +11,7 @@
     1599.21375
   ],
   "sprite_sha256": "da70f20d31d6b106ff29f949d2c1a40cac112ddb6dbfc051b0c736a584b24b83",
-  "shader_sha256": "f9bf9d893461c61b564caf9102659e89c2890fa9b6c36c18421d638ebaf2e646",
+  "shader_sha256": "9c582c72f819c3fecb3b88fd1a952db9a7407f829c42b43e203e4eb03783daac",
   "size": [
     1920,
     1080
@@ -24,7 +24,7 @@
   "movement_radius": 0.0,
   "calibration": "Default",
   "analysis": "Production live GPU analyzer, once per source frame",
-  "changed_pixels": 349627,
+  "changed_pixels": 349620,
   "frames": 1,
   "fps": 60.0
 }

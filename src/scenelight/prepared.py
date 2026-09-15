@@ -22,7 +22,7 @@ from .runtime.prepared import FIELDS, VERSION, Reader
 
 
 def engine_identity() -> str:
-    digest = hashlib.sha256(b"scenelight-prepared-v3")
+    digest = hashlib.sha256(b"scenelight-prepared-v4")
     for name in ("live_gpu.py", "live_opencl.py"):
         digest.update((Path(__file__).parent / "runtime" / name).read_bytes())
     return digest.hexdigest()
@@ -148,6 +148,24 @@ def cached_metadata(destination: Path, expected: dict) -> dict | None:
     return None
 
 
+def _tagged_video_frames(source: Path, size: tuple[int, int]):
+    """Decode tagged YUV colors as current Ren'Py does, without resampling time."""
+    from imageio_ffmpeg import read_frames
+
+    frames = read_frames(
+        str(source), pix_fmt="rgba", bits_per_pixel=32, output_params=["-vsync", "0"]
+    )
+    try:
+        metadata = next(frames)
+        if tuple(metadata["size"]) != tuple(size):
+            raise ValueError("Video decoders disagree about the displayed frame size")
+        width, height = size
+        for raw in frames:
+            yield np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 4)
+    finally:
+        frames.close()
+
+
 def prepare(
     source: Path, destination: Path, *, preview: bool, progress=None, on_started=None
 ) -> dict:
@@ -161,9 +179,14 @@ def prepare(
     builder = writer = None
     started = time.perf_counter()
     try:
+        profiles = ["opencv"]
+        if not preview and media.kind == "video":
+            profiles.append("ffmpeg-tagged")
         metadata = dict(
             expected,
-            frame_count=media.frame_count,
+            frame_count=media.frame_count * len(profiles),
+            source_frame_count=media.frame_count,
+            decode_profiles=profiles,
             fps=media.fps,
             size=list(media.size),
             durations_ms=list(media.durations_ms),
@@ -179,7 +202,26 @@ def prepare(
             signature = hashlib.sha256(sample.tobytes()).hexdigest()
             writer.append(builder.frame(frame.rgba), signature)
             if progress is not None:
-                progress(frame.index + 1, media.frame_count)
+                progress(frame.index + 1, metadata["frame_count"])
+        if len(profiles) > 1:
+            # Ren'Py generations can decode the same YUV movie to different
+            # RGB bytes. Retain each exact sequence under its own signatures;
+            # playback still holds only two lighting frames, and never guesses
+            # an index from the audio clock or approximate image similarity.
+            media.close()
+            builder.history = ()
+            count = 0
+            for rgba in _tagged_video_frames(source, media.size):
+                if count >= media.frame_count:
+                    raise ValueError("Video decoders disagree about the frame count")
+                height, width = rgba.shape[:2]
+                sample = rgba[(np.arange(9) * height // 9)[:, None], np.arange(16) * width // 16]
+                writer.append(builder.frame(rgba), hashlib.sha256(sample.tobytes()).hexdigest())
+                count += 1
+                if progress is not None:
+                    progress(media.frame_count + count, metadata["frame_count"])
+            if count != media.frame_count:
+                raise ValueError("Video decoders disagree about the frame count")
         if source_identity(source) != expected["source"]:
             raise ValueError("Video changed during lighting preparation; reopen it to retry")
         writer.finish()
@@ -232,7 +274,7 @@ def prepare_project_movies(discovery) -> dict:
             entries[relative] = {
                 "cache": destination.relative_to(discovery.game_root).as_posix(),
                 "size": reader.metadata["size"],
-                "frames": reader.count,
+                "frames": reader.metadata.get("source_frame_count", reader.count),
             }
         finally:
             reader.close()

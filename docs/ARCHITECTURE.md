@@ -92,6 +92,9 @@ checks validate the required float rendering operations before activation.
 Transport uses 26 planes over a 16×9 placement grid. Live transport also carries a
 metadata row. Light slots have a consistent meaning across the scene, and live
 history stabilizes near-tied source ordering without delaying current light values.
+The secondary slots blend continuously between physical lights and colored-light
+families. Plane 2 stores the blend in green and a format marker in blue; the shader
+also accepts older fields. This keeps the existing texture and varying counts.
 See [light continuity](live-continuity.md).
 
 With the default `scene_analysis: live`, supported movies are prepared frame by

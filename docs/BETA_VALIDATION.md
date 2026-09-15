@@ -1,14 +1,26 @@
 # Compatibility and validation
 
-Coverage recorded on 11 September 2026. Automatic discovery does not recognize
+Coverage updated on 15 September 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
 ## Current validation
 
-The local suite passed **601 tests**, with no failures or skips. Windows/Linux CI,
-lint, formatting, dependency checks and package builds passed. A fresh source-package
+The local suite passed **618 tests**, with no failures or skips. The prior Windows/Linux CI
+results cover the earlier revision. A fresh source-package
 installation completed scan, install, verify and remove without changing the
 synthetic game's original files.
+
+The animation correction was checked across six moving backgrounds and six
+synthetic cases, including fades, flashes and cuts. Live and prepared Preview
+rendering matched exactly. Native Ren'Py 7.7.1 and 8.5.3 played the prepared
+waterfall frames and passed save/load; a DDLC animation lab and Amy's opening
+dialogue also passed. The first DDLC harness copy omitted its root `characters`
+directory; the complete fixture passed after that setup error was corrected.
+
+The real video check exposed different RGB conversion in Ren'Py 8. The cache now
+stores both exact decoder variants rather than falling back for that clip.
+This correction changes Preview exposure by removing a redundant video-only
+adjustment. It does not hold lighting fixed or reduce the source frame rate.
 
 | Area | Recorded coverage |
 | --- | --- |

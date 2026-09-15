@@ -64,7 +64,7 @@ def test_release_record_names_every_cache_contract() -> None:
         "first_public_version": "1.0.0",
         "runtime_api_version": 1,
         "runtime_manifest_version": 8,
-        "transport_algorithm": "12-scene-stable-light-layout",
+        "transport_algorithm": "13-continuous-light-slots",
         "sprite_form_version": 5,
         "capture_version": 42,
         "capture_plan_version": 2,

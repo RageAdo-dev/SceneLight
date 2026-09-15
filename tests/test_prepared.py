@@ -1,11 +1,82 @@
+import hashlib
 import json
 import zipfile
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from scenelight.prepared import Writer
 from scenelight.runtime.prepared import FIELDS, VERSION, Reader
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_game_cache_preserves_exact_decoder_color_variants(tmp_path, monkeypatch, complete):
+    from scenelight import prepared
+    from scenelight.preview import media
+
+    source = tmp_path / "tagged.webm"
+    source.write_bytes(b"isolated decoder fixture")
+    original = [np.full((9, 16, 4), value, np.uint8) for value in (90, 100)]
+    tagged = [pixels.copy() for pixels in original]
+    for pixels in tagged:
+        pixels[..., 0] -= 4
+
+    class Clip:
+        kind = "video"
+        size = (16, 9)
+        frame_count = 2
+        fps = 60
+        durations_ms = (1000 / 60,) * 2
+
+        def __init__(self, *args):
+            pass
+
+        def iter_frames(self, indices):
+            return (SimpleNamespace(index=i, rgba=original[i]) for i in indices)
+
+        def close(self):
+            pass
+
+    class Builder:
+        def __init__(self, **kwargs):
+            self.history = ()
+
+        def frame(self, rgba):
+            return fields(int(rgba[0, 0, 0]))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(media, "MediaClip", Clip)
+    monkeypatch.setattr(prepared, "FramePreparer", Builder)
+    monkeypatch.setattr(
+        prepared, "_tagged_video_frames", lambda *args: iter(tagged if complete else tagged[:1])
+    )
+    target = tmp_path / "movie.slframes"
+    if not complete:
+        target.write_bytes(b"previous cache")
+        with pytest.raises(ValueError, match="frame count"):
+            prepared.prepare(source, target, preview=False)
+        assert target.read_bytes() == b"previous cache"
+        return
+    progress = []
+    result = prepared.prepare(
+        source, target, preview=False, progress=lambda a, b: progress.append((a, b))
+    )
+    assert result["source_frame_count"] == 2
+    assert result["frame_count"] == 4
+    assert result["decode_profiles"] == ["opencv", "ffmpeg-tagged"]
+    assert progress == [(1, 4), (2, 4), (3, 4), (4, 4)]
+    reader = Reader(str(target))
+    try:
+        for index, pixels in enumerate(original + tagged):
+            signature = hashlib.sha256(pixels.tobytes()).hexdigest()
+            assert reader.signatures[signature] == index
+            assert reader.frame(index) == fields(int(pixels[0, 0, 0]))
+            assert len(reader.frames) <= 2
+    finally:
+        reader.close()
 
 
 def test_movie_install_requires_playback_components_instead_of_silent_live_fallback(

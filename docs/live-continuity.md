@@ -1,4 +1,21 @@
-# Live light identity continuity
+# Lighting continuity
+
+Moving backgrounds must change the lighting without turning detection thresholds
+into visible flashes. The analyzer retains a source's measured position and color
+when its emission score changes. Reflected illumination still has a direction;
+the emission score controls its point-source response.
+
+Colored-light energy follows scene radiance. Hue sectors contribute together to
+stable color-family slots, so a small score change cannot move the whole light to
+a different winning region. A continuous scene-wide blend replaces the previous
+vote between physical and colored-light layouts. Light energy and confidence fade
+through that blend without filtering the video over time.
+
+Preview uses the full per-frame exposure result directly. Its older local-frame
+meter now applies only when full analysis is unavailable, matching the game's
+behavior for live and prepared fields.
+
+## Physical source ordering
 
 Two similarly strong fixtures could exchange the primary-light slot when their
 scores crossed by less than one percent. Because the primary light also controls
@@ -37,3 +54,15 @@ the audit retains that event rather than describing it as a steady-video jump.
 Regression tests cover near ties, immediate stronger-light selection, immediate
 cut reset, unchanged static fields, and separate histories for separate bindings.
 These checks complement per-frame numerical parity and performance tests.
+
+## Animation regression checks
+
+The September 2026 correction was checked with six moving video backgrounds,
+moving and dimming colored lamps, a fade, a one-frame flash, a scene cut and
+textured reflections. The waterfall's false two-frame color change disappeared;
+actual source exposure changes remain visible. These are measured examples, not
+a guarantee that every scene will produce the desired artistic result.
+
+Automated tests also cover threshold continuity, near-tied hue sectors, exact
+live/prepared replay, still/video agreement, immediate flashes and cuts, and the
+two-frame playback cache bound. See [current validation](BETA_VALIDATION.md).

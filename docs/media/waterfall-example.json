@@ -5,13 +5,13 @@
     1440
   ],
   "crop_box": [
-    0,
-    0,
-    2560,
-    1440
+    0.0,
+    0.0,
+    2560.0,
+    1440.0
   ],
   "sprite_sha256": "da70f20d31d6b106ff29f949d2c1a40cac112ddb6dbfc051b0c736a584b24b83",
-  "shader_sha256": "f9bf9d893461c61b564caf9102659e89c2890fa9b6c36c18421d638ebaf2e646",
+  "shader_sha256": "9c582c72f819c3fecb3b88fd1a952db9a7407f829c42b43e203e4eb03783daac",
   "size": [
     1920,
     1080
@@ -24,13 +24,13 @@
   "movement_radius": 0.0,
   "calibration": "Default",
   "analysis": "Production live GPU analyzer, once per source frame",
-  "changed_pixels": 349592,
+  "changed_pixels": 349497,
   "frames": 120,
   "fps": 60.0,
   "encodings": {
     "waterfall-example.webp": {
-      "bytes": 58135034,
-      "sha256": "a7dd71a3f650712be6755967d28feca330935cb6c13f6f49d874c19e03a96957",
+      "bytes": 58171432,
+      "sha256": "98e4c7cab78853ff3b028c16a9186e83389366491336c73aba674ee7a6405317",
       "frames": 120,
       "duration_ms": 1999,
       "frame_durations_ms": [
@@ -39,14 +39,14 @@
       ]
     },
     "waterfall-example.mp4": {
-      "bytes": 13500330,
-      "sha256": "ac27b4ab6fac6d35fed87c2004f0b12cc5413368ab1c23635fe2e1dab5b10949",
+      "bytes": 13547698,
+      "sha256": "db4b07e817e89597dbfa8fdf7f2baaaa8adb02ef9008e9435bdc7d5972a055e4",
       "frames": 120,
       "fps": 60.0
     },
     "waterfall-example.gif": {
-      "bytes": 77307410,
-      "sha256": "850b5530ec50c6844f442eb5ffd18452bfd138aaf4d8401d91878023457f9c60",
+      "bytes": 75612753,
+      "sha256": "1531ae74bfc12df8ff3221b334f558ed4e150e1d83527bf31b81a97875204f27",
       "frames": 100,
       "duration_ms": 2000,
       "frame_durations_ms": [
@@ -54,8 +54,8 @@
       ]
     },
     "waterfall-example-preview.webp": {
-      "bytes": 27604678,
-      "sha256": "5884b444436c37766a3cb7093ae8f8b9ca315c1aa66fed26acd7cc6d22f96573",
+      "bytes": 27587374,
+      "sha256": "0e62dbaa369ae2133ef047a6aef3d181a8a15d23b36c008ea35ce2e020beea14",
       "frames": 120,
       "duration_ms": 1999,
       "frame_durations_ms": [

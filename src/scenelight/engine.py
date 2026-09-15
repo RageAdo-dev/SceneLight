@@ -11,7 +11,7 @@ character moves.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from math import atan2, degrees
 from typing import Any
@@ -280,6 +280,25 @@ def _clamp_scalar(value: float, lower: float, upper: float) -> float:
     return min(max(float(value), lower), upper)
 
 
+def _smoothstep_scalar(value: float, lower: float, upper: float) -> float:
+    value = _clamp_scalar((value - lower) / (upper - lower), 0.0, 1.0)
+    return value * value * (3.0 - 2.0 * value)
+
+
+def _directional_support(
+    light: DetectedLight, subject_y: float, adaptation: float, physical_count: int
+) -> float:
+    """Blend uncertain sources with diffuse light without discarding their geometry."""
+    lower = _smoothstep_scalar(light.y, subject_y - 0.06, subject_y + 0.02)
+    daylight = _smoothstep_scalar(adaptation, 0.12, 0.20)
+    reflection = _smoothstep_scalar(light.radius, 0.06, 0.11)
+    if physical_count >= 2:
+        reflection = max(reflection, 1.0 - _smoothstep_scalar(light.emission_score, 0.54, 0.70))
+    # Reflected light still has a direction. Emission controls its point-source
+    # falloff, not whether its measured position and color exist at all.
+    return 1.0 - lower * daylight * reflection
+
+
 def _linear_quantile(
     values: np.ndarray,
     quantiles: float | tuple[float, ...],
@@ -454,12 +473,14 @@ def _detect_creative_color_sources(
     if prepared_fields is None:
         prepared_fields = _prepare_creative_color_fields(linear)
     saturation, saturated, sector_memberships = prepared_fields
-    colored = (source_weights > EPSILON) & saturated
+    colored = saturated
     if not np.any(colored):
         return ()
 
     yy, xx = coordinate_grid
-    chroma_weight = source_weights * (0.30 + 0.70 * saturation) * colored
+    # Hue energy must fade with radiance. The physical saliency mask is useful
+    # for finding compact lights, but drops a dimming colored lamp abruptly.
+    chroma_weight = _luminance(linear) * (0.30 + 0.70 * saturation) * colored
     total_energy = float(np.sum(chroma_weight)) + EPSILON
     candidates: list[tuple[float, int, DetectedLight]] = []
     h, w = source_weights.shape
@@ -498,26 +519,19 @@ def _detect_creative_color_sources(
     maximum_energy = max(item[0] for item in candidates)
     selected: list[DetectedLight] = []
     for energy, _sector, candidate in sorted(candidates, key=lambda item: (-item[0], item[1])):
-        candidate_color = np.asarray(candidate.color, dtype=np.float32)
-        if any(
-            np.linalg.norm(candidate_color - np.asarray(present.color, dtype=np.float32)) < 0.16
-            for present in selected
-        ):
-            continue
         selected.append(
             DetectedLight(
                 x=candidate.x,
                 y=candidate.y,
                 color=candidate.color,
-                intensity=_clamp_scalar(np.sqrt(energy / (maximum_energy + EPSILON)), 0.65, 1.0),
+                intensity=_clamp_scalar(np.sqrt(energy / (maximum_energy + EPSILON)), 0.0, 1.0)
+                * _smoothstep_scalar(energy / total_energy, 0.012, 0.06),
                 radius=candidate.radius,
                 confidence=candidate.confidence,
                 emission_score=candidate.emission_score,
                 creative_only=True,
             )
         )
-        if len(selected) >= 6:
-            break
     return tuple(selected)
 
 
@@ -698,27 +712,8 @@ def _detect_source_components(
     maximum_energy = selected[0][0]
     lights: list[DetectedLight] = []
     for effective_energy, label, energy, emission_score in selected:
-        # Non-emissive candidates only affect the top-six count and energy
-        # normalization downstream. plausible_emitter rejects them before any
-        # placeholder geometry can be observed.
-        if emission_score < 0.48:
-            lights.append(
-                DetectedLight(
-                    x=0.5,
-                    y=0.2,
-                    color=(1.0, 1.0, 1.0),
-                    intensity=_clamp_scalar(
-                        np.sqrt(effective_energy / (maximum_energy + EPSILON)),
-                        0.12,
-                        1.0,
-                    ),
-                    radius=1.0,
-                    confidence=0.0,
-                    emission_score=emission_score,
-                )
-            )
-            continue
-
+        # Preserve measured positions/colors across the emission confidence
+        # range. The scene solver controls how strongly they affect lighting.
         if crop_components:
             left = int(stats[label, cv2.CC_STAT_LEFT])
             top = int(stats[label, cv2.CC_STAT_TOP])
@@ -1079,20 +1074,13 @@ def analyze_scene(
     # low-key source, but keep broad/repeated lower-field reflectors in the
     # environment probes.  This is a radiometric prior, not scene- or
     # character-specific tuning.
-    def plausible_emitter(light: DetectedLight) -> bool:
-        if light.emission_score < 0.48:
-            return False
-        daylight_lower_reflector = (
-            light.y > subject_y - 0.02
-            and adaptation_luminance > 0.16
-            and (
-                light.radius > 0.085
-                or (len(physical_components) >= 2 and light.emission_score < 0.62)
-            )
+    support = {
+        light: _directional_support(
+            light, subject_y, adaptation_luminance, len(physical_components)
         )
-        return not daylight_lower_reflector
-
-    emissive_lights = tuple(light for light in physical_components if plausible_emitter(light))
+        for light in physical_components
+    }
+    emissive_lights = tuple(light for light in physical_components if support[light] > EPSILON)
     broad_environment = not emissive_lights
     source_total = (
         float(np.sum(source_weights)) if measurements is None else measurements.source_total
@@ -1191,6 +1179,33 @@ def analyze_scene(
             sky_y = float(np.clip(subject_y - 0.42, 0.04, 0.42))
             light_y = light_y * (1.0 - sky_prior) + sky_y * sky_prior
 
+    primary_support = support[emissive_lights[0]] if emissive_lights else 0.0
+    if emissive_lights and primary_support < 1.0 and source_total > EPSILON:
+        diffuse_x = subject_x
+        diffuse_y = _clamp_scalar(subject_y - 0.42, 0.04, 0.42)
+        diffuse_confidence = _clamp_scalar(0.68 * separation, 0.0, 1.0)
+        if measurements is None:
+            upper_hemisphere = np.clip((subject_y - prepared.normalized_y) * 2.2 + 0.35, 0.15, 1.0)
+            diffuse_linear = _weighted_rgb(linear, local_weights * upper_hemisphere)
+        else:
+            diffuse_linear = np.asarray(measurements.upper_light_linear, dtype=np.float32)
+        if gradient_confidence > 0.015:
+            diffuse_gradient_y = min(
+                _clamp_scalar(subject_y + gradient_y_unit * 0.52, 0.0, 1.0), subject_y - 0.12
+            )
+            diffuse_blend = 0.72 * gradient_confidence
+            diffuse_x = diffuse_x * (1.0 - diffuse_blend) + gradient_light_x * diffuse_blend
+            diffuse_y = diffuse_y * (1.0 - diffuse_blend) + diffuse_gradient_y * diffuse_blend
+            diffuse_confidence = max(diffuse_confidence, gradient_confidence * 0.72)
+        diffuse_y = min(diffuse_y, subject_y - 0.12)
+        light_x = diffuse_x * (1.0 - primary_support) + light_x * primary_support
+        light_y = diffuse_y * (1.0 - primary_support) + light_y * primary_support
+        light_linear = diffuse_linear * (1.0 - primary_support) + light_linear * primary_support
+        source_size = 1.0 - primary_support + source_size * primary_support
+        confidence = (
+            min(diffuse_confidence, 0.58) * (1.0 - primary_support) + confidence * primary_support
+        )
+
     # Normalize chromaticities without forcing bright whites into the sprite.
     ambient_luma = float(_luminance(ambient_linear))
     light_luma = float(_luminance(light_linear))
@@ -1220,11 +1235,14 @@ def analyze_scene(
             intensity=1.0,
             radius=float(source_size),
             confidence=float(confidence),
-            emission_score=0.0 if broad_environment else emissive_lights[0].emission_score,
+            emission_score=0.0
+            if broad_environment
+            else emissive_lights[0].emission_score * primary_support,
         )
     ]
     minimum_secondary_intensity = 0.27 if maximum_explicit_lights == 4 else 0.42
     for candidate in emissive_lights[1:]:
+        candidate = replace(candidate, intensity=candidate.intensity * support[candidate])
         if candidate.intensity < minimum_secondary_intensity:
             continue
         if all(

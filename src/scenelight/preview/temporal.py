@@ -249,11 +249,10 @@ def interpolate_metadata(
 
     left_lights = [dict(light) for light in left.get("light_transport", ())]
     right_lights = [dict(light) for light in right.get("light_transport", ())]
-    canonical_layout = "physical-rgb-families-v1"
-    if (
-        left.get("light_transport_layout") == canonical_layout
-        and right.get("light_transport_layout") == canonical_layout
-    ):
+    canonical_layouts = {"physical-rgb-families-v1", "continuous-light-slots-v2"}
+    if left.get("light_transport_layout") in canonical_layouts and right.get(
+        "light_transport_layout"
+    ) == left.get("light_transport_layout"):
         light_count = max(len(left_lights), len(right_lights))
         light_pairs = []
         for index in range(light_count):

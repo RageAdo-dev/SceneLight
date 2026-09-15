@@ -2019,7 +2019,7 @@ init -50 python:
                     0.55,
                     1.15
                 );
-                float source_present = step(0.001, data.w + extra.x);
+                float source_present = smoothstep(0.0, 0.65, data.w + extra.x);
                 float source_reach = 0.08 + data.z * 0.90;
                 float pixel_distance = distance(data.xy, v_sc_screen);
                 float falloff = 1.0 / (1.0 + pow(pixel_distance / source_reach, 2.0));
@@ -2042,15 +2042,16 @@ init -50 python:
                 vec2 extra_a,
                 vec4 data_b,
                 vec4 color_b,
-                vec2 extra_b
+                vec2 extra_b,
+                float layout_mix
             ) {
                 // Hue-family sources are encoded with physical intensity off
                 // (data.w == 0) and their measured source energy in extra.x.
                 // Requiring two such sources prevents colorful props or one
                 // dominant lamp from turning an ordinary scene into a grade.
-                float creative_a = (1.0 - step(0.001, data_a.w))
+                float creative_a = (layout_mix < 0.0 ? 1.0 - step(0.001, data_a.w) : layout_mix)
                     * step(0.001, extra_a.x) * step(0.001, color_a.a);
-                float creative_b = (1.0 - step(0.001, data_b.w))
+                float creative_b = (layout_mix < 0.0 ? 1.0 - step(0.001, data_b.w) : layout_mix)
                     * step(0.001, extra_b.x) * step(0.001, color_b.a);
                 float chroma_evidence = smoothstep(
                     0.55,
@@ -2063,12 +2064,12 @@ init -50 python:
                     distance(data_a.xy, data_b.xy)
                 );
                 float energy_evidence = smoothstep(
-                    0.55,
+                    0.0,
                     0.85,
                     min(extra_a.x, extra_b.x)
                 );
                 float confidence_evidence = smoothstep(
-                    0.58,
+                    0.0,
                     0.82,
                     min(color_a.a, color_b.a)
                 );
@@ -2081,7 +2082,8 @@ init -50 python:
                 vec4 primary_color,
                 vec4 creative_data,
                 vec4 creative_color,
-                vec2 creative_extra
+                vec2 creative_extra,
+                float layout_mix
             ) {
                 // One strongly colored practical plus a neutral key is already
                 // a separated-light scene. Keep the gate conservative so a
@@ -2089,7 +2091,7 @@ init -50 python:
                 // a global grade.
                 float primary_present = step(0.001, primary_data.w)
                     * step(0.001, primary_color.a);
-                float creative_present = (1.0 - step(0.001, creative_data.w))
+                float creative_present = (layout_mix < 0.0 ? 1.0 - step(0.001, creative_data.w) : layout_mix)
                     * step(0.001, creative_extra.x)
                     * step(0.001, creative_color.a);
                 float neutral_evidence = 1.0 - smoothstep(
@@ -2307,6 +2309,10 @@ init -50 python:
             vec4 transport_ambient = scenelight_transport_at(1.0, v_sc_center);
             vec4 transport_global_extra = scenelight_transport_at(2.0, v_sc_center);
             float transport_mix = step(0.5, u_sc_has_transport);
+            // A marker distinguishes continuous slots from installed legacy
+            // fields without adding textures or vertex outputs.
+            float sc_layout_mix = transport_mix > 0.5 && transport_global_extra.b > 0.5
+                ? transport_global_extra.g : -1.0;
             vec3 ambient_chroma = mix(
                 scenelight_unit_energy(irradiance_sample.rgb * u_sc_chroma_range),
                 transport_ambient.rgb * u_sc_chroma_range,
@@ -2321,11 +2327,9 @@ init -50 python:
                 transport_global_extra.r * u_sc_target_range,
                 transport_mix
             );
-            // Animated backgrounds keep the exact static transport solution
-            // for geometry, multiple emitters, probes, and character motion.
-            // Their current blurred environment frame updates broad exposure
-            // and chroma every displayed frame without a CPU re-analysis.
-            if (u_sc_live_background > 0.5) {
+            // Only the legacy static-field fallback needs local frame metering.
+            // Live and prepared fields already describe this exact video frame.
+            if (u_sc_live_background > 0.5 && u_sc_live_analysis < 0.5) {
                 vec3 live_environment = scenelight_srgb_to_linear(
                     scenelight_wrap_at(v_sc_center)
                 );
@@ -2723,16 +2727,16 @@ init -50 python:
             float sc_separation_evidence = max(
                 scenelight_separation_pair_evidence(
                     sc_light1_data, sc_light1_color, sc_light1_extra,
-                    sc_light2_data, sc_light2_color, sc_light2_extra
+                    sc_light2_data, sc_light2_color, sc_light2_extra, sc_layout_mix
                 ),
                 max(
                     scenelight_separation_pair_evidence(
                         sc_light1_data, sc_light1_color, sc_light1_extra,
-                        sc_light3_data, sc_light3_color, sc_light3_extra
+                        sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix
                     ),
                     scenelight_separation_pair_evidence(
                         sc_light2_data, sc_light2_color, sc_light2_extra,
-                        sc_light3_data, sc_light3_color, sc_light3_extra
+                        sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix
                     )
                 )
             );
@@ -2741,22 +2745,22 @@ init -50 python:
                 max(
                     scenelight_primary_creative_evidence(
                         sc_light0_data, sc_light0_color,
-                        sc_light1_data, sc_light1_color, sc_light1_extra
+                        sc_light1_data, sc_light1_color, sc_light1_extra, sc_layout_mix
                     ),
                     max(
                         scenelight_primary_creative_evidence(
                             sc_light0_data, sc_light0_color,
-                            sc_light2_data, sc_light2_color, sc_light2_extra
+                            sc_light2_data, sc_light2_color, sc_light2_extra, sc_layout_mix
                         ),
                         scenelight_primary_creative_evidence(
                             sc_light0_data, sc_light0_color,
-                            sc_light3_data, sc_light3_color, sc_light3_extra
+                            sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix
                         )
                     )
                 )
             );
             float sc_adaptive_light_colors = u_sc_calibration4.z
-                * smoothstep(0.03, 0.28, sc_separation_evidence);
+                * sc_separation_evidence;
             float sc_individual_light_colors = clamp(
                 max(u_sc_calibration4.y, sc_adaptive_light_colors) * u_sc_strength,
                 0.0,
@@ -2827,18 +2831,18 @@ init -50 python:
                 // physical key a second time or warm scenes collapse back to
                 // a single orange tint.
                 float sc_creative_source_count =
-                    (1.0 - step(0.001, sc_light1_data.w))
-                        * step(0.001, sc_light1_extra.x)
-                    + (1.0 - step(0.001, sc_light2_data.w))
-                        * step(0.001, sc_light2_extra.x)
-                    + (1.0 - step(0.001, sc_light3_data.w))
-                        * step(0.001, sc_light3_extra.x);
+                    (sc_layout_mix < 0.0 ? 1.0 - step(0.001, sc_light1_data.w) : sc_layout_mix)
+                        * smoothstep(0.0, 0.65, sc_light1_extra.x)
+                    + (sc_layout_mix < 0.0 ? 1.0 - step(0.001, sc_light2_data.w) : sc_layout_mix)
+                        * smoothstep(0.0, 0.65, sc_light2_extra.x)
+                    + (sc_layout_mix < 0.0 ? 1.0 - step(0.001, sc_light3_data.w) : sc_layout_mix)
+                        * smoothstep(0.0, 0.65, sc_light3_extra.x);
                 // With one colored source, retain the neutral aggregate in
                 // this mix so the two sources paint different body regions.
                 // With multiple hue families, omit the already-fused primary
                 // exactly as before.
-                float sc_multiple_creative_sources = step(
-                    1.5,
+                float sc_multiple_creative_sources = smoothstep(
+                    1.0, 2.0,
                     sc_creative_source_count
                 );
                 sc_creative_influence0 *= 1.0 - sc_multiple_creative_sources;

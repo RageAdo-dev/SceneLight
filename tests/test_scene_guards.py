@@ -1,15 +1,37 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from scenelight.builder import _camera_metadata
 from scenelight.engine import (
+    DetectedLight,
+    Placement,
     analyze_scene,
     diffuse_scene_chroma_guard,
 )
+
+
+def test_reflected_light_keeps_its_direction_across_emission_classification():
+    background = Image.new("RGB", (128, 72), (60, 65, 55))
+    ImageDraw.Draw(background).rectangle((12, 8, 30, 25), fill=(210, 210, 205))
+    light = DetectedLight(0.18, 0.2, (0.73, 0.73, 0.73), 1.0, 0.16, 0.7, 0.4)
+    positions = []
+    for emission in np.linspace(0.25, 0.75, 21):
+        scene = analyze_scene(
+            background, Placement(), source_components=(replace(light, emission_score=emission),)
+        )
+        positions.append((scene.light_x, scene.light_y, scene.source_size))
+        assert scene.source_size == pytest.approx(light.radius)
+    assert np.ptp(positions, axis=0).max() < 1e-6
+    moved = analyze_scene(background, Placement(), source_components=(replace(light, x=0.82),))
+    # The scene gradient remains fixed; the measured source must still move
+    # the solved direction rather than being replaced by the diffuse prior.
+    assert moved.light_x - positions[0][0] > 0.35
 
 
 def _analysis(**overrides):

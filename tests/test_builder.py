@@ -1,6 +1,7 @@
 import hashlib
 import json
 from concurrent.futures.process import BrokenProcessPool
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,7 +68,9 @@ def test_neutral_key_plus_strong_colored_source_uses_spatial_family_slots() -> N
 
     assert len(selected) == 4
     assert selected[0] is physical
-    assert selected[1] is strongest_red
+    expected_x = (strongest_red.x + weaker_same_family.x * 0.65**2) / (1.0 + 0.65**2)
+    assert selected[1].x == pytest.approx(expected_x, abs=1e-6)
+    assert weaker_same_family.x < selected[1].x < strongest_red.x
     assert sum(light.creative_only and light.intensity > 0 for light in selected) == 1
 
 
@@ -119,7 +122,10 @@ def test_scene_layout_can_force_consistent_slots_across_placement_samples() -> N
 
     assert len(creative_slots) == 4
     assert creative_slots[0] is physical[0]
-    assert creative_slots[1] is weak_prop
+    assert creative_slots[1].x == pytest.approx(weak_prop.x)
+    assert creative_slots[1].y == pytest.approx(weak_prop.y)
+    assert creative_slots[1].intensity == weak_prop.intensity
+    assert creative_slots[1].creative_only
     assert physical_slots == physical
 
 
@@ -133,6 +139,59 @@ def test_transport_layout_metadata_is_derived_from_encoded_planes() -> None:
 
     assert builder_module._transport_light_layout(transport) == "physical-rgb-families-v1"
     assert builder_module._transport_light_layout(strip) == "physical-rgb-families-v1"
+
+    transport[2, ..., 2] = 255
+    transport[2, ..., 1] = 127
+    strip = np.concatenate(transport, axis=1)
+    assert builder_module._transport_light_layout(transport) == "continuous-light-slots-v2"
+    assert builder_module._transport_light_layout(strip) == "continuous-light-slots-v2"
+
+
+def test_near_tied_hue_sectors_contribute_without_winner_switches():
+    key = DetectedLight(0.5, 0.1, (0.73, 0.73, 0.73), 1.0, 0.2, 0.8)
+    left = DetectedLight(0.1, 0.3, (0.98, 0.53, 0.51), 1.0, 0.2, 0.96, 1.0, True)
+    right = replace(left, x=0.9, intensity=0.999)
+    a = SimpleNamespace(lights=(key,), creative_lights=(left, right))
+    b = SimpleNamespace(
+        lights=(key,),
+        creative_lights=(replace(left, intensity=0.999), replace(right, intensity=1.0)),
+    )
+    first = builder_module._select_transport_lights(a, creative_layout=True)
+    second = builder_module._select_transport_lights(b, creative_layout=True)
+    assert 0.49 < first[1].x < 0.51
+    assert abs(first[1].x - second[1].x) < 0.002
+    reverse = builder_module._select_transport_lights(
+        SimpleNamespace(lights=(key,), creative_lights=tuple(reversed(a.creative_lights))),
+        creative_layout=True,
+    )
+    assert reverse[1].x == pytest.approx(first[1].x, abs=1e-6)
+
+
+def test_transport_blends_light_hypotheses_across_confidence_boundaries():
+    from scenelight.engine import analyze_scene
+
+    scene = analyze_scene(Image.new("RGB", (64, 36), (90, 90, 90)))
+    key = DetectedLight(0.15, 0.15, (0.7353569,) * 3, 1.0, 0.2, 0.8)
+    fill = replace(key, x=0.85, intensity=0.6)
+    red = DetectedLight(0.75, 0.6, (1.0, 0.53, 0.51), 1.0, 0.15, 0.8, 1.0, True)
+
+    def encode(confidence):
+        analysis = replace(
+            scene, lights=(key, fill), creative_lights=(replace(red, confidence=confidence),)
+        )
+        return builder_module._encode_transport_analyses(
+            ((row, column, analysis) for row in range(2) for column in range(2)), (2, 2)
+        )
+
+    mixes = []
+    for confidence in np.linspace(0.72, 0.90, 25):
+        left, right = encode(confidence - 0.00001), encode(confidence + 0.00001)
+        assert np.abs(left.astype(int) - right.astype(int)).max() <= 1
+        assert np.all(left[2, ..., 2] == 255)
+        mixes.append(int(left[2, 0, 0, 1]))
+    assert mixes[0] == 0 and mixes[-1] == 255
+    assert len(set(mixes)) >= 6
+    assert all(a <= b for a, b in zip(mixes, mixes[1:]))
 
 
 def test_form_worker_limit_uses_live_memory_without_changing_quality() -> None:

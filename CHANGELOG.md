@@ -9,6 +9,10 @@
 - Live analysis handles backgrounds changed by code or visual effects.
 - Surface maps retain fine painted detail while smoothing artificial silhouette ridges.
 - Directional color blending no longer turns small surface slopes into sharp seams.
+- Animated lighting blends between source estimates instead of switching at detection cutoffs.
+- Fading colored lights retain their measured direction and fade out gradually.
+- Preview no longer applies a second exposure adjustment to fully analyzed video frames.
+- Prepared movies include the exact color conversions used by legacy and current decoders.
 - Compatible renderers reuse constant scene samples in the vertex shader to reduce draw time.
 - Transition snapshots keep their lighting and release their graphics textures correctly.
 
@@ -28,5 +32,6 @@
 - A lossless 60 fps movement demo.
 
 Form-map version 5 requires rebuilding older maps through **Update SceneLight**.
+The animation correction also refreshes scene lighting and prepared movies; valid surface maps are reused.
 
 [Development history](docs/history/development-changelog.md) · [Compatibility and validation](docs/BETA_VALIDATION.md)

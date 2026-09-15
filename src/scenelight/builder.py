@@ -38,6 +38,7 @@ from .engine import (
     _luminance,
     _placement_region,
     _prepare_creative_color_fields,
+    _smoothstep_scalar,
     _srgb_to_linear,
     _weighted_rgb,
     analyze_scene,
@@ -60,7 +61,7 @@ TRANSPORT_CHARACTER_HEIGHT = 0.92
 TRANSPORT_LIGHT_BASE = 3
 TRANSPORT_PROBE_BASE = 15
 TRANSPORT_PROBE_SCALAR_BASE = 23
-TRANSPORT_CACHE_VERSION = "12-scene-stable-light-layout"
+TRANSPORT_CACHE_VERSION = "13-continuous-light-slots"
 RUNTIME_MANIFEST_VERSION = 8
 FORM_CHECKPOINT_INTERVAL = 16
 MIB = 1024**2
@@ -167,11 +168,11 @@ def _single_creative_source_is_separate(
     chroma_distance = float(np.linalg.norm(primary_chroma - candidate_chroma))
     spatial_distance = float(np.hypot(primary.x - candidate.x, primary.y - candidate.y))
     return (
-        primary_neutral_distance <= 0.26
-        and chroma_distance >= 0.50
-        and spatial_distance >= 0.14
-        and candidate.intensity >= 0.78
-        and candidate.confidence >= 0.78
+        primary_neutral_distance < 0.40
+        and chroma_distance > 0.45
+        and spatial_distance > 0.10
+        and candidate.intensity > 0.72
+        and candidate.confidence > 0.72
     )
 
 
@@ -201,18 +202,40 @@ def _select_transport_lights(
             return tuple(physical[:1] + [_disabled_creative_light() for _ in range(3)])
         return tuple(physical)
 
-    # Canonical red/green/blue-family slots prevent light identities from
-    # swapping between transport-grid samples or adjacent video anchors when
-    # their relative brightness changes. Pick the strongest representative of
-    # each family; a disabled placeholder preserves the other plane indices.
-    families: dict[int, DetectedLight] = {}
+    # Sum the hue sectors in each stable slot. Picking a winning sector made
+    # a light jump between similarly colored regions as their scores crossed.
+    grouped: dict[int, list[DetectedLight]] = {}
     for light in creative:
-        family = _creative_hue_family(light)
-        present = families.get(family)
-        score = light.intensity * light.confidence
-        if present is None or score > present.intensity * present.confidence:
-            families[family] = light
+        if light.intensity > 0.0:
+            grouped.setdefault(_creative_hue_family(light), []).append(light)
+    energies = {
+        family: sum(light.intensity**2 for light in group) for family, group in grouped.items()
+    }
+    maximum_energy = max(energies.values(), default=1.0)
+    families: dict[int, DetectedLight] = {}
+    for family, group in grouped.items():
+        weights = np.asarray([light.intensity**2 for light in group], dtype=np.float32)
+        weights /= energies[family]
+        geometry = weights @ np.asarray(
+            [(light.x, light.y, light.radius, light.confidence) for light in group],
+            dtype=np.float32,
+        )
+        color = weights @ _srgb_to_linear(
+            np.asarray([light.color for light in group], dtype=np.float32)
+        )
+        families[family] = DetectedLight(
+            x=float(geometry[0]),
+            y=float(geometry[1]),
+            radius=float(geometry[2]),
+            color=_display_chromaticity(color),
+            confidence=float(geometry[3]),
+            intensity=min(math.sqrt(energies[family] / maximum_energy), 1.0),
+            emission_score=1.0,
+            creative_only=True,
+        )
     if not families:
+        if creative_layout is True:
+            return tuple(physical[:1] + [_disabled_creative_light() for _ in range(3)])
         return tuple(physical)
     if len(families) == 1 and creative_layout is None:
         candidate = next(iter(families.values()))
@@ -220,6 +243,44 @@ def _select_transport_lights(
             return tuple(physical)
     hue_slots = [families.get(index, _disabled_creative_light()) for index in range(3)]
     return tuple(physical[:1] + hue_slots)
+
+
+def _separation_evidence(lights: tuple[DetectedLight, ...]) -> float:
+    """Continuous evidence for the optional colored-light hypothesis."""
+    if not lights:
+        return 0.0
+    primary, *families = lights
+    primary_chroma = _linear_chroma(primary.color)
+    evidence = 0.0
+    for i, light in enumerate(families):
+        if light.intensity <= 0.0 or light.confidence <= 0.0:
+            continue
+        chroma = _linear_chroma(light.color)
+        single = (
+            (
+                (1.0 - _smoothstep_scalar(float(np.linalg.norm(primary_chroma - 1.0)), 0.22, 0.40))
+                * _smoothstep_scalar(float(np.linalg.norm(primary_chroma - chroma)), 0.45, 0.80)
+                * _smoothstep_scalar(
+                    math.hypot(primary.x - light.x, primary.y - light.y), 0.10, 0.24
+                )
+                * _smoothstep_scalar(light.intensity, 0.72, 0.90)
+                * _smoothstep_scalar(light.confidence, 0.72, 0.90)
+            )
+            if primary.confidence > 0.0 and primary.intensity > 0.0
+            else 0.0
+        )
+        evidence = max(evidence, single)
+        for other in families[i + 1 :]:
+            pair = (
+                _smoothstep_scalar(
+                    float(np.linalg.norm(chroma - _linear_chroma(other.color))), 0.55, 0.95
+                )
+                * _smoothstep_scalar(math.hypot(light.x - other.x, light.y - other.y), 0.04, 0.24)
+                * _smoothstep_scalar(min(light.intensity, other.intensity), 0.0, 0.85)
+                * _smoothstep_scalar(min(light.confidence, other.confidence), 0.0, 0.82)
+            )
+            evidence = max(evidence, pair)
+    return evidence
 
 
 def _camera_metadata(analysis) -> dict[str, object]:
@@ -530,17 +591,17 @@ def _encode_transport_analyses(
 
     samples = tuple(samples)
     grid_width, grid_height = grid_size
-    # Every plane index must retain one semantic identity across the whole
-    # spatial grid. Letting individual placement samples switch between
-    # physical components and RGB-family sources makes bilinear sampling blend
-    # unrelated lights and causes position-dependent seams. A majority vote of
-    # the exact placement analyses chooses one conservative scene-wide layout;
-    # per-cell light energy and color remain fully local inside that layout.
-    creative_votes = sum(
-        any(light.creative_only for light in _select_transport_lights(analysis))
+    # Share one continuous blend across the spatial grid. A majority vote
+    # abruptly replaced every secondary light when an animation crossed it.
+    creative_samples = tuple(
+        _select_transport_lights(analysis, creative_layout=True)
         for _row, _column, analysis in samples
     )
-    creative_layout = creative_votes * 2 > len(samples)
+    layout_mix = _smoothstep_scalar(
+        max((_separation_evidence(lights) for lights in creative_samples), default=0.0),
+        0.0,
+        0.25,
+    )
     # Assemble all linear transport values first, then quantize the complete
     # LUT in one vectorized operation. The earlier scalar encoder performed
     # thousands of tiny NumPy calls per scene even though every channel uses
@@ -566,12 +627,13 @@ def _encode_transport_analyses(
             analysis.local_luminance,
         )
         values[2, row, column, 0] = scene_target_mid(analysis) / 0.58
+        values[2, row, column, 1:3] = (layout_mix, 1.0)
         chroma_destinations.append((1, row, column))
         chroma_colors.append(analysis.ambient_color)
 
         transport_lights = _select_transport_lights(
             analysis,
-            creative_layout=creative_layout,
+            creative_layout=False,
         )
         for light_index, light in enumerate(transport_lights):
             plane = TRANSPORT_LIGHT_BASE + light_index * 3
@@ -614,6 +676,21 @@ def _encode_transport_analyses(
         for index, (plane, row, column) in enumerate(chroma_destinations):
             values[plane, row, column, :3] = chroma[index] / CHROMA_RANGE
 
+    if layout_mix > 0.0:
+        for (row, column, _analysis), lights in zip(samples, creative_samples, strict=True):
+            for light_index, light in enumerate(lights[1:], 1):
+                plane = TRANSPORT_LIGHT_BASE + light_index * 3
+                optional = np.asarray(
+                    (
+                        (light.x, light.y, light.radius),
+                        _linear_chroma(light.color) / CHROMA_RANGE,
+                        (0.0, light.confidence, light.intensity),
+                    ),
+                    dtype=np.float32,
+                )
+                values[plane : plane + 3, row, column, :3] *= 1.0 - layout_mix
+                values[plane : plane + 3, row, column, :3] += optional * layout_mix
+
     # Every data plane is opaque. Ren'Py premultiplies RGBA textures, so
     # storing an independent scalar in alpha would quantize RGB chroma by that
     # scalar before sampling (particularly destructive for dim probes).
@@ -638,6 +715,8 @@ def _transport_light_layout(transport: np.ndarray) -> str:
         )
     else:
         raise ValueError(f"Unexpected transport shape: {array.shape}")
+    if np.all(planes[:, 2, :, 2] == 255):
+        return "continuous-light-slots-v2"
     for light_index in range(1, 4):
         scalar_plane = TRANSPORT_LIGHT_BASE + light_index * 3 + 2
         scalar = planes[:, scalar_plane, :, :3]

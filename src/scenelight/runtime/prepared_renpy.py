@@ -15,7 +15,7 @@ class Movies(object):
         self.decoded = {}
         with api.file("scenelight_runtime/prepared_movies.json") as stream:
             self.entries = json.load(stream)
-        digest = hashlib.sha256(b"scenelight-prepared-v3")
+        digest = hashlib.sha256(b"scenelight-prepared-v4")
         for name in ("live_gpu", "live_opencl"):
             with api.file("scenelight_runtime/" + name + ".txt") as stream:
                 digest.update(stream.read())
