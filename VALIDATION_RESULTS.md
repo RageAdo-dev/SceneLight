@@ -20,10 +20,10 @@ The latest recorded checks, hardware measurements and known limits are in
 - **Performance:** repeated analysis measured about 20% faster on the development
   PC. This is analysis time, not total frame rate, GPU utilization or power.
   The older Radeon machine was unreachable for this revision.
-- **Previous published build:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939242237)
-  and the [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939254926)
-  passed for the preceding animation correction. Those hosted results do not
-  validate the current local candidate.
+- **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032521064)
+  passed for the directional-lighting commit, and the
+  [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013)
+  produced the linked download from that same commit.
 
 A successful installation or short playback test does not establish compatibility
 with every route, asset or custom displayable in a game.

@@ -5,7 +5,7 @@ light and color as they move through a scene.
 
 > **Before you start:** Back up your game or project folder and saves. You’ll have an easy way back if setup is interrupted or your game isn’t compatible.
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/actions/runs/34939254926/artifacts/10384098586)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013/artifacts/10422745842)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
 
 ![Character lighting before and after SceneLight](docs/media/lighting-comparison.png)
 
