@@ -1564,6 +1564,7 @@ class MainWindow(QMainWindow):
                     background.source,
                     size,
                     background.fps,
+                    frames=len(timeline_ms),
                 ) as writer:
                     render_frames(writer.write)
             else:

@@ -121,7 +121,10 @@ class MP4Writer:
     """Feed GPU-rendered RGB frames to a bundled modern FFmpeg.
 
     When the source video contains audio it is carried into the composite and
-    encoded to AAC; videos without audio remain valid silent MP4 files.
+    encoded to AAC; videos without audio remain valid silent MP4 files. Pass
+    ``frames`` whenever the caller knows how many images it will write: the
+    export is then cut at exactly that length and short audio cannot end it
+    early.
     """
 
     def __init__(
@@ -130,6 +133,7 @@ class MP4Writer:
         source: Path,
         size: tuple[int, int],
         fps: float,
+        frames: int | None = None,
     ):
         try:
             from imageio_ffmpeg import get_ffmpeg_exe
@@ -137,8 +141,14 @@ class MP4Writer:
             raise RuntimeError(
                 "Video export needs imageio-ffmpeg. Install SceneLight's preview dependencies."
             ) from error
+        if frames is not None and frames < 1:
+            raise ValueError("Video export needs at least one frame")
+        if frames is not None and fps <= 0:
+            raise ValueError("Video export needs a positive frame rate")
         self.destination = destination
         self.size = size
+        self.frames = frames
+        self.count = 0
         self._published = False
         destination.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(
@@ -181,11 +191,17 @@ class MP4Writer:
             "192k",
             "-af",
             "apad",
-            "-shortest",
             "-movflags",
             "+faststart",
-            str(self.temporary),
         ]
+        if frames is None:
+            # Without a known length FFmpeg has to infer the end of the video.
+            command += ["-shortest"]
+        else:
+            # Cutting at the exact duration keeps a short audio track from
+            # ending the export early on any FFmpeg build.
+            command += ["-t", f"{frames / fps:.9f}"]
+        command.append(str(self.temporary))
         try:
             self._process = subprocess.Popen(
                 command,
@@ -204,6 +220,7 @@ class MP4Writer:
             raise ValueError("Video frame dimensions changed")
         rgb = np.ascontiguousarray(rgba[..., :3], dtype=np.uint8)
         self._process.stdin.write(rgb.tobytes())
+        self.count += 1
 
     def close(self) -> None:
         if self._published:
@@ -224,6 +241,9 @@ class MP4Writer:
         if return_code:
             self.temporary.unlink(missing_ok=True)
             raise RuntimeError(stderr.decode("utf-8", "replace").strip() or "FFmpeg failed")
+        if self.frames is not None and self.count != self.frames:
+            self.temporary.unlink(missing_ok=True)
+            raise RuntimeError(f"Encoder received {self.count} of {self.frames} video frames")
         os.replace(self.temporary, self.destination)
         self._published = True
 

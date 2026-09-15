@@ -307,7 +307,7 @@ def test_short_audio_cannot_truncate_exported_video_frames(tmp_path):
         check=True,
     )
     destination = tmp_path / "longer-video.mp4"
-    with MP4Writer(destination, source, (64, 36), 10.0) as writer:
+    with MP4Writer(destination, source, (64, 36), 10.0, frames=20) as writer:
         for index in range(20):
             writer.write(np.full((36, 64, 3), index * 10, np.uint8))
     capture = cv2.VideoCapture(str(destination))
@@ -316,6 +316,37 @@ def test_short_audio_cannot_truncate_exported_video_frames(tmp_path):
         count += 1
     capture.release()
     assert count == 20
+
+
+def test_declared_frame_count_is_enforced_before_the_export_is_published(tmp_path):
+    import subprocess
+
+    import pytest
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    destination = tmp_path / "truncated.mp4"
+    source = tmp_path / "short-audio.m4a"
+    subprocess.run(
+        [
+            get_ffmpeg_exe(),
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.1",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        check=True,
+    )
+    with pytest.raises(RuntimeError, match="3 of 4"):
+        with MP4Writer(destination, source, (64, 36), 10.0, frames=4) as writer:
+            for index in range(3):
+                writer.write(np.full((36, 64, 3), index * 10, np.uint8))
+    assert not destination.exists()
+    assert list(tmp_path.glob("*.mp4")) == []
 
 
 def test_video_encoder_start_failure_preserves_previous_export(tmp_path, monkeypatch):

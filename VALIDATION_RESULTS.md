@@ -3,14 +3,17 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 629 tests passed on 15 September 2026, with no failures
+- **Local candidate:** 630 tests passed on 15 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.
 - **Directional lighting:** regression tests cover direction reversal, surface-map
   resolution, painted-edge relief, dark scenes and continuity as bright regions meet.
 - **Exports:** the Preview export path produced all 1,799 colored-background frames
-  and all 900 storm frames at 1920 × 1080 and the original frame rates.
+  and all 900 storm frames at 1920 × 1080 and the original frame rates. Video
+  exports are cut to the exact frame count the caller declares, so a short audio
+  track can no longer end the file early; a count mismatch is refused instead of
+  publishing a shortened video.
 - **Native rendering:** fresh Ren'Py 7.7.1 and 8.5.3 fixtures passed movement,
   transitions, prepared animation and save/load with form-map version 6. Original
   authored files were preserved.

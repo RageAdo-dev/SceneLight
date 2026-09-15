@@ -5,7 +5,7 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The local suite passed **629 tests**, with no failures or skips. Regression checks
+The local suite passed **630 tests**, with no failures or skips. Regression checks
 cover side-light reversal, consistent normals across sprite sizes, bounded painted
 relief, dark-scene response and continuity when bright regions meet. Fresh Ren'Py
 7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
@@ -15,6 +15,11 @@ The actual Preview export path retained all 1,799 frames of the colored-backgrou
 clip and all 900 storm frames at 1080p and their original frame rates. The Windows
 launcher has been checked with an isolated bundled interpreter; this is not a
 clean Windows virtual-machine test.
+
+Video export length is now determined by the number of frames the exporter
+declares, not by how long the source audio happens to last. An encoder that
+receives the wrong number of frames refuses to publish the file, so a truncated
+export fails loudly instead of shipping.
 
 Repeated before/after analysis runs on the development PC measured approximately
 4.0–4.2 ms before and 3.27–3.29 ms after. GPU analysis render targets decreased
