@@ -3,7 +3,7 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 630 tests passed on 15 September 2026, with no failures
+- **Local candidate:** 631 tests passed on 16 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.
@@ -25,20 +25,21 @@ The latest recorded checks, hardware measurements and known limits are in
 - **Long session:** 48 interactions of *Still With You* ran with lighting enabled
   across three backgrounds and two characters, with no renderer failure.
 - **Repository:** example animations are re-encoded as page-weight previews, with
-  full-quality originals attached to the private beta release. The Windows launcher
-  carries product version metadata, and the release workflow signs both launchers
-  when signing secrets are present.
+  full-quality originals attached to the private beta release. The Windows
+  launchers carry the product name, version, publisher and copyright in their
+  version resources, and the release workflow signs both when signing secrets
+  are present.
 - **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032521064)
-  passed for the directional-lighting commit, and the
+  passed for the directional-lighting commit, which the
   [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013)
-  produced the download used before the packaging changes below.
+  also covered. The linked download has since been rebuilt from a later commit.
 - **Clean machine:** a Windows Sandbox with no Python installed ran the packaged
   EXE, scanned and installed a corpus game with `source_untouched`, verified it,
   launched it, and removed it again with the game's file hash unchanged. Windows
   reported the launcher as version 1.0.0, product SceneLight.
 - **Package:** the [private beta release](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta)
   holds the current ZIP, its checksum and the full-quality example media. The ZIP
-  is built from the commit that the README links to.
+  matches a rebuild of the current `main` commit, byte for byte.
 
 A successful installation or short playback test does not establish compatibility
 with every route, asset or custom displayable in a game.

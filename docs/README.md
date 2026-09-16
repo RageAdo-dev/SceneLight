@@ -15,6 +15,8 @@
 ## Technical reference
 
 - [Architecture](ARCHITECTURE.md)
+- [Rendering status](REALTIME_IMPLEMENTATION_STATUS.md)
+- [Real-time rendering design](REALTIME_RENDERING_PLAN.md)
 - [Prepared movie playback](prepared-playback.md)
 - [Live light continuity](live-continuity.md)
 - [Performance measurements](performance.md)

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (unreleased)
+## 1.0.0-beta
 
 ### Lighting and playback
 
@@ -24,7 +24,8 @@
 ### Setup and author tools
 
 - SceneLight.exe opens Setup and Preview with a bundled Windows runtime.
-- SceneLight.exe reports the product name and version in Windows file properties.
+- SceneLight.exe and the bundled game launcher report the product name, version,
+  publisher and copyright in Windows file properties.
 - Preview exports at 720p, 1080p or 4K, with settings recorded beside the file.
 - GIF export retains one frame at a time; short audio tracks no longer truncate video exports.
 - Install in place or create a separate playable copy. Review character tags before installation.

@@ -5,7 +5,7 @@ setup is interrupted or your project isn’t compatible.
 
 ## Install
 
-1. Open **SceneLight.bat → For mod developers** and select the project containing `game/`.
+1. Open **SceneLight.exe → For mod developers** and select the project containing `game/`.
 2. Scan the project and select its character image tags. Leave UI, stickers and props unchecked.
 3. Add any missing tag, then choose **Install developer API**.
 
