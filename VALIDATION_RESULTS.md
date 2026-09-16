@@ -31,7 +31,14 @@ The latest recorded checks, hardware measurements and known limits are in
 - **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032521064)
   passed for the directional-lighting commit, and the
   [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013)
-  produced the linked download from that same commit.
+  produced the download used before the packaging changes below.
+- **Clean machine:** a Windows Sandbox with no Python installed ran the packaged
+  EXE, scanned and installed a corpus game with `source_untouched`, verified it,
+  launched it, and removed it again with the game's file hash unchanged. Windows
+  reported the launcher as version 1.0.0, product SceneLight.
+- **Package:** the [private beta release](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta)
+  holds the current ZIP, its checksum and the full-quality example media. The ZIP
+  is built from the commit that the README links to.
 
 A successful installation or short playback test does not establish compatibility
 with every route, asset or custom displayable in a game.
