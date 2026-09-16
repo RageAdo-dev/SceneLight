@@ -6,6 +6,28 @@ easy way back if setup is interrupted or your game isn’t compatible.
 [Download the Windows package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0-beta/SceneLight-v1.0.0-Windows.zip).
 Extract the download, then extract `SceneLight-v1.0.0-Windows.zip` inside it.
 
+## Install without the Windows app
+
+The packaged app is a convenience, not a requirement. If you already have
+Python 3.10 or newer, install SceneLight as a package and Windows never shows a
+download warning, because the launcher is created on your own machine instead of
+being downloaded as an executable:
+
+```text
+pip install git+https://github.com/RageAdo-dev/SceneLight
+scenelight-setup
+```
+
+`scenelight --help` lists the command-line equivalents, including
+`scenelight install --project <game folder>`, and
+`python -m scenelight.preview` opens Preview on its own. Everything else in this
+guide works the same way.
+
+If you do download the Windows package and would rather not see the one-time
+"Windows protected your PC" prompt, right-click the ZIP, open **Properties**,
+tick **Unblock**, then extract it. Unblocking removes the marker Windows added
+when the file was downloaded.
+
 ## Add SceneLight to a game
 
 1. Open **SceneLight.exe** and select your game folder.
