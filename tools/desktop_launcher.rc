@@ -13,11 +13,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "SceneLight\0"
+            VALUE "Comments", "https://github.com/RageAdo-dev/SceneLight\0"
+            VALUE "CompanyName", "RageAdo-dev\0"
             VALUE "FileDescription", "SceneLight setup and preview\0"
             VALUE "FileVersion", "1.0.0\0"
             VALUE "InternalName", "SceneLight\0"
-            VALUE "LegalCopyright", "MIT licensed\0"
+            VALUE "LegalCopyright", "Copyright (c) 2026 RageAdo-dev. MIT licensed.\0"
             VALUE "OriginalFilename", "SceneLight.exe\0"
             VALUE "ProductName", "SceneLight\0"
             VALUE "ProductVersion", "1.0.0\0"

@@ -58,29 +58,28 @@ visibility and publication remain separate owner decisions.
 
 ## Native launcher
 
-The desktop entry point is separate from the installed-game launcher. Rebuild
-its checked-in binary with MinGW-w64:
+The desktop entry point and the launcher installed into games are separate
+binaries. Rebuild both checked-in binaries with MinGW-w64:
 
 ```text
 python tools/build_desktop_launcher.py
 ```
 
-The script writes `tools/desktop_launcher.rc` from the packaged version, compiles
-it with `windres` and links it into `src/scenelight/assets/scenelight-desktop.exe`,
-so Windows file properties report the product name and version. Keep `windres`
-and `gcc` on `PATH`, or pass their paths as arguments.
+The script writes `tools/desktop_launcher.rc` and `tools/native_launcher.rc` from
+the packaged version, compiles them with `windres` and links them into
+`src/scenelight/assets/scenelight-desktop.exe` and
+`src/scenelight/assets/scenelight-launcher.exe`. Windows file properties then
+report the product name, version, copyright holder and project URL for both.
+Keep `windres` and `gcc` on `PATH`, or pass their paths as arguments.
 
 Run `SceneLight.exe --diagnostics <report.json>` from a complete package to check
 the bundled interpreter, GUI imports, Tcl/Tk and dependency routing. Test Setup
 and Preview interactively as well.
 
-Build from a Visual C++ Developer Command Prompt:
-
-```text
-cl /nologo /O2 /W4 /DUNICODE /D_UNICODE tools\native_launcher.c /Fe:src\scenelight\assets\scenelight-launcher.exe /link /SUBSYSTEM:WINDOWS user32.lib /Brepro
-```
-
-Review warnings, run `tests/test_launch_safety.py` and record the binary hash.
+Review warnings, run `tests/test_launch_safety.py` and `tests/test_desktop.py`,
+and record the binary hashes. The link step omits the PE timestamp, so the same
+sources reproduce the same bytes and a recorded hash still matches after a
+rebuild.
 If signing is used, sign before hashing and do not modify the binary afterward.
 Never instruct users to disable SmartScreen or antivirus.
 

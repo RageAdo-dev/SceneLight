@@ -9,7 +9,7 @@ description = "Dynamic screen-space 2D sprite relighting for Ren'Py"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "SceneLight contributors" }]
+authors = [{ name = "RageAdo-dev" }]
 dependencies = [
   "numpy==2.1.3",
   "opencv-python-headless==4.10.0.84",

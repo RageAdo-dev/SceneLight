@@ -55,10 +55,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     wchar_t runtime_directory[32768];
     wcscpy(runtime_directory, runtime);
     wchar_t *runtime_slash = wcsrchr(runtime_directory, L'\\');
+    wchar_t *runtime_forward_slash = wcsrchr(runtime_directory, L'/');
+    if (runtime_forward_slash && (!runtime_slash || runtime_forward_slash > runtime_slash)) {
+        runtime_slash = runtime_forward_slash;
+    }
     if (!runtime_slash) return 4;
     *runtime_slash = 0;
 
-    STARTUPINFOW startup = { sizeof(startup) };
+    STARTUPINFOW startup = { 0 };
+    startup.cb = sizeof(startup);
     PROCESS_INFORMATION process = { 0 };
     if (!CreateProcessW(runtime, command, NULL, NULL, FALSE, 0, NULL, runtime_directory, &startup, &process)) {
         MessageBoxW(NULL, L"SceneLight could not start the game runtime.", L"SceneLight", MB_ICONERROR);

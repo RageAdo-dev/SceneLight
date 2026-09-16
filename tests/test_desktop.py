@@ -22,6 +22,13 @@ def test_launcher_version_resource_matches_the_packaged_version():
     assert module.version_quad(version) == (1, 0, 0, 0)
     checked_in = module.RESOURCE.read_text(encoding="utf-8").splitlines()
     assert checked_in == module.resource_text(version).splitlines()
+    native = module.NATIVE_RESOURCE.read_text(encoding="utf-8").splitlines()
+    assert native == module.native_resource_text(version).splitlines()
+    for lines in (checked_in, native):
+        text = "\n".join(lines)
+        assert "RageAdo-dev" in text
+        assert "github.com/RageAdo-dev/SceneLight" in text
+        assert "MIT licensed" in text
 
 
 def test_bundled_app_uses_its_runtime_instead_of_a_stale_user_environment(tmp_path, monkeypatch):
