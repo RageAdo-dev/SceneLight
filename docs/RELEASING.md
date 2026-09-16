@@ -91,20 +91,44 @@ executable, and that warning gets worse as more people download a new file.
 Signing removes it, so treat a certificate as a release prerequisite rather
 than a nicety.
 
-Choose one of these before a public beta:
+Public-trust code signing keys have to live in validated hardware or a cloud
+HSM, so a plain `.pfx` file is no longer accepted by CAs for new certificates.
+That leaves three realistic options, priced as of September 2026:
 
-- **Azure Trusted Signing** — cloud signing on a subscription, no hardware
-  token, the cheapest option for a small project.
-- **OV certificate** — signs immediately, but SmartScreen reputation builds up
-  over the first weeks of downloads.
-- **EV certificate** — usually ships on a hardware token, and earns SmartScreen
-  trust straight away at the highest cost.
+| Option | Cost | Notes |
+| --- | --- | --- |
+| Azure Artifact Signing (formerly Trusted Signing), Basic | **$9.99/month**, 5,000 signatures | Cloud signing, no token. Organizations need a US/Canada/EU/UK/AU/NZ/JP/KR/SG/CH/NO/IL address and three years of verifiable history; individual developers must be in the US or Canada and validate against the Azure billing account identity. |
+| Azure Artifact Signing, Premium | $99.99/month, 100,000 signatures | Same service, more signatures and certificate profiles. Additional signatures cost $0.005. |
+| OV certificate plus cloud signing | **$129/year** for the certificate, plus a signing subscription from **$15/month** (SSL.com eSigner, 240 signatures) | SmartScreen reputation builds over the first weeks of downloads. A YubiKey token costs extra and cannot be used from CI. |
+| EV certificate | **$349/year** (SSL.com, list price) | Immediate SmartScreen trust, hardware token or cloud HSM required. EV sole-proprietor listings start around $359/year. |
+
+For a small private beta, Azure Artifact Signing Basic is the cheapest path at
+about **$120/year**. An OV certificate with cloud signing works out around
+**$310/year**. Buy EV only if you need trust on the very first download.
 
 To sign in CI, add two repository secrets and the workflow signs both launchers
 before the ZIP is assembled and fails the build if the signature is not valid:
 
 - `WINDOWS_CERT_PFX` — the `.pfx` file, base64 encoded.
 - `WINDOWS_CERT_PASSWORD` — its password.
+
+That path only applies to certificates you can import as a `.pfx`. For Azure
+Artifact Signing, set these instead and the workflow shells out to `signtool`
+with the Artifact Signing dlib:
+
+- `TRUSTED_SIGNING_ACCOUNT` — the Artifact Signing account name.
+- `TRUSTED_SIGNING_CERT_PROFILE` — the certificate profile name.
+- `TRUSTED_SIGNING_ENDPOINT` — optional; defaults to
+  `https://eus.codesigning.azure.net/`.
+- `TRUSTED_SIGNING_DLIB` — optional path to `Azure.CodeSigning.Dlib.dll` when it
+  is not installed under `Program Files`.
+- `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` — a service
+  principal with the Trusted Signing Certificate Profile Signer role.
+
+Install the Trusted Signing client tools on the runner before the signing step;
+the workflow searches for the dlib and stops with an explanation if it is
+missing. Microsoft documents the client tools and the required Windows SDK
+version in [Sign files with Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/how-to-signing-integrations).
 
 Create the base64 text with:
 

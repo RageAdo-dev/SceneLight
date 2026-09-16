@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Compatibility and validation notes
+    url: https://github.com/RageAdo-dev/SceneLight/blob/main/docs/BETA_VALIDATION.md
+    about: Known limits, tested engines and hardware results before reporting a bug.
