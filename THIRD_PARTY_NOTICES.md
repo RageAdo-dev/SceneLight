@@ -10,6 +10,26 @@ Windows packages also include CPython and Tcl/Tk. Their notices remain under
 Python dependency notices remain in their installed package and `.dist-info`
 directories under `_scenelight/python/Lib/site-packages`.
 
+## Qt and PySide6
+
+The Preview interface links against **PySide6-Essentials 6.9.2** and the Qt 6
+libraries it ships, which are offered under the **LGPL v3**. They are included
+unmodified as separate dynamic libraries, so a recipient can replace them with
+their own build. The full licence text travels with the package under
+`_scenelight/python/Lib/site-packages/pyside6_essentials-6.9.2.dist-info/licenses/`
+and `shiboken6-6.9.2.dist-info/licenses/`. SceneLight does not modify PySide6 or
+Qt, and its own source stays under the MIT licence.
+
+## FFmpeg
+
+Video export and movie preparation call a bundled **FFmpeg 7.1** binary from
+imageio-ffmpeg (`gyan.dev` essentials build) as a separate process. That build
+enables GPL components, so it is distributed under the **GPL v3**; the full text
+is at [docs/licenses/FFMPEG-GPL-3.0.txt](docs/licenses/FFMPEG-GPL-3.0.txt), and
+the source for that exact build is published at <https://www.gyan.dev/ffmpeg/builds/>.
+Because SceneLight invokes FFmpeg as a separate program rather than linking
+against it, SceneLight itself remains MIT licensed.
+
 ## Ren'Py
 
 Windows packages include the official **Ren'Py 7.7.1** compatibility runtime for

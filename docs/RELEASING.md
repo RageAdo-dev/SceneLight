@@ -130,6 +130,43 @@ the workflow searches for the dlib and stops with an explanation if it is
 missing. Microsoft documents the client tools and the required Windows SDK
 version in [Sign files with Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/how-to-signing-integrations).
 
+### Free signing for an open-source release
+
+[SignPath Foundation](https://signpath.org/) signs open-source projects at no
+cost. They check that the binary was built from a public repository and vouch
+for that with their own certificate, which also means the signature names them
+rather than you. It is the only genuinely free route to a signed Windows build,
+and it requires the project to be public and built through their signing step.
+
+## Going public
+
+Releasing publicly changes what users can verify, so walk this list once:
+
+1. **Decide on the source.** A public repository is required for free signing,
+   community bug reports and free unlimited CI minutes. Private repositories
+   spend Actions minutes and cannot use SignPath Foundation.
+2. **Shrink the history first.** Demo media was committed several times while it
+   was being re-rendered, which leaves roughly 800 MB in `.git`. Rewrite the
+   large paths out of history before the repository is public, while a rewrite
+   costs nothing and no outside clone exists. Keep a `git bundle` backup.
+3. **Re-check what becomes visible.** Commit messages, `docs/history/`, test
+   fixtures and issue templates all become public. Search for local paths,
+   personal names and credentials before flipping the switch.
+4. **Confirm the licence bundle.** MIT for SceneLight, LGPL v3 notices for
+   Qt/PySide6, GPL v3 text plus the source pointer for the bundled FFmpeg, and
+   the CPython, Tcl/Tk and Ren'Py notices. See `THIRD_PARTY_NOTICES.md`.
+5. **Check the artwork.** The rendered examples use DDLC characters. Team
+   Salvato's IP guidelines cover non-commercial fan work; if that is not the
+   footing you want, replace the examples with the Ren'Py tutorial artwork.
+6. **Publish the release, not just the tag.** Move the release from prerelease to
+   latest once a build has survived real use, and keep the checksum asset next
+   to the ZIP.
+
+Shipping without a signature is a legitimate choice, especially for the first
+public builds. Windows will warn until the file hash accumulates reputation, and
+an unsigned file starts from zero again on every version. Publishing the SHA-256
+next to the download lets users confirm they have the file you built.
+
 Create the base64 text with:
 
 ```powershell
