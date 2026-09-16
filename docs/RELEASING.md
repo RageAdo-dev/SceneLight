@@ -62,8 +62,13 @@ The desktop entry point is separate from the installed-game launcher. Rebuild
 its checked-in binary with MinGW-w64:
 
 ```text
-gcc -O2 -Wall -Wextra -Werror -municode -mwindows -static-libgcc -s tools/desktop_launcher.c -o src/scenelight/assets/scenelight-desktop.exe -luser32
+python tools/build_desktop_launcher.py
 ```
+
+The script writes `tools/desktop_launcher.rc` from the packaged version, compiles
+it with `windres` and links it into `src/scenelight/assets/scenelight-desktop.exe`,
+so Windows file properties report the product name and version. Keep `windres`
+and `gcc` on `PATH`, or pass their paths as arguments.
 
 Run `SceneLight.exe --diagnostics <report.json>` from a complete package to check
 the bundled interpreter, GUI imports, Tcl/Tk and dependency routing. Test Setup
@@ -78,5 +83,37 @@ cl /nologo /O2 /W4 /DUNICODE /D_UNICODE tools\native_launcher.c /Fe:src\scenelig
 Review warnings, run `tests/test_launch_safety.py` and record the binary hash.
 If signing is used, sign before hashing and do not modify the binary afterward.
 Never instruct users to disable SmartScreen or antivirus.
+
+## Code signing
+
+Windows shows "Unknown Publisher" and a SmartScreen warning for an unsigned
+executable, and that warning gets worse as more people download a new file.
+Signing removes it, so treat a certificate as a release prerequisite rather
+than a nicety.
+
+Choose one of these before a public beta:
+
+- **Azure Trusted Signing** — cloud signing on a subscription, no hardware
+  token, the cheapest option for a small project.
+- **OV certificate** — signs immediately, but SmartScreen reputation builds up
+  over the first weeks of downloads.
+- **EV certificate** — usually ships on a hardware token, and earns SmartScreen
+  trust straight away at the highest cost.
+
+To sign in CI, add two repository secrets and the workflow signs both launchers
+before the ZIP is assembled and fails the build if the signature is not valid:
+
+- `WINDOWS_CERT_PFX` — the `.pfx` file, base64 encoded.
+- `WINDOWS_CERT_PASSWORD` — its password.
+
+Create the base64 text with:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('SceneLight.pfx')) |
+    Set-Clipboard
+```
+
+Signing happens before hashing. Record the signed binary's SHA-256 in the
+release notes, and never modify an executable after signing it.
 
 [Compatibility results](BETA_VALIDATION.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)

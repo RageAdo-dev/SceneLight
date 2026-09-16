@@ -34,7 +34,8 @@ The same character with a moving background:
 
 ![Monika beside a flowing forest waterfall](docs/media/waterfall-example-preview.webp)
 
-[1080p video](docs/media/waterfall-example.mp4) · [1080p GIF](docs/media/waterfall-example.gif)
+[Video](docs/media/waterfall-example.mp4) · [GIF](docs/media/waterfall-example.gif) · [full-quality
+downloads](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta)
 
 Monika © Team Salvato. These are unofficial examples. [Artwork and background credits](docs/media/CREDITS.md).
 
@@ -45,7 +46,8 @@ Open it from **Settings → Tools → Open Preview & Calibrator**.
 
 ![Character lighting changing between warm and blue lamps](docs/media/moving-light-preview.webp)
 
-[1080p video](docs/media/moving-light.mp4) · [1080p GIF](docs/media/moving-light.gif)
+[Video](docs/media/moving-light.mp4) · [GIF](docs/media/moving-light.gif) · [full-quality
+downloads](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta)
 
 ## Surface maps
 

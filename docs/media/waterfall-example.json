@@ -29,13 +29,13 @@
   "fps": 60.0,
   "encodings": {
     "waterfall-example.webp": {
-      "bytes": 58163400,
-      "sha256": "7465430cbb909bbb2e9b9d94ec33d716f888ca7294b84c11ae3ece884d673fdd",
-      "frames": 120,
-      "duration_ms": 1999,
+      "bytes": 26647324,
+      "sha256": "3df8155ea94f60d5b5c62e16d3713e4cdbc164d89e0b04b302db7515413512ba",
+      "frames": 60,
+      "duration_ms": 2000,
       "frame_durations_ms": [
-        16,
-        17
+        33,
+        34
       ]
     },
     "waterfall-example.mp4": {
@@ -45,22 +45,22 @@
       "fps": 60.0
     },
     "waterfall-example.gif": {
-      "bytes": 75814515,
-      "sha256": "c88fcb2188522e8ad3b370a3485354a8b1532734d6c87bd27094c58d6a661669",
-      "frames": 100,
+      "bytes": 21464965,
+      "sha256": "b056ef9a58409b0d0ce11cb2fba9a5426e5ea9503c521dcb65249fed245c3dde",
+      "frames": 40,
       "duration_ms": 2000,
       "frame_durations_ms": [
-        20
+        50
       ]
     },
     "waterfall-example-preview.webp": {
-      "bytes": 27583728,
-      "sha256": "0acaa7bfa6b6675bfc0fadd080462c14164f8829bd2d33b5c398c232a837a48c",
-      "frames": 120,
-      "duration_ms": 1999,
+      "bytes": 8655480,
+      "sha256": "0fb76c10b5324ba9cf15529e486ea05502bbd91711b27f33488c6f2ebdafdb00",
+      "frames": 60,
+      "duration_ms": 2000,
       "frame_durations_ms": [
-        16,
-        17
+        33,
+        34
       ]
     }
   }

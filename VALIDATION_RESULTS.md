@@ -17,9 +17,17 @@ The latest recorded checks, hardware measurements and known limits are in
 - **Native rendering:** fresh Ren'Py 7.7.1 and 8.5.3 fixtures passed movement,
   transitions, prepared animation and save/load with form-map version 6. Original
   authored files were preserved.
-- **Performance:** repeated analysis measured about 20% faster on the development
-  PC. This is analysis time, not total frame rate, GPU utilization or power.
-  The older Radeon machine was unreachable for this revision.
+- **Low-end host:** on the Radeon HD 6700M test machine, warm-scene analysis fell
+  from 177.5 ms to 137.1 ms and cool-scene analysis from 171.1 ms to 123.6 ms
+  (23–28% lower), with GPU passes down from 131 to 97 and analysis render targets
+  from 163.4 MiB to 131.6 MiB. A 183-second run held 435.6–525.5 MiB of private
+  memory after warm-up across 10 scene cycles and one save/load.
+- **Long session:** 48 interactions of *Still With You* ran with lighting enabled
+  across three backgrounds and two characters, with no renderer failure.
+- **Repository:** example animations are re-encoded as page-weight previews, with
+  full-quality originals attached to the private beta release. The Windows launcher
+  carries product version metadata, and the release workflow signs both launchers
+  when signing secrets are present.
 - **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032521064)
   passed for the directional-lighting commit, and the
   [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013)

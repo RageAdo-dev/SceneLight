@@ -1,6 +1,27 @@
+import importlib.util
 from pathlib import Path
 
 from scenelight import desktop, setup_gui
+
+
+def _launcher_builder():
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "scenelight_launcher_builder", root / "tools/build_desktop_launcher.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_launcher_version_resource_matches_the_packaged_version():
+    module = _launcher_builder()
+    version = module.package_version()
+    assert version == __import__("scenelight").__version__
+    assert module.version_quad(version) == (1, 0, 0, 0)
+    checked_in = module.RESOURCE.read_text(encoding="utf-8").splitlines()
+    assert checked_in == module.resource_text(version).splitlines()
 
 
 def test_bundled_app_uses_its_runtime_instead_of_a_stale_user_environment(tmp_path, monkeypatch):

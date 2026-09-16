@@ -27,10 +27,23 @@ declares, not by how long the source audio happens to last. An encoder that
 receives the wrong number of frames refuses to publish the file, so a truncated
 export fails loudly instead of shipping.
 
-Repeated before/after analysis runs on the development PC measured approximately
-4.0–4.2 ms before and 3.27–3.29 ms after. GPU analysis render targets decreased
-from 191 to 160. These short runs measure analysis rather than total game frame
-rate, utilization or power. The older Radeon host was unreachable for this revision.
+The directional revision was measured on the older Radeon HD 6700M host by running
+one frame of analysis on each build, back to back, through the same offscreen
+context. Warm-scene analysis fell from 177.5 ms to 137.1 ms and cool-scene analysis
+from 171.1 ms to 123.6 ms (23–28% lower). GPU passes fell from 131 to 97 per frame
+and analysis render targets from 163.4 MiB to 131.6 MiB. These are analysis
+measurements, not total frame rate, utilization or power.
+
+A 183-second run of the same host stayed between 435.6 and 525.5 MiB of private
+memory after warm-up, finished 10 scene cycles and one save/load, and never
+disabled the renderer. Prepared movie lighting from an earlier build is rejected
+after an engine change and rebuilt by the installer; that run covers live analysis
+instead, because it copied the runtime into a game without re-running setup.
+
+A 48-interaction scripted session in *Still With You* on Ren'Py 8.5.3 kept live
+lighting enabled across three backgrounds and two characters with several
+expressions, with no renderer failures. It stopped at an author-authored pause the
+probe does not drive, so this is a long opening session rather than a full route.
 
 ## Previous published validation
 
@@ -66,10 +79,21 @@ adjustment. It does not hold lighting fixed or reduce the source frame rate.
 | Source protection | Original hashes and isolated save sentinels preserved |
 
 Fourteen of fifteen games in the regression corpus passed automatic install and
-verification. **Axiom** produced no background/sprite mappings and is not counted
-as automatically compatible. Opening-story checks covered eight dialogue
-interactions each in Amy, Still With You and Crossing Over. Full routes and every
-custom asset were not exercised. [Detailed corpus results](history/validation-2026-09-11.md).
+verification. **Axiom** is a monologue over full-screen painted art: none of its
+ten images has any transparency, so it contains no character sprites and
+SceneLight correctly installs nothing. It is a game with nothing to light rather
+than a detection failure. Opening-story checks covered eight dialogue interactions
+each in Amy, Still With You and Crossing Over, and the longer session above covers
+48 interactions in Still With You. Full routes and every custom asset were not
+exercised. [Detailed corpus results](history/validation-2026-09-11.md).
+
+Example media in the repository is re-encoded as page-weight previews; the
+full-quality originals are attached to the
+[private beta release](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta).
+The Windows launcher now carries product version metadata, and the release workflow
+signs both launchers and fails the build on an invalid signature when the signing
+secrets are configured. No certificate is configured yet, so published builds are
+still unsigned and Windows will show "Unknown Publisher".
 
 Form-map v5 passed movement, lighting-mode, transition and save/load checks on
 Ren'Py 7.7.1 and 8.5.3. The vertex and fallback shaders produced identical pixels

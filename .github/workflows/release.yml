@@ -12,6 +12,9 @@ jobs:
   release:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      SCENELIGHT_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+      SCENELIGHT_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -28,6 +31,30 @@ jobs:
       - run: bandit -r src -ll
       - run: python -m pip_audit -r requirements-preview.txt --progress-spinner off
       - run: python -m build
+      - name: Sign the bundled launchers
+        if: env.SCENELIGHT_CERT_PFX != ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfx = Join-Path $env:RUNNER_TEMP 'scenelight-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SCENELIGHT_CERT_PFX))
+          try {
+            $password = ConvertTo-SecureString -String $env:SCENELIGHT_CERT_PASSWORD -Force -AsPlainText
+            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            foreach ($exe in @(
+              'src\scenelight\assets\scenelight-desktop.exe',
+              'src\scenelight\assets\scenelight-launcher.exe'
+            )) {
+              $signature = Set-AuthenticodeSignature -FilePath $exe -Certificate $cert `
+                -HashAlgorithm SHA256 -TimestampServer 'http://timestamp.digicert.com'
+              if ($signature.Status -ne 'Valid') {
+                throw "Signing failed for $exe ($($signature.Status))"
+              }
+              Write-Output "Signed $exe"
+            }
+          } finally {
+            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
+          }
       - name: Build the tested ZIP variants with the verified compatibility runtime
         shell: powershell
         run: |

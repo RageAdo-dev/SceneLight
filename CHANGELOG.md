@@ -19,15 +19,18 @@
 - Prepared movies include the exact color conversions used by legacy and current decoders.
 - Compatible renderers reuse constant scene samples in the vertex shader to reduce draw time.
 - Transition snapshots keep their lighting and release their graphics textures correctly.
+- Live analysis runs in about a quarter less time on an older Radeon laptop GPU, with fewer GPU passes and smaller analysis buffers.
 
 ### Setup and author tools
 
 - SceneLight.exe opens Setup and Preview with a bundled Windows runtime.
+- SceneLight.exe reports the product name and version in Windows file properties.
 - Preview exports at 720p, 1080p or 4K, with settings recorded beside the file.
 - GIF export retains one frame at a time; short audio tracks no longer truncate video exports.
 - Install in place or create a separate playable copy. Review character tags before installation.
 - Updates reuse valid analysis, rebuild changed inputs and preserve recovery data.
 - Large captures resume after interruption and limit workers according to available memory.
+- The release workflow signs both launchers when signing credentials are configured, and fails the build on an invalid signature.
 - Ren'Py 6 games can use the verified 7.7.1 compatibility runtime.
 - Authors can control lighting by project, background, scene, character or image.
 - Rain and glitch effects are available through the author API; the player effects panel is disabled.
