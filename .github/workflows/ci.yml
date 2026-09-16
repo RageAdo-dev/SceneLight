@@ -32,10 +32,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1
       - run: python -m pip install .
       - run: python -m pip check
-      - name: Verify preparation is available without the optional Preview stack
+      - name: Verify a plain install provides preparation and the Preview stack
         run: >-
           python -c "from scenelight.setup_gui import missing_dependencies, missing_preview_dependencies;
-          assert not missing_dependencies(); assert missing_preview_dependencies();
+          assert not missing_dependencies(); assert not missing_preview_dependencies();
           from PySide6.QtGui import QOpenGLContext, QOffscreenSurface;
           from scenelight.prepared import FramePreparer;
           from scenelight.preview.media import MediaClip;
