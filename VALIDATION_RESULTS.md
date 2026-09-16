@@ -29,10 +29,10 @@ The latest recorded checks, hardware measurements and known limits are in
   launchers carry the product name, version, publisher and copyright in their
   version resources, and the release workflow signs both when signing secrets
   are present.
-- **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032521064)
-  passed for the directional-lighting commit, which the
-  [Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013)
-  also covered. The linked download has since been rebuilt from a later commit.
+- **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35069311253)
+  pass on the current `main`, covering the full test suite on Windows and Linux
+  plus dependency resolution for a plain install. The linked download is built
+  from `main` and its checksum is published beside it.
 - **Clean machine:** a Windows Sandbox with no Python installed ran the packaged
   EXE, scanned and installed a corpus game with `source_untouched`, verified it,
   launched it, and removed it again with the game's file hash unchanged. Windows

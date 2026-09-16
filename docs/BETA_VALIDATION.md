@@ -11,11 +11,10 @@ relief, dark-scene response and continuity when bright regions meet. Fresh Ren'P
 7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
 save/load using form-map v6; original authored files were preserved.
 
-All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032521064)
-passed for commit `49c854a`, which the
-[Windows package build](https://github.com/RageAdo-dev/SceneLight/actions/runs/35032802013)
-also covered. The linked download was rebuilt from `485d5b9`. Hosted runners skip
-the graphics-dependent tests, which the local runs cover.
+All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35069311253)
+pass on the current `main`. The linked download is built from `main`, and its
+checksum is published beside it. Hosted runners skip the graphics-dependent tests,
+which the local runs cover.
 
 The actual Preview export path retained all 1,799 frames of the colored-background
 clip and all 900 storm frames at 1080p and their original frame rates. The Windows
