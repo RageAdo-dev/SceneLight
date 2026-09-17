@@ -1171,23 +1171,41 @@ def _pseudo_surface(
         if linear_luma is not None
         else _luminance(linear_srgb if linear_srgb is not None else _srgb_to_linear(srgb))
     )
-    broad_luma = cv2.GaussianBlur(luma, (0, 0), sigmaX=max(2.0, min(alpha.shape) / 100))
+    short_side = float(min(alpha.shape))
+    # Painted pixels are not geometry. Line art and the artist's own shading
+    # boundaries are narrow bright and dark ribbons; differentiating them turns
+    # flat drawings into hard ridges that read as creases across a face or a
+    # sleeve. Rank-filter those ribbons away first, then keep only the broad
+    # volume that survives at form scale.
+    ribbon_radius = int(max(3, round(short_side / 96.0)) | 1)
+    if ribbon_radius > 1:
+        ribbon_source = np.clip(luma * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        luma = cv2.medianBlur(ribbon_source, ribbon_radius).astype(np.float32) / 255.0
+    broad_luma = cv2.GaussianBlur(luma, (0, 0), sigmaX=max(2.0, short_side / 100))
     broad_luma = (broad_luma - np.mean(broad_luma[mask > 0])) if np.any(mask) else broad_luma
     # A distance field has ridges wherever two silhouette edges are equally
     # close. Smooth that broad shape separately: applying the same wide filter
     # to painted relief would erase useful hair, face and clothing detail.
     silhouette_height = cv2.GaussianBlur(
-        np.sqrt(np.maximum(distance, 0.0)), (0, 0), sigmaX=max(1.2, min(alpha.shape) / 16)
+        np.sqrt(np.maximum(distance, 0.0)), (0, 0), sigmaX=max(1.2, short_side / 16)
     )
-    detail_height = cv2.GaussianBlur(broad_luma, (0, 0), sigmaX=max(1.2, min(alpha.shape) / 260))
-    height = 0.76 * silhouette_height + 0.24 * detail_height
+    # Painted shading edges sit at strand and fold scale. Anything finer than
+    # broad volume is albedo, and the artwork already carries it.
+    detail_height = cv2.GaussianBlur(broad_luma, (0, 0), sigmaX=max(1.2, short_side / 72))
+    silhouette_weight = 0.88
+    detail_weight = 0.12
+    height = silhouette_weight * silhouette_height + detail_weight * detail_height
     # Height is dimensionless, but Sobel differences are per pixel. Express
     # slope in the same surface coordinates at every input resolution.
-    strength = 5.5 * depth * (min(alpha.shape) / 256.0)
-    shape_x = cv2.Sobel(silhouette_height, cv2.CV_32F, 1, 0, ksize=3) * (0.76 * strength)
-    shape_y = cv2.Sobel(silhouette_height, cv2.CV_32F, 0, 1, ksize=3) * (0.76 * strength)
-    detail_x = cv2.Sobel(detail_height, cv2.CV_32F, 1, 0, ksize=3) * (0.24 * strength)
-    detail_y = cv2.Sobel(detail_height, cv2.CV_32F, 0, 1, ksize=3) * (0.24 * strength)
+    strength = 5.5 * depth * (short_side / 256.0)
+    shape_x = cv2.Sobel(silhouette_height, cv2.CV_32F, 1, 0, ksize=3) * (
+        silhouette_weight * strength
+    )
+    shape_y = cv2.Sobel(silhouette_height, cv2.CV_32F, 0, 1, ksize=3) * (
+        silhouette_weight * strength
+    )
+    detail_x = cv2.Sobel(detail_height, cv2.CV_32F, 1, 0, ksize=3) * (detail_weight * strength)
+    detail_y = cv2.Sobel(detail_height, cv2.CV_32F, 0, 1, ksize=3) * (detail_weight * strength)
     # Painted brightness is uncertain evidence of relief. Preserve small
     # slopes, but smoothly bound strong albedo edges instead of creating a
     # cliff through a face or across two differently colored fabrics.

@@ -13,6 +13,7 @@ from scenelight.cli import (
     _seed_embedded_form_cache,
     _write_install_config,
 )
+from scenelight.form_maps import FORM_MAP_VERSION
 from scenelight.release import (
     FIRST_PUBLIC_VERSION,
     classify_release,
@@ -65,7 +66,7 @@ def test_release_record_names_every_cache_contract() -> None:
         "runtime_api_version": 1,
         "runtime_manifest_version": 8,
         "transport_algorithm": "14-spatial-radiance-basis",
-        "sprite_form_version": 6,
+        "sprite_form_version": 7,
         "capture_version": 42,
         "capture_plan_version": 2,
         "capture_pixel_version": 2,
@@ -233,7 +234,7 @@ def test_direct_refresh_seeds_only_compatible_sprite_form_maps(tmp_path: Path) -
     (forms / "hero_response.png").write_bytes(b"map")
     manifest = source / "sprite_form_manifest.json"
     manifest.write_text(
-        json.dumps({"version": 6, "sprites": {"hero idle": {"response": "map"}}}),
+        json.dumps({"version": FORM_MAP_VERSION, "sprites": {"hero idle": {"response": "map"}}}),
         encoding="utf-8",
     )
     managed = tmp_path / "working-copy"
@@ -248,7 +249,8 @@ def test_direct_refresh_seeds_only_compatible_sprite_form_maps(tmp_path: Path) -
     incompatible_forms.mkdir(parents=True)
     (incompatible_forms / "hero_response.png").write_bytes(b"old map")
     (incompatible_source / "sprite_form_manifest.json").write_text(
-        json.dumps({"version": 5, "sprites": {"hero idle": {}}}), encoding="utf-8"
+        json.dumps({"version": FORM_MAP_VERSION - 1, "sprites": {"hero idle": {}}}),
+        encoding="utf-8",
     )
     other_managed = tmp_path / "other-working-copy"
     (other_managed / "game").mkdir(parents=True)
