@@ -2788,8 +2788,18 @@ init -50 python:
                 // Creative mode gives every detected hue family equal artistic
                 // standing, then separates their directional lobes. Realistic
                 // mode above remains energy-weighted and fully additive.
-                float sc_creative_power = 2.0
-                    + 3.0 * sc_individual_light_colors;
+                // Each lobe is raised to this exponent and the lobes are then
+                // renormalised against each other, so the exponent sets how
+                // sharply one lamp hands over to the next.  At the old
+                // 2.0 + 3.0 * evidence the handover collapsed to a step: the
+                // border between two lamps was painted onto the artwork as a
+                // region with hard terraced edges across a face, hands or
+                // cardigan.  The regions, the lamp colours and the overall
+                // lighting model are unchanged here; the lower exponent only
+                // lets neighbouring lobes overlap so the border reads as a
+                // gradient instead of a cut.
+                float sc_creative_power = 1.0
+                    + 1.5 * sc_individual_light_colors;
                 float sc_creative_spread = clamp(
                     sc_individual_light_colors * 0.42,
                     0.0,

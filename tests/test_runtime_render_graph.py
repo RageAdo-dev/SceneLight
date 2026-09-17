@@ -1,6 +1,7 @@
 """Verify the transition graph preserves viewport coordinates and input events."""
 
 import ast
+import re
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
@@ -163,3 +164,82 @@ def test_sprite_space_ramps_have_no_hard_saturation_edges():
     assert "float lower_body_ramp = clamp(" in source
     assert "0.5 + dot(relative_form_position, average_light_direction) * 0.9" not in source
     assert "max(length(relative_form_position), 0.08)" not in source
+
+
+def _creative_partition_profile(power, steps=513, spread=0.84, surface_tilt=-0.10):
+    """Green-lamp share across the sprite's horizontal centre line.
+
+    Mirrors the creative path: each detected hue family gets a lobe built from
+    the pixel's surface direction, the lobes are raised to ``sc_creative_power``
+    and renormalised.  The radial direction field is the one the shader ships,
+    sampled one step per form-map pixel so a handover that completes inside a
+    step or two is the hard seam users see.  ``surface_tilt`` stands in for the
+    small sideways lean the reconstructed normals of a flat sprite carry.
+    """
+
+    directions = ((0.62, -0.78), (-0.90, -0.42))
+    normal_z = (1.0 - surface_tilt * surface_tilt) ** 0.5
+    profile = []
+    for index in range(steps):
+        x = -0.5 + index / (steps - 1)
+        sx = surface_tilt + _form_direction_field(x) * spread * 1.35
+        magnitude = (sx * sx + normal_z * normal_z) ** 0.5
+        sx = sx / magnitude
+        influences = []
+        for dx, dy in directions:
+            lobe = min(1.0, max(0.035, 0.50 + 0.50 * (sx * dx + 0.0 * dy)))
+            lambert = min(1.0, max(0.035, dx * surface_tilt + 0.45 * normal_z))
+            influences.append(max(lambert * (1.0 - spread) + lobe * spread, 1e-6) ** power)
+        profile.append(influences[0] / sum(influences))
+    return profile
+
+
+def _form_direction_field(x):
+    """The radial direction ramp the sprite shader feeds into the lobes."""
+
+    return x / (x * x + 0.0064) ** 0.5
+
+
+def _handover_width(profile):
+    """Form-map pixels between the 10% and 90% points of the lamp handover."""
+
+    low = min(profile)
+    inside = [
+        index
+        for index, value in enumerate(profile)
+        if low + 0.1 * (1.0 - low) < value < low + 0.9 * (1.0 - low)
+    ]
+    return 0.0 if not inside else float(inside[-1] - inside[0] + 1)
+
+
+def _runtime_source():
+    path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
+    return path.read_text()
+
+
+def test_creative_light_partition_widens_the_lamp_handover():
+    """The per-lamp handover must read as a gradient, not a cut.
+
+    The exponent used to be ``2.0 + 3.0 * evidence`` (5.0 at a typical single
+    detected hue family, 8.0 with two), which turns the renormalised lobes into
+    a winner-take-all partition: the border between two lamps lands on the
+    artwork as a straight-edged region across a face, hands or cardigan.  The
+    regions, lamp colours and lighting model are unchanged here; only the width
+    of the handover moves.
+    """
+
+    source = _runtime_source()
+    match = re.search(
+        r"float sc_creative_power = ([0-9.]+)"
+        r"\s*\n\s*\+ ([0-9.]+) \* sc_individual_light_colors;",
+        source,
+    )
+    assert match, "sc_creative_power is no longer a linear exponent"
+    base, slope = float(match.group(1)), float(match.group(2))
+    assert base < 2.0 and slope < 3.0, (base, slope)
+
+    for evidence in (1.0, 2.0):
+        old = _handover_width(_creative_partition_profile(2.0 + 3.0 * evidence))
+        new = _handover_width(_creative_partition_profile(base + slope * evidence))
+        assert new > 1.9 * old, (evidence, old, new)
+        assert new >= 30.0, (evidence, old, new)
