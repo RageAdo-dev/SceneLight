@@ -1028,7 +1028,11 @@ init -50 python:
             return scene
         renderer = renpy.display._scenelight_live_renderer
         frame = renderer.frame(scene["_sc_live_binding"]) if renderer is not None else None
-        if frame is None:
+        # A frame that survived the binding lookup but lost its fields would put
+        # the sprite in live-atlas coordinates while it samples the packaged
+        # atlas. Require the fields themselves, so the fallback is always a
+        # scene whose UVs match the textures it will actually be given.
+        if frame is None or renderer.fields(frame) is None:
             return SCENELIGHT_SCENES.get(scene["_sc_live_key"])
         result = dict(scene)
         result.update({"uv": (0.0, 0.0, 1.0, 1.0),

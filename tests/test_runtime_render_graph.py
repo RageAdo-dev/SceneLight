@@ -63,3 +63,49 @@ def test_incoming_transition_is_live_in_transition_coordinates_and_forwards_even
     assert result.properties == {}
     assert side.event("input", 20, 30, 0.5) == "handled"
     assert calls[-1] == ("input", 20, 30, 0.5)
+
+
+def test_live_scene_resolution_never_mixes_live_uvs_with_packaged_fields():
+    """A frame without fields must not keep live-atlas coordinates.
+
+    The sprite samples the live field textures at live UVs. When a frame
+    survives the binding lookup but its fields were retired (a window resize
+    drops them), returning the live UVs alongside the packaged atlas mixes two
+    coordinate spaces: the character is shaded from unrelated texels instead of
+    falling back to lighting that matches the textures it is given.
+    """
+
+    path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
+    source = path.read_text()
+    start = source.index("    def _scenelight_resolve_live_scene(scene):")
+    end = source.index("\n    def ", start + 10)
+    node = ast.parse(textwrap.dedent(source[start:end])).body[0]
+
+    packaged = {"room": {"uv": (0.25, 0.5, 0.1, 0.1)}}
+    live_scene = {"_sc_live_binding": "binding", "_sc_live_key": "room", "uv": (0.0, 0.0, 1.0, 1.0)}
+
+    class Renderer:
+        def __init__(self, fields):
+            self._fields = fields
+
+        def frame(self, binding):
+            return object()
+
+        def fields(self, frame):
+            return self._fields
+
+    def resolve(fields):
+        namespace = {
+            "renpy": SimpleNamespace(
+                display=SimpleNamespace(_scenelight_live_renderer=Renderer(fields))
+            ),
+            "SCENELIGHT_SCENES": packaged,
+            "_scenelight_live_fields": lambda scene: None,
+        }
+        exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
+        return namespace["_scenelight_resolve_live_scene"](live_scene)
+
+    # A frame that still owns its fields may use live-atlas coordinates.
+    assert resolve({"irradiance": object()})["uv"] == (0.0, 0.0, 1.0, 1.0)
+    # Without them, fall back to the packaged entry whose UVs match its atlas.
+    assert resolve(None) is packaged["room"]

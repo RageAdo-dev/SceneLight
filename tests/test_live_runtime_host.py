@@ -245,7 +245,10 @@ def renderer_fixture():
     def to_texture(render, **kwargs):
         draw.current_fbo = 9
         texture = SimpleNamespace(
-            number=100 + len(allocated), texture_width=render.size[0], texture_height=render.size[1]
+            number=100 + len(allocated),
+            texture_width=render.size[0],
+            texture_height=render.size[1],
+            loader=draw.texture_loader,
         )
         allocated.append(texture)
         render.cached_texture = texture
@@ -420,6 +423,71 @@ def test_drawable_change_discards_handles_while_the_loader_stays_the_same():
     assert draw.texture_loader is loader
     assert renderer.fields(old) is None
     assert renderer.frame(background) is not None
+
+
+def test_drawable_change_retires_engine_textures_before_the_loader_forgets_them():
+    """A resize must not leave finalizers that can free a live GL name.
+
+    Ren'Py reuses one ``TextureLoader`` for the whole run and re-runs
+    ``TextureLoader.init()`` on every resize. That call deletes each allocated
+    name and then empties ``allocated``, while the Python textures that owned
+    those names stay alive. Our lighting fields live outside the per-frame
+    render tree, so nothing else drops them at resize time. When one is
+    finally collected, ``GLTexture.__del__`` appends its stale number to the
+    *current* ``free_list``; the next ``cleanup()`` calls ``glDeleteTextures``
+    on a name the renderer has since handed to a live texture. The sprite then
+    samples an undefined texture and paints as an opaque black quad.
+    """
+
+    renderer, draw, _, _, _ = renderer_fixture()
+    draw.drawable_size = (1280, 720)
+    draw.drawable_viewport = (0.0, 0.0, 1280.0, 720.0)
+    background, source = Background(), Render()
+    # Ren'Py's Render carries its own "loaded" flag, so model it here: it is
+    # the game's render, not ours, and must come out of a resize untouched.
+    source.loaded = True
+    renderer.capture(background, source, 1280, 720, Frame)
+    frame = renderer.frame(background)
+    fields = renderer.fields(frame)
+    assert fields
+    for texture in fields.values():
+        texture.loaded = True
+    retained = list(fields.values())
+    frozen_key = Frame()
+    frozen_texture = SimpleNamespace(number=7, loaded=True, loader=draw.texture_loader)
+    renderer.frozen_canvases[frozen_key] = (frozen_texture, (1280, 720))
+
+    # Dragging the window edge keeps the loader and resets its bookkeeping.
+    draw.drawable_size = (1500, 860)
+    draw.drawable_viewport = (0.0, 0.0, 1500.0, 860.0)
+    renderer.capture(background, source, 1500, 860, Frame)
+
+    assert renderer.fields(frame) is None
+    assert all(texture.loaded is False for texture in retained)
+    assert frozen_texture.loaded is False
+    assert source.loaded is True
+
+
+def test_field_lookup_cannot_return_fields_from_the_previous_drawable():
+    """The sprite samples fields every draw, so the lookup must do the check.
+
+    Nothing else runs between the resize and the sprite's own field request,
+    so a lookup keyed only on the frame handed the shader textures the new
+    drawable had already reallocated.
+    """
+
+    renderer, draw, _, _, _ = renderer_fixture()
+    draw.drawable_size = (1280, 720)
+    draw.drawable_viewport = (0.0, 0.0, 1280.0, 720.0)
+    background, source = Background(), Render()
+    renderer.capture(background, source, 1280, 720, Frame)
+    frame = renderer.frame(background)
+    assert renderer.fields(frame) is not None
+
+    draw.drawable_size = (1500, 860)
+    draw.drawable_viewport = (0.0, 0.0, 1500.0, 860.0)
+
+    assert renderer.fields(frame) is None
 
 
 def test_frozen_background_is_dropped_when_the_drawable_changes(monkeypatch):

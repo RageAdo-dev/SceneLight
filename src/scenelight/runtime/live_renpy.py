@@ -87,6 +87,7 @@ class Renderer(object):
         self.loader = loader
         self.drawable = drawable
         self.analysis = None
+        self._detach_textures()
         if new_context:
             # Only a replacement GL context starts over. A resize must not
             # resurrect a renderer that stopped itself to protect the game.
@@ -112,6 +113,54 @@ class Renderer(object):
 
             self.texture_transform = MatrixStack([1, 0, 0, 1])
         return True
+
+    @staticmethod
+    def _detach_texture(texture):
+        """Retire one engine texture so its finalizer cannot free a live name.
+
+        Only real GL textures are touched. Ren'Py's ``Render`` also carries a
+        ``loaded`` flag, and a render belongs to the game's own displayable
+        tree: its state has to stay exactly as the engine left it.
+        """
+        if texture is None:
+            return
+        if not (hasattr(texture, "number") and hasattr(texture, "loader")):
+            return
+        try:
+            texture.loaded = False
+        except (AttributeError, TypeError):
+            pass
+
+    def _detach_textures(self):
+        """Make our engine textures inert before the loader forgets them.
+
+        Ren'Py reuses a single ``TextureLoader`` and re-runs
+        ``TextureLoader.init()`` on every window resize. That call deletes
+        every allocated GL name and then empties ``allocated``, while the
+        Python textures that owned those names stay alive. Our lighting
+        fields live outside the per-frame render tree, so nothing else drops
+        them at resize time. When one is finally collected,
+        ``GLTexture.__del__`` appends its now-stale number to the *current*
+        ``free_list``; the next ``cleanup()`` then calls ``glDeleteTextures``
+        on a name the renderer has since handed to a live texture. That is
+        what paints the sprite as an opaque black quad after a drag. Clearing
+        ``loaded`` first makes those finalizers no-ops.
+        """
+        candidates = []
+        for fields in list(self.frames.values()):
+            candidates.extend(fields.values())
+        for fields in self.prepared_pool:
+            candidates.extend(fields.values())
+        for texture, _size in list(self.frozen_canvases.values()):
+            candidates.append(texture)
+        for signature, _frame, _animated, canvas, _offset in list(self.backgrounds.values()):
+            candidates.append(signature[0] if signature else None)
+            candidates.append(getattr(canvas, "cached_texture", None))
+        self.frames.clear()
+        self.prepared_pool[:] = []
+        self.frozen_canvases.clear()
+        for texture in candidates:
+            self._detach_texture(texture)
 
     def _context(self):
         draw = self.api.display.draw
@@ -410,4 +459,9 @@ class Renderer(object):
         return bool(pending)
 
     def fields(self, frame):
+        # The sprite shader asks for its fields on every draw, so this is the
+        # hottest lookup in the runtime. It still has to run the drawable check:
+        # returning a field set captured before the window changed hands the
+        # shader textures the new drawable has already reallocated.
+        self._drawable_changed()
         return self.frames.get(frame) if frame is not None else None
