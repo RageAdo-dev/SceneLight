@@ -121,6 +121,9 @@ if ($Source) {
     }
     # Keep the README's guides, images and artwork notices available offline.
     Copy-Item -LiteralPath (Join-Path $root "docs") -Destination $packageRoot -Recurse -Force
+    # Ship the example effect packs so mod authors can open them without the
+    # source tree, which stays out of the download.
+    Copy-Item -LiteralPath (Join-Path $root "examples") -Destination $packageRoot -Recurse -Force
     $payloadRoot = Join-Path $packageRoot "_scenelight"
     New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
     foreach ($item in @("src", "runtime-installer")) {

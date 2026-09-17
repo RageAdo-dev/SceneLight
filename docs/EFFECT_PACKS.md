@@ -58,7 +58,9 @@ private lighting textures are not exposed.
 
 An effect may select a built-in `preset` and override its `defaults`. A preset
 cannot also replace its fragment, parameters or source-texture contract.
-See the [source examples](https://github.com/RageAdo-dev/SceneLight/tree/main/examples/effect-packs).
+Ready-made packs ship with SceneLight in [`examples/effect-packs`](../examples/effect-packs);
+the same files are kept in the
+[source tree](https://github.com/RageAdo-dev/SceneLight/tree/main/examples/effect-packs).
 
 ## Limits and composition
 
