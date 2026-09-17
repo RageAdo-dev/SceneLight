@@ -244,11 +244,15 @@ def renderer_fixture():
 
     def to_texture(render, **kwargs):
         draw.current_fbo = 9
+        # Model a real Ren'Py GLTexture: ``number`` and ``loaded`` are public,
+        # but ``loader`` is a private Cython attribute Python cannot see. An
+        # earlier version of this fixture exposed ``loader``, so the runtime
+        # could key off it while every real texture stayed untouched.
         texture = SimpleNamespace(
             number=100 + len(allocated),
             texture_width=render.size[0],
             texture_height=render.size[1],
-            loader=draw.texture_loader,
+            loaded=True,
         )
         allocated.append(texture)
         render.cached_texture = texture
@@ -454,7 +458,7 @@ def test_drawable_change_retires_engine_textures_before_the_loader_forgets_them(
         texture.loaded = True
     retained = list(fields.values())
     frozen_key = Frame()
-    frozen_texture = SimpleNamespace(number=7, loaded=True, loader=draw.texture_loader)
+    frozen_texture = SimpleNamespace(number=7, loaded=True)
     renderer.frozen_canvases[frozen_key] = (frozen_texture, (1280, 720))
 
     # Dragging the window edge keeps the loader and resets its bookkeeping.
@@ -466,6 +470,39 @@ def test_drawable_change_retires_engine_textures_before_the_loader_forgets_them(
     assert all(texture.loaded is False for texture in retained)
     assert frozen_texture.loaded is False
     assert source.loaded is True
+
+
+def test_field_set_that_left_the_frames_map_is_still_retired():
+    """The engine's render cache outlives our own containers.
+
+    A later capture replaces the binding's fields, so the previous set leaves
+    ``frames`` while its textures stay alive in the render that blitted them.
+    Those textures are exactly the ones that leaked a group of six consecutive
+    GL names per capture, so the reset sweep has to reach them too.
+    """
+
+    renderer, draw, _, _, _ = renderer_fixture()
+    draw.drawable_size = (1280, 720)
+    draw.drawable_viewport = (0.0, 0.0, 1280.0, 720.0)
+    background, source = Background(), Render()
+    renderer.capture(background, source, 1280, 720, Frame)
+    orphaned = list(renderer.fields(renderer.frame(background)).values())
+    assert len(orphaned) == 4
+    for texture in orphaned:
+        texture.loaded = True
+
+    # Reanalyze under a new placement: the previous set is no longer the
+    # binding's, and nothing but our own record still points at it.
+    background.placement = (20, 0, 0, 0, 0, 0, False)
+    renderer.capture(background, source, 1280, 720, Frame)
+    replaced = renderer.fields(renderer.frame(background)).values()
+    assert all(texture not in replaced for texture in orphaned)
+
+    draw.drawable_size = (1500, 860)
+    draw.drawable_viewport = (0.0, 0.0, 1500.0, 860.0)
+    renderer.capture(background, source, 1500, 860, Frame)
+
+    assert all(texture.loaded is False for texture in orphaned)
 
 
 def test_field_lookup_cannot_return_fields_from_the_previous_drawable():

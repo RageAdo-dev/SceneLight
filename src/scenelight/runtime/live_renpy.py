@@ -61,6 +61,10 @@ class Renderer(object):
         self.texture_transform = None
         self.retired_source_frame_time = None
         self.drawable = None
+        # Every engine texture we asked for since the last drawable change.
+        # Ren'Py's render caches can outlive our own containers, so the caches
+        # are not enough to find them again at reset time.
+        self.created_textures = []
 
     def _drawable_changed(self):
         # Ren'Py keeps the texture loader across a window resize and only swaps
@@ -118,13 +122,16 @@ class Renderer(object):
     def _detach_texture(texture):
         """Retire one engine texture so its finalizer cannot free a live name.
 
-        Only real GL textures are touched. Ren'Py's ``Render`` also carries a
-        ``loaded`` flag, and a render belongs to the game's own displayable
-        tree: its state has to stay exactly as the engine left it.
+        Only real GL textures are touched, and the test has to use public
+        attributes only: ``GLTexture`` exposes ``number`` and ``loaded``, while
+        ``loader`` is a private Cython attribute Python cannot see. Keying off
+        ``loader`` silently matched nothing. Ren'Py's ``Render`` also carries a
+        ``loaded`` flag but no ``number``, and a render belongs to the game's
+        own displayable tree: its state has to stay as the engine left it.
         """
         if texture is None:
             return
-        if not (hasattr(texture, "number") and hasattr(texture, "loader")):
+        if not (hasattr(texture, "number") and hasattr(texture, "loaded")):
             return
         try:
             texture.loaded = False
@@ -146,7 +153,7 @@ class Renderer(object):
         what paints the sprite as an opaque black quad after a drag. Clearing
         ``loaded`` first makes those finalizers no-ops.
         """
-        candidates = []
+        candidates = list(self.created_textures)
         for fields in list(self.frames.values()):
             candidates.extend(fields.values())
         for fields in self.prepared_pool:
@@ -156,11 +163,37 @@ class Renderer(object):
         for signature, _frame, _animated, canvas, _offset in list(self.backgrounds.values()):
             candidates.append(signature[0] if signature else None)
             candidates.append(getattr(canvas, "cached_texture", None))
+        self.created_textures[:] = []
         self.frames.clear()
         self.prepared_pool[:] = []
         self.frozen_canvases.clear()
         for texture in candidates:
             self._detach_texture(texture)
+
+    def _own_texture(self, texture):
+        """Remember one engine texture until the current drawable is replaced.
+
+        Our own containers are not enough to find these again at reset time:
+        a field set that already left ``frames`` is still reachable from the
+        engine's render cache, and that cache releases it long after we did.
+        """
+        if texture is None:
+            return
+        self.created_textures.append(texture)
+        if len(self.created_textures) > 512:
+            self._prune_owned_textures()
+
+    def _prune_owned_textures(self):
+        """Drop entries nothing but this list still refers to.
+
+        Releasing one here is safe: no GL context has been replaced since it
+        was created, so its finalizer hands the loader a name the loader still
+        tracks. Only textures a render cache is keeping alive have to stay, and
+        those are exactly what the sweep at the next reset is for.
+        """
+        self.created_textures[:] = [
+            texture for texture in self.created_textures if sys.getrefcount(texture) > 3
+        ]
 
     def _context(self):
         draw = self.api.display.draw
@@ -256,6 +289,7 @@ class Renderer(object):
                     source = draw.render_to_texture(
                         canvas, properties={"drawable_resolution": animated, "mipmap": False}
                     )
+                    self._own_texture(source)
                     old_fields = self.frames.get(previous[1], {}) if previous is not None else {}
                     history_keys = ("_history_lights", "_history_image")
                     history = (
@@ -284,6 +318,7 @@ class Renderer(object):
                             self.api.Render(*size),
                             properties={"drawable_resolution": False, "mipmap": False},
                         )
+                        self._own_texture(target)
                         self.analysis.device.bind_targets((outputs[name],))
                         gl.ActiveTexture(self.gpu.TEXTURE0)
                         gl.BindTexture(self.gpu.TEXTURE_2D, target.number)
@@ -338,6 +373,7 @@ class Renderer(object):
                             self.api.Render(*size),
                             properties={"drawable_resolution": False, "mipmap": False},
                         )
+                        self._own_texture(target)
                     gl.ActiveTexture(self.gpu.TEXTURE0)
                     gl.BindTexture(self.gpu.TEXTURE_2D, target.number)
                     gl.TexSubImage2D(
