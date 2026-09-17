@@ -220,6 +220,37 @@ def test_runtime_does_not_double_wrap_registered_character_images() -> None:
     assert "not isinstance(registered, (SceneLightSprite, SceneLightImageLike))" in route
 
 
+def test_runtime_scene_router_survives_a_full_restart() -> None:
+    """A restarted store must not leave a router that raises during bootstrap.
+
+    The engine's scene-list class outlives a full restart, but the store that
+    held the router implementation does not. Ren'Py builds its contexts before
+    init blocks run again, and that calls into the class-level router, so the
+    implementation has to be resolved at call time and re-bound every init.
+    """
+
+    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+        encoding="utf-8"
+    )
+    router_start = runtime.index("    def _scenelight_mutation_router(original):")
+    router_end = runtime.index("\n    def _scenelight_install_scene_router", router_start)
+    router = runtime[router_start:router_end]
+
+    assert 'globals().get("_scenelight_route_scene_mutation")' in router
+    assert "return original(owner, *args, **kwargs)" in router
+
+    install_start = router_end
+    install_end = runtime.find("\n\ninit ", install_start)
+    if install_end == -1:
+        install_end = len(runtime)
+    install = runtime[install_start:install_end]
+
+    assert 'globals().get("_scenelight_route_scene_add")' in install
+    assert "return original_add(owner, *args, **kwargs)" in install
+    assert 'hasattr(scene_lists, "_scenelight_original_add")' not in install
+    assert 'getattr(scene_lists, "_scenelight_original_add", None)' in install
+
+
 def test_runtime_retains_stable_scene_during_character_show_hide_mutations() -> None:
     runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
         encoding="utf-8"

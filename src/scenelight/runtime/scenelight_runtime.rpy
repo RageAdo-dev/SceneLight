@@ -4024,26 +4024,43 @@ init -50 python:
 
     def _scenelight_mutation_router(original):
         def routed(owner, *args, **kwargs):
-            return _scenelight_route_scene_mutation(original, owner, args, kwargs)
+            # A full restart resets the store but leaves this router attached to
+            # the engine's scene-list class, and the rebuilt scene lists call it
+            # before init blocks run again. Resolve the implementation at call
+            # time so a reset store falls through to the engine instead of
+            # raising NameError during bootstrap.
+            route = globals().get("_scenelight_route_scene_mutation")
+            if route is None:
+                return original(owner, *args, **kwargs)
+            return route(original, owner, args, kwargs)
 
         return routed
 
     def _scenelight_install_scene_router():
         scene_lists = _scenelight_scene_lists_class()
-        if scene_lists is None or hasattr(scene_lists, "_scenelight_original_add"):
+        if scene_lists is None:
             return
-        original_add = scene_lists.add
+        # Rebind on every init so a restarted store gets routers that reference
+        # the live namespace; the captured originals are kept from the first run.
+        original_add = getattr(scene_lists, "_scenelight_original_add", None)
+        if original_add is None:
+            original_add = scene_lists.add
+            scene_lists._scenelight_original_add = original_add
 
         def routed_add(owner, *args, **kwargs):
-            return _scenelight_route_scene_add(original_add, owner, args, kwargs)
+            route = globals().get("_scenelight_route_scene_add")
+            if route is None:
+                return original_add(owner, *args, **kwargs)
+            return route(original_add, owner, args, kwargs)
 
-        scene_lists._scenelight_original_add = original_add
         scene_lists.add = routed_add
         for method_name in ("remove", "clear"):
-            original = getattr(scene_lists, method_name, None)
+            original = getattr(scene_lists, "_scenelight_original_" + method_name, None)
             if original is None:
-                continue
-            setattr(scene_lists, "_scenelight_original_" + method_name, original)
+                original = getattr(scene_lists, method_name, None)
+                if original is None:
+                    continue
+                setattr(scene_lists, "_scenelight_original_" + method_name, original)
             setattr(scene_lists, method_name, _scenelight_mutation_router(original))
 
 
