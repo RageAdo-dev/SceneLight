@@ -60,16 +60,27 @@ class Renderer(object):
         self.prepared_releases = {}
         self.texture_transform = None
         self.retired_source_frame_time = None
+        self.drawable = None
 
     def _context(self):
         draw = self.api.display.draw
         loader = getattr(draw, "texture_loader", None)
         if loader is None:
             return None
-        if loader is not self.loader:
+        # Ren'Py keeps the texture loader across a window resize and only swaps
+        # the drawable underneath it, so the loader alone cannot tell us that
+        # captured textures went stale. Watch the drawable geometry as well:
+        # lighting captured against the old drawable samples the wrong memory
+        # once the window changes size.
+        drawable = (
+            getattr(draw, "drawable_size", None),
+            getattr(draw, "drawable_viewport", None),
+        )
+        if loader is not self.loader or drawable != self.drawable:
             # A destroyed GL context already owns reclamation of its objects.
             # Never delete old numeric GL names in a replacement context.
             self.loader = loader
+            self.drawable = drawable
             self.analysis = None
             self.disabled = False
             self.backgrounds.clear()

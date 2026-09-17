@@ -403,6 +403,25 @@ def test_placement_changes_reanalyze_and_context_recreation_discards_old_handles
     assert draw.current_fbo == 7
 
 
+def test_drawable_change_discards_handles_while_the_loader_stays_the_same():
+    renderer, draw, _, _, _ = renderer_fixture()
+    background, source = Background(), Render()
+    draw.drawable_size = (1280, 720)
+    draw.drawable_viewport = (0.0, 0.0, 1280.0, 720.0)
+    renderer.capture(background, source, 1280, 720, Frame)
+    old = renderer.frame(background)
+    assert old is not None
+    loader = draw.texture_loader
+
+    # Dragging the window edge keeps the loader and swaps the drawable.
+    draw.drawable_size = (1500, 860)
+    draw.drawable_viewport = (0.0, 0.0, 1500.0, 860.0)
+    renderer.capture(background, source, 1280, 720, Frame)
+    assert draw.texture_loader is loader
+    assert renderer.fields(old) is None
+    assert renderer.frame(background) is not None
+
+
 def test_failed_analysis_restores_host_state_and_stops_returning_stale_frames():
     renderer, draw, analysis, _, errors = renderer_fixture()
     background = Background()
