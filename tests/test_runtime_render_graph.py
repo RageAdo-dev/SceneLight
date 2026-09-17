@@ -109,3 +109,57 @@ def test_live_scene_resolution_never_mixes_live_uvs_with_packaged_fields():
     assert resolve({"irradiance": object()})["uv"] == (0.0, 0.0, 1.0, 1.0)
     # Without them, fall back to the packaged entry whose UVs match its atlas.
     assert resolve(None) is packaged["room"]
+
+
+def test_sprite_space_ramps_have_no_hard_saturation_edges():
+    """A clamped sprite-space ramp draws a straight line across the character.
+
+    Three terms in the fragment shader vary with position across the sprite
+    rather than with the surface: the directional bias along the light, a
+    direction field around the sprite centre, and the ground bounce that rises
+    up the lower body. Each was written as a linear ramp with a hard clamp, so
+    shading stops changing on one side of the saturation line and keeps ramping
+    on the other. That discontinuity is the straight seam users see across a
+    face, sleeve or cardigan. The shader now uses saturating forms that keep
+    the middle slope and the limits but bend into them.
+    """
+
+    def slope_jump(values, spacing):
+        slopes = [(b - a) / spacing for a, b in zip(values, values[1:])]
+        return max(abs(b - a) for a, b in zip(slopes, slopes[1:]))
+
+    steps = 400
+    spacing = 0.01
+    domain = [-spacing * steps / 2 + spacing * i for i in range(steps)]
+
+    def smooth_directional(x):
+        ramp = x * 1.8
+        return 0.5 + 0.5 * ramp / (1.0 + ramp * ramp) ** 0.5
+
+    def clamped_directional(x):
+        return min(1.0, max(0.0, 0.5 + 0.9 * x))
+
+    def smooth_lower_body(y):
+        ramp = min(1.0, max(0.0, (y + 0.30) * 1.45))
+        return ramp * ramp * (3.0 - 2.0 * ramp)
+
+    def clamped_lower_body(y):
+        return min(1.0, max(0.0, (y + 0.30) * 1.45))
+
+    smooth_direction = slope_jump([smooth_directional(x) for x in domain], spacing)
+    clamped_direction = slope_jump([clamped_directional(x) for x in domain], spacing)
+    smooth_bounce = slope_jump([smooth_lower_body(y) for y in domain], spacing)
+    clamped_bounce = slope_jump([clamped_lower_body(y) for y in domain], spacing)
+
+    assert clamped_direction > 0.4
+    assert smooth_direction < clamped_direction / 4.0
+    assert clamped_bounce > 0.4
+    assert smooth_bounce < clamped_bounce / 4.0
+
+    path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
+    source = path.read_text()
+    assert "directional_ramp / sqrt(1.0 + directional_ramp * directional_ramp)" in source
+    assert "/ sqrt(dot(relative_form_position, relative_form_position) + 0.0064)" in source
+    assert "float lower_body_ramp = clamp(" in source
+    assert "0.5 + dot(relative_form_position, average_light_direction) * 0.9" not in source
+    assert "max(length(relative_form_position), 0.08)" not in source

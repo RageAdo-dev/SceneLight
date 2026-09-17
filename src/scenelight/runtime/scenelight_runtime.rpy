@@ -2661,10 +2661,14 @@ init -50 python:
                 + base_light_weight3 * (1.0 - sc_light3_extra.x)
             ) / total_light_weight;
             vec2 relative_form_position = v_tex_coord - u_sc_form_center;
-            float directional = clamp(
-                0.5 + dot(relative_form_position, average_light_direction) * 0.9,
-                0.0,
-                1.0
+            // Smooth saturation.  A linear ramp with hard clamps puts a
+            // straight band across the character wherever it saturates,
+            // because the shading stops changing on one side of the line
+            // and keeps ramping on the other.  This keeps the same slope
+            // through the middle and the same limits, without the corners.
+            float directional_ramp = dot(relative_form_position, average_light_direction) * 1.8;
+            float directional = 0.5 + 0.5 * (
+                directional_ramp / sqrt(1.0 + directional_ramp * directional_ramp)
             );
             form_light *= 1.0 + (directional - 0.5) * 0.32 * key_amount * broad_weight;
             vec3 response0 = texture2D(tex5, clamp(center_light_vector0.xy * 0.5 + 0.5, vec2(0.0), vec2(1.0))).rgb;
@@ -2799,8 +2803,11 @@ init -50 python:
                 // the viewer.  Creative separation therefore also uses the
                 // pixel's direction across the character silhouette, giving
                 // distinct lamps distinct regions to paint.
+                // Smoothed in the same way: the hard length floor used to
+                // kink the direction field at a fixed radius from the
+                // sprite centre.
                 vec2 sc_form_direction = relative_form_position
-                    / max(length(relative_form_position), 0.08);
+                    / sqrt(dot(relative_form_position, relative_form_position) + 0.0064);
                 // Keep the forward component: normalizing XY alone turns
                 // even a tiny slope into a full-strength sideways direction,
                 // producing sharp color seams as the slope crosses zero.
@@ -2967,7 +2974,10 @@ init -50 python:
 
             // Low-frequency color below the final screen position provides a
             // restrained ground/floor bounce, strongest on the lower body.
-            float lower_body = clamp((relative_form_position.y + 0.30) * 1.45, 0.0, 1.0);
+            // Smoothstep between the same two heights, so the floor bounce
+            // fades in and out instead of ending on a horizontal line.
+            float lower_body_ramp = clamp((relative_form_position.y + 0.30) * 1.45, 0.0, 1.0);
+            float lower_body = lower_body_ramp * lower_body_ramp * (3.0 - 2.0 * lower_body_ramp);
             float downward_facing = clamp(normal.y * 0.70 + (1.0 - normal.z) * 0.22, 0.0, 1.0);
             float bounce = (0.24 * lower_body + 0.76 * downward_facing)
                 * u_sc_calibration2.w * 0.16 * u_sc_strength;
