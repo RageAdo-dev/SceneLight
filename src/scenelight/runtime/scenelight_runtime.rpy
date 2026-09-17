@@ -2877,6 +2877,34 @@ init -50 python:
                     sc_creative_source_count
                 );
                 sc_creative_influence0 *= 1.0 - sc_multiple_creative_sources;
+                // Blend neighbouring separated lights instead of switching
+                // between them.  The powers above are renormalised against each
+                // other, which makes the handover between two lamps a
+                // winner-take-all partition: wherever two lamps are close in
+                // strength the change collapses into a one-pixel step, and the
+                // step shows up as straight creases across a jaw, sleeve or
+                // skirt.  A softmax over the same powers spreads that handover
+                // into a gradient.  The lamps, their colours, their weights and
+                // the region they cover are unchanged.
+                float sc_creative_peak = max(
+                    max(sc_creative_influence0, sc_creative_influence1),
+                    max(sc_creative_influence2, sc_creative_influence3)
+                );
+                float sc_creative_temperature = max(
+                    0.05 * sc_creative_peak, 0.0005
+                );
+                sc_creative_influence0 = exp(
+                    (sc_creative_influence0 - sc_creative_peak) / sc_creative_temperature
+                );
+                sc_creative_influence1 = exp(
+                    (sc_creative_influence1 - sc_creative_peak) / sc_creative_temperature
+                );
+                sc_creative_influence2 = exp(
+                    (sc_creative_influence2 - sc_creative_peak) / sc_creative_temperature
+                );
+                sc_creative_influence3 = exp(
+                    (sc_creative_influence3 - sc_creative_peak) / sc_creative_temperature
+                );
                 float sc_creative_total = max(
                     sc_creative_influence0 + sc_creative_influence1
                         + sc_creative_influence2 + sc_creative_influence3,
