@@ -212,7 +212,27 @@ $archive = Join-Path $dist "SceneLight-v$version-Windows$suffix.zip"
 if (Test-Path -LiteralPath $archive) {
     Remove-Item -LiteralPath $archive -Force
 }
-Compress-Archive -LiteralPath $packageRoot -DestinationPath $archive -CompressionLevel Optimal
+# The bundled desktop runtime contains generated Qt asset names that push past
+# MAX_PATH once they sit under the staging directory, and Compress-Archive
+# cannot read those without the extended-length prefix.  bsdtar, which ships
+# with Windows, walks them correctly.
+$tar = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+if ($null -ne $tar) {
+    Push-Location -LiteralPath $staging
+    try {
+        & $tar.Source -a -c -f $archive "SceneLight-$version"
+        if ($LASTEXITCODE -ne 0) {
+            throw "tar.exe failed to create $archive"
+        }
+    } finally {
+        Pop-Location
+    }
+} else {
+    Compress-Archive -LiteralPath $packageRoot -DestinationPath $archive -CompressionLevel Optimal
+}
+if (-not (Test-Path -LiteralPath $archive)) {
+    throw "The release archive was not created: $archive"
+}
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $([IO.Path]::GetFileName($archive))" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
 } finally {
