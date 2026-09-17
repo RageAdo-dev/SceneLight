@@ -91,7 +91,11 @@ function Remove-VerifiedStagingTree {
     if (-not $resolved.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to remove an unexpected staging path: $resolved"
     }
-    Remove-Item -LiteralPath $resolved -Recurse -Force
+    # The bundled PySide6 runtime contains generated asset paths that sit just
+    # inside MAX_PATH once they are nested under the staging tree. Remove-Item
+    # cannot walk those without the extended-length prefix, which fails the
+    # build at the last step.
+    Remove-Item -LiteralPath ("\\?\" + $resolved) -Recurse -Force
 }
 
 try {
