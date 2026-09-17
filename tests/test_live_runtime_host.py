@@ -422,6 +422,41 @@ def test_drawable_change_discards_handles_while_the_loader_stays_the_same():
     assert renderer.frame(background) is not None
 
 
+def test_frozen_background_is_dropped_when_the_drawable_changes(monkeypatch):
+    """A resize must not keep composing the previous drawable's background.
+
+    The frozen canvas is the background retained for a scene-wide transition,
+    and it is returned before any analysis runs. When it was keyed only on the
+    texture loader it survived a window resize and composed at its captured
+    size, which scaled the background and left part of the window unpainted.
+    """
+
+    renderer, draw, _, _, _ = renderer_fixture()
+    parts = {"example.time": SimpleNamespace(uniforms=["u_time"])}
+    monkeypatch.setitem(sys.modules, "renpy.gl2.gl2shadercache", SimpleNamespace(shader_part=parts))
+    draw.drawable_size = (1280, 720)
+    draw.drawable_viewport = (0.0, 0.0, 1280.0, 720.0)
+    background, source = Background(), Render()
+    source.children = [(SimpleNamespace(shaders=("example.time",)), (0, 0))]
+    renderer.capture(background, source, 1280, 720, Frame)
+    snapshot = Frame()
+    assert renderer.pin_canvas(background, snapshot)
+    assert renderer.frozen_canvas(snapshot) is not None
+    assert renderer.canvas(background) is not None
+
+    # Dragging the window edge keeps the loader and swaps the drawable.
+    draw.drawable_size = (1500, 860)
+    draw.drawable_viewport = (0.0, 0.0, 1500.0, 860.0)
+    assert renderer.frozen_canvas(snapshot) is None
+    assert renderer.canvas(background) is None
+    assert renderer.frame(background) is None
+
+    # The next frame re-analyzes against the new drawable instead of staying blank.
+    renderer.capture(background, source, 1500, 860, Frame)
+    assert renderer.frame(background) is not None
+    assert renderer.frozen_canvas(snapshot) is None
+
+
 def test_failed_analysis_restores_host_state_and_stops_returning_stale_frames():
     renderer, draw, analysis, _, errors = renderer_fixture()
     background = Background()

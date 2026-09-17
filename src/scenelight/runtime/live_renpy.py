@@ -62,47 +62,62 @@ class Renderer(object):
         self.retired_source_frame_time = None
         self.drawable = None
 
-    def _context(self):
+    def _drawable_changed(self):
+        # Ren'Py keeps the texture loader across a window resize and only swaps
+        # the drawable underneath it, so the loader alone cannot tell us that
+        # captured textures went stale: lighting captured against the old
+        # drawable samples the wrong memory once the window changes size.
+        # Every cache lookup has to check, because the frozen-canvas path
+        # returns a captured render before any analysis runs. A stale entry
+        # there composes the previous drawable's background at its old size,
+        # which shows up as a scaled background leaving an unpainted band.
         draw = self.api.display.draw
         loader = getattr(draw, "texture_loader", None)
         if loader is None:
-            return None
-        # Ren'Py keeps the texture loader across a window resize and only swaps
-        # the drawable underneath it, so the loader alone cannot tell us that
-        # captured textures went stale. Watch the drawable geometry as well:
-        # lighting captured against the old drawable samples the wrong memory
-        # once the window changes size.
+            return False
         drawable = (
             getattr(draw, "drawable_size", None),
             getattr(draw, "drawable_viewport", None),
         )
-        if loader is not self.loader or drawable != self.drawable:
-            # A destroyed GL context already owns reclamation of its objects.
-            # Never delete old numeric GL names in a replacement context.
-            self.loader = loader
-            self.drawable = drawable
-            self.analysis = None
+        new_context = loader is not self.loader
+        if not new_context and drawable == self.drawable:
+            return False
+        # A destroyed GL context already owns reclamation of its objects.
+        # Never delete old numeric GL names in a replacement context.
+        self.loader = loader
+        self.drawable = drawable
+        self.analysis = None
+        if new_context:
+            # Only a replacement GL context starts over. A resize must not
+            # resurrect a renderer that stopped itself to protect the game.
             self.disabled = False
-            self.backgrounds.clear()
-            self.frames.clear()
-            self.frozen_canvases.clear()
-            self.cleanup_checked = False
-            self.last_analysis_time = None
-            self.prepared_pool[:] = []
-            self.prepared_releases.clear()
-            self.retired_source_frame_time = None
-            # Newer Ren'Py renderers require a model-to-texture MatrixStack.
-            # Inspect the bound method once per context; do not catch TypeError
-            # from texture loading itself, which could hide an engine failure.
-            self.texture_transform = None
-            try:
-                arguments = inspect.getfullargspec(draw.load_all_textures).args
-            except (AttributeError, TypeError, ValueError):
-                arguments = ()  # Python 2 / older Cython renderer.
-            if "reverse" in arguments:
-                from renpy.display.matrix import MatrixStack
+        self.backgrounds.clear()
+        self.frames.clear()
+        self.frozen_canvases.clear()
+        self.cleanup_checked = False
+        self.last_analysis_time = None
+        self.prepared_pool[:] = []
+        self.prepared_releases.clear()
+        self.retired_source_frame_time = None
+        # Newer Ren'Py renderers require a model-to-texture MatrixStack.
+        # Inspect the bound method once per context; do not catch TypeError
+        # from texture loading itself, which could hide an engine failure.
+        self.texture_transform = None
+        try:
+            arguments = inspect.getfullargspec(draw.load_all_textures).args
+        except (AttributeError, TypeError, ValueError):
+            arguments = ()  # Python 2 / older Cython renderer.
+        if "reverse" in arguments:
+            from renpy.display.matrix import MatrixStack
 
-                self.texture_transform = MatrixStack([1, 0, 0, 1])
+            self.texture_transform = MatrixStack([1, 0, 0, 1])
+        return True
+
+    def _context(self):
+        draw = self.api.display.draw
+        if getattr(draw, "texture_loader", None) is None:
+            return None
+        self._drawable_changed()
         if self.disabled:
             return None
         if self.analysis is None:
@@ -325,16 +340,19 @@ class Renderer(object):
             )
 
     def frame(self, background):
+        self._drawable_changed()
         if self.disabled:
             return None
         previous = self.backgrounds.get(getattr(background, "binding", background))
         return previous[1] if previous is not None else None
 
     def animated(self, background):
+        self._drawable_changed()
         previous = self.backgrounds.get(getattr(background, "binding", background))
         return bool(previous is not None and previous[2] and not self.disabled)
 
     def canvas(self, background):
+        self._drawable_changed()
         previous = self.backgrounds.get(getattr(background, "binding", background))
         if previous is None or self.disabled or previous[3] is None:
             return None
@@ -352,6 +370,7 @@ class Renderer(object):
         return True
 
     def frozen_canvas(self, reference):
+        self._drawable_changed()
         return self.frozen_canvases.get(reference) if reference is not None else None
 
     @staticmethod
