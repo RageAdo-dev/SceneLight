@@ -30,22 +30,21 @@ def _pre_effect_fixture(mode: str) -> Image.Image:
 
 
 def test_form_maps_preserve_the_reviewed_smooth_surface_texels() -> None:
-    # v7 removes painted line art and strand-scale edges from the inferred
-    # surface; height, occlusion and grain stay unchanged.
+    # v6 normalizes slope units; height, occlusion and grain stay unchanged.
     # Keep this reviewed surface stable across packing and optional-FX changes.
     expected = {
         "opaque": {
-            "normal_noise": "96386a8abe804f0b09b881378c867c0be094a26f82fa067e8b409077d579e47d",
-            "height_ao_edge": "dab731c09395ffa639c43cd0725f6eb8f47154870a123c58d1cfdf18e94a15e3",
-            "response": "07cb1a72fe6c0b9e51fe0982a0d75fb6560b871807bc14013f083a99d59d12ce",
+            "normal_noise": "d05a82d21d315c9c8ca8c8286c40026109ca4e31f448ec477966c35cd4710f73",
+            "height_ao_edge": "93dbb612dc5b151e37848507c4fd8a0bfc01204d5b272400da74a2f470102e4b",
+            "response": "0de2c34e2d4cdbfee235ba2e308acbe64a798cd95cc0fd4027d6d4a513911c87",
         },
         "sprite": {
-            "normal_noise": "8bebb5783d74630fb7d1033dd0b2a47cc27a5d50dd27f79692d027bafc72c28e",
-            "height_ao_edge": "84239543ad6486c6473ec47c4ded598134d3d76bb939930f11d3bf6b200dc6e9",
-            "response": "ddcada65d4c2afd1aa051da1caf066f1d511083bd963c52e2cc83b027ba83f8f",
+            "normal_noise": "8f7af25c01314a3dbd1d3ce58291721bfc2f2239ad1e75598eba29c10db07786",
+            "height_ao_edge": "138c4c998c0ab1b7dead4e33e117cd3d1d854c7e23ee931dd4fdd8f7416f7231",
+            "response": "5bd0747e424d719ab43343e50c9774a07b92eb849f469e56a180a035f05f4e09",
         },
     }
-    assert FORM_MAP_VERSION == 7
+    assert FORM_MAP_VERSION == 6
     for mode, hashes in expected.items():
         maps = build_sprite_form_maps(_pre_effect_fixture(mode))
         normal = np.asarray(maps.normal_noise.convert("RGB"), dtype=np.uint8)
