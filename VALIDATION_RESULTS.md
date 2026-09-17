@@ -3,7 +3,7 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 631 tests passed on 16 September 2026, with no failures
+- **Local candidate:** 638 tests passed on 17 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.

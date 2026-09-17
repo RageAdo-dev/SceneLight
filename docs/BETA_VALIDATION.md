@@ -1,17 +1,17 @@
 # Compatibility and validation
 
-Coverage updated on 16 September 2026. Automatic discovery does not recognize
+Coverage updated on 17 September 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The local suite passed **631 tests**, with no failures or skips. Regression checks
+The local suite passed **638 tests**, with no failures or skips. Regression checks
 cover side-light reversal, consistent normals across sprite sizes, bounded painted
 relief, dark-scene response and continuity when bright regions meet. Fresh Ren'Py
 7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
 save/load using form-map v6; original authored files were preserved.
 
-All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35069311253)
+All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35180686292)
 pass on the current `main`. The linked download is built from `main`, and its
 checksum is published beside it. Hosted runners skip the graphics-dependent tests,
 which the local runs cover.
