@@ -3,10 +3,20 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 639 tests passed on 16 September 2026, with no failures
+- **Local candidate:** 641 tests passed on 17 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.
+- **Lamp handover:** creative colour separation raises each detected hue family
+  to an exponent and then renormalises the lobes against each other, so the
+  exponent decided how sharply one lamp handed over to the next. The old
+  exponent collapsed that handover to a step, and because the lobes are shaped
+  by a direction field that reverses through the sprite's form centre, the step
+  landed on a straight line down the middle of a character. Measured through the
+  production shader on the Interaction mod's own sprite, the handover widened
+  from 27 to 79 form-map pixels at one detected family and 16 to 35 at two. The
+  lamp colours, numbered regions, term weights and rest of the lighting model
+  are unchanged.
 - **Painted shading:** the inferred surface reads painted detail at form scale, so
   an artist's shading bands and line boundaries no longer render as creases. The
   silhouette term, term weights, relief bound and lighting model are unchanged;

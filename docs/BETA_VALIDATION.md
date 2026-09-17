@@ -1,15 +1,28 @@
 # Compatibility and validation
 
-Coverage updated on 16 September 2026. Automatic discovery does not recognize
+Coverage updated on 17 September 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The local suite passed **639 tests**, with no failures or skips. Regression checks
+The local suite passed **641 tests**, with no failures or skips. Regression checks
 cover side-light reversal, consistent normals across sprite sizes, bounded painted
 relief, dark-scene response and continuity when bright regions meet. Fresh Ren'Py
 7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
 save/load using form-map v8; original authored files were preserved.
+
+Creative colour separation gives every detected hue family equal standing by
+raising its lobe to an exponent and renormalising the lobes against each other.
+That exponent therefore set how sharply one lamp handed over to the next, and at
+the previous value the handover collapsed to a step. Because the lobes are shaped
+by a direction field that reverses through the sprite's form centre, the step fell
+on a straight line down the middle of a character, drawing a hard-edged vertical
+seam and terraced patches across a face, neck, hands and cardigan. Rendering the
+production shader with the Interaction mod's own Sayori sprite and two strongly
+separated lamps measured a 27 form-map pixel handover at one detected family and
+16 at two; the loosened exponent widens those to 79 and 35. The lamp colours, the
+numbered regions, the term weights and the rest of the lighting model are
+unchanged.
 
 Painted shading is now read at form scale, so an artist's own shading bands and
 line boundaries no longer arrive as steps in the inferred surface. This is general
