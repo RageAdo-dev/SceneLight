@@ -1,6 +1,6 @@
 # Compatibility and validation
 
-Coverage updated on 17 September 2026. Automatic discovery does not recognize
+Coverage updated on 16 September 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
@@ -11,10 +11,20 @@ relief, dark-scene response and continuity when bright regions meet. Fresh Ren'P
 7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
 save/load using form-map v6; original authored files were preserved.
 
-All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35180686292)
+All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml)
 pass on the current `main`. The linked download is built from `main`, and its
 checksum is published beside it. Hosted runners skip the graphics-dependent tests,
 which the local runs cover.
+
+A window resize or fullscreen toggle during play could previously leave a
+character drawn as a solid black silhouette, show a doubled sprite across a scene
+transition, or hold a stale background behind the dialogue box. Ren'Py deletes
+every GPU name when the drawable changes, then reuses those names, so the runtime
+now retires its own lighting textures as part of that change rather than letting
+their destructors free names the engine had already reassigned. On the resize
+probe the engine's leak counter reports zero across two resizes, down from 27
+before the fix and 236 in the original failing session, and the frame captured
+after the resize is byte-identical to the frame captured before it.
 
 The actual Preview export path retained all 1,799 frames of the colored-background
 clip and all 900 storm frames at 1080p and their original frame rates. The Windows

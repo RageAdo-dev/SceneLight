@@ -3,7 +3,7 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 638 tests passed on 17 September 2026, with no failures
+- **Local candidate:** 638 tests passed on 16 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.
@@ -29,7 +29,15 @@ The latest recorded checks, hardware measurements and known limits are in
   launchers carry the product name, version, publisher and copyright in their
   version resources, and the release workflow signs both when signing secrets
   are present.
-- **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/runs/35069311253)
+- **Window resizing:** a resize or fullscreen toggle during play could leave a
+  character drawn as a black silhouette, show a doubled sprite during a scene
+  transition, or leave a stale background behind the dialogue box. Ren'Py frees
+  every GPU name on a resize, so the runtime now retires its own lighting
+  textures as part of that change instead of letting their finalizers delete
+  names the engine had already handed to something else. The engine's own leak
+  counter reports zero across two resizes, and the frame after a resize is
+  byte-identical to the frame before it.
+- **Hosted checks:** all six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml)
   pass on the current `main`, covering the full test suite on Windows and Linux
   plus dependency resolution for a plain install. The linked download is built
   from `main` and its checksum is published beside it.
