@@ -3,10 +3,15 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 638 tests passed on 16 September 2026, with no failures
+- **Local candidate:** 639 tests passed on 16 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.
+- **Painted shading:** the inferred surface reads painted detail at form scale, so
+  an artist's shading bands and line boundaries no longer render as creases. The
+  silhouette term, term weights, relief bound and lighting model are unchanged;
+  faceting in the inferred normals drops by about half while fine painted detail is
+  retained.
 - **Directional lighting:** regression tests cover direction reversal, surface-map
   resolution, painted-edge relief, dark scenes and continuity as bright regions meet.
 - **Exports:** the Preview export path produced all 1,799 colored-background frames
@@ -15,7 +20,7 @@ The latest recorded checks, hardware measurements and known limits are in
   track can no longer end the file early; a count mismatch is refused instead of
   publishing a shortened video.
 - **Native rendering:** fresh Ren'Py 7.7.1 and 8.5.3 fixtures passed movement,
-  transitions, prepared animation and save/load with form-map version 6. Original
+  transitions, prepared animation and save/load with form-map version 8. Original
   authored files were preserved.
 - **Low-end host:** on the Radeon HD 6700M test machine, warm-scene analysis fell
   from 177.5 ms to 137.1 ms and cool-scene analysis from 171.1 ms to 123.6 ms

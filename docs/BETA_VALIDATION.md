@@ -5,11 +5,17 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The local suite passed **638 tests**, with no failures or skips. Regression checks
+The local suite passed **639 tests**, with no failures or skips. Regression checks
 cover side-light reversal, consistent normals across sprite sizes, bounded painted
 relief, dark-scene response and continuity when bright regions meet. Fresh Ren'Py
 7.7.1 and 8.5.3 fixtures passed prepared playback, movement, transitions and
-save/load using form-map v6; original authored files were preserved.
+save/load using form-map v8; original authored files were preserved.
+
+Painted shading is now read at form scale, so an artist's own shading bands and
+line boundaries no longer arrive as steps in the inferred surface. This is general
+to any sprite with painted shading; it was measured against the approved surface,
+where faceting in the inferred normals drops by about half while a small painted
+highlight still reaches the surface at 81% of its previous strength.
 
 All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml)
 pass on the current `main`. The linked download is built from `main`, and its

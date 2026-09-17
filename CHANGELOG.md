@@ -43,7 +43,7 @@
 - Shorter installation and author guides, with rendered surface-map examples.
 - A lossless 60 fps movement demo.
 
-Form-map version 6 requires rebuilding older maps through **Update SceneLight**.
+Form-map version 8 requires rebuilding older maps through **Update SceneLight**.
 This update also refreshes scene lighting and prepared movies.
 
 [Development history](docs/history/development-changelog.md) · [Compatibility and validation](docs/BETA_VALIDATION.md)
