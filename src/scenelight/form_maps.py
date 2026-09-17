@@ -25,7 +25,9 @@ from .engine import (
     _surface_ambient_occlusion,
 )
 
-FORM_MAP_VERSION = 6
+# 8 rebuilds the maps that version 7 briefly wrote for the reverted surface
+# change, so installs that saw 7 cannot keep stale normals.
+FORM_MAP_VERSION = 8
 FORM_ANALYSIS_MAX_DIMENSION = 512
 HEIGHT_MIN = -0.25
 HEIGHT_MAX = 1.25

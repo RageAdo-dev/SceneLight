@@ -12,6 +12,8 @@
 - Supported movies prepare lighting for every frame once, then reuse it during playback.
 - Live analysis handles backgrounds changed by code or visual effects.
 - Surface maps retain fine painted detail while smoothing artificial silhouette ridges.
+- Painted shading bands are read at form scale, so an artist's own band and line
+  boundaries no longer appear as ridges across a face, sleeve or cardigan.
 - Directional color blending no longer turns small surface slopes into sharp seams.
 - Animated lighting blends between source estimates instead of switching at detection cutoffs.
 - Fading colored lights retain their measured direction and fade out gradually.

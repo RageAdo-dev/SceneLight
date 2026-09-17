@@ -81,3 +81,25 @@ def test_fine_painted_relief_survives_without_spreading_across_the_surface():
     assert change.max() > 0.1
     assert np.max(np.abs(detail_height - height)) > 0.03
     assert change[radius_squared > 32**2].max() < 0.001
+
+
+def test_narrow_painted_ribbon_stays_flatter_than_painted_volume():
+    size = 512
+    alpha = np.zeros((size, size), dtype=np.float32)
+    alpha[32:480, 64:448] = 1
+    flat = np.full((size, size, 3), 0.55, dtype=np.float32)
+    base = np.stack(_pseudo_surface(alpha, flat, 0.72)[1:])
+
+    ribbon_paint = flat.copy()
+    ribbon_paint[:, 254:258] = 0.85
+    volume_paint = flat.copy()
+    volume_paint[:, 226:286] = 0.85
+    ribbon = np.stack(_pseudo_surface(alpha, ribbon_paint, 0.72)[1:])
+    volume = np.stack(_pseudo_surface(alpha, volume_paint, 0.72)[1:])
+
+    ribbon_effect = np.linalg.norm(ribbon - base, axis=0).max()
+    volume_effect = np.linalg.norm(volume - base, axis=0).max()
+    # A strand-wide painted stripe must read as albedo rather than as a ridge,
+    # while broad painted volume still shapes the surface.
+    assert volume_effect > 0.15
+    assert ribbon_effect < 0.6 * volume_effect

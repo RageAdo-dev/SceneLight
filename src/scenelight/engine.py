@@ -1179,7 +1179,13 @@ def _pseudo_surface(
     silhouette_height = cv2.GaussianBlur(
         np.sqrt(np.maximum(distance, 0.0)), (0, 0), sigmaX=max(1.2, min(alpha.shape) / 16)
     )
-    detail_height = cv2.GaussianBlur(broad_luma, (0, 0), sigmaX=max(1.2, min(alpha.shape) / 260))
+    # Painted shading bands and line art sit a few pixels wide. Sampled at close
+    # to native scale, the artist's own boundaries become hard steps in the
+    # inferred surface and read as creases across a face or a cardigan; at form
+    # scale the broad painted volume still shapes the surface and those
+    # boundaries stay flat. The silhouette term is untouched, so the shape of
+    # the light response does not move.
+    detail_height = cv2.GaussianBlur(broad_luma, (0, 0), sigmaX=max(1.2, min(alpha.shape) / 96))
     height = 0.76 * silhouette_height + 0.24 * detail_height
     # Height is dimensionless, but Sobel differences are per pixel. Express
     # slope in the same surface coordinates at every input resolution.

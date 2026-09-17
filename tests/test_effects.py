@@ -44,7 +44,7 @@ def test_form_maps_preserve_the_reviewed_smooth_surface_texels() -> None:
             "response": "5bd0747e424d719ab43343e50c9774a07b92eb849f469e56a180a035f05f4e09",
         },
     }
-    assert FORM_MAP_VERSION == 6
+    assert FORM_MAP_VERSION == 8
     for mode, hashes in expected.items():
         maps = build_sprite_form_maps(_pre_effect_fixture(mode))
         normal = np.asarray(maps.normal_noise.convert("RGB"), dtype=np.uint8)
