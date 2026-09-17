@@ -1505,28 +1505,25 @@ init -50 python:
 
         def render(self, width, height, st, at):
             rendered = renpy.render(self.child, width, height, st, at)
-            # Ren'Py Render sizes do not themselves clip overflowing children.
-            # A fixed viewport makes the offscreen projection match the scene's
-            # screen coordinates, including sprites extending past an edge.
             # Let child dependencies schedule updates; do not force a texture
-            # snapshot or query/re-render every character for its bounds.
-            viewport = renpy.Render(config.screen_width, config.screen_height)
-            viewport.xclipping = True
-            viewport.yclipping = True
-            viewport.blit(rendered, (0, 0))
-            result = renpy.Render(config.screen_width, config.screen_height)
-            result.blit(viewport, (0, 0))
-            result.mesh = True
-            result.add_shader("renpy.texture")
-            result.add_property("drawable_resolution", True)
-            result.add_property("mipmap", renpy.config.mipmap_dissolves)
-            return result
+            # snapshot or query every character for its bounds.
+            #
+            # The render must stay exactly as the transition asked for it.
+            # Ren'Py scales the virtual screen to the drawable for both sides
+            # of a transition, and the rasteriser clips anything outside that
+            # space. Clipping into an extra screen-sized render, wrapping it in
+            # a mesh pass, or claiming the drawable resolution all put this side
+            # in a different coordinate system from the outgoing side: the
+            # scene scales wrongly and screen-space sprite lighting samples
+            # outside its field, which shows up mid-transition as an opaque
+            # black sprite quad and a black character silhouette.
+            return rendered
 
     # Scene-wide transitions render their sides into another framebuffer. That
     # changes the coordinate system seen by a screen-space sprite shader, so
-    # retain the outgoing snapshot and resolve the incoming side in a clipped
-    # screen-sized viewport. Its own movie/animation dependencies remain live
-    # without repeated synchronous snapshots or character-bounds queries.
+    # retain the outgoing snapshot and resolve the incoming side live, in the
+    # transition's own coordinates. Its own movie/animation dependencies remain
+    # live without repeated synchronous snapshots or character-bounds queries.
     # Never use screenshot_to_bytes here: it reads the framebuffer back to the
     # CPU and PNG-encodes it synchronously, which stalls story advancement.
     _scenelight_existing_with_callback = config.with_callback

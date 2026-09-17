@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-def test_incoming_transition_is_live_clipped_and_forwards_events():
+def test_incoming_transition_is_live_in_transition_coordinates_and_forwards_events():
     class Displayable:
         pass
 
@@ -16,6 +16,7 @@ def test_incoming_transition_is_live_clipped_and_forwards_events():
             self.children = []
             self.shaders = []
             self.properties = {}
+            self.mesh = False
 
         def blit(self, child, position):
             self.children.append(child)
@@ -50,12 +51,15 @@ def test_incoming_transition_is_live_clipped_and_forwards_events():
     side = namespace["_SceneLightLiveTransitionSide"](child)
     result = side.render(1280, 720, 0.4, 0.8)
     assert calls == [(child, 1280, 720, 0.4, 0.8)]
-    assert result.size == (1280, 720)
-    assert result.mesh is True
-    viewport = result.children[0]
-    assert viewport.size == (1280, 720)
-    assert viewport.xclipping and viewport.yclipping
-    assert viewport.children == [child_render]
-    assert result.properties["drawable_resolution"] is True
+    # The incoming side must be handed back exactly as Ren'Py rendered it. An
+    # extra clipped or mesh-wrapped render put this side in a different
+    # coordinate system from the outgoing side, which scaled the scene wrongly
+    # and made screen-space sprite lighting sample outside its field, showing up
+    # as an opaque black sprite quad and a black silhouette mid-transition.
+    assert result is child_render
+    assert result.size == (1600, 1000)
+    assert result.mesh is False
+    assert result.children == []
+    assert result.properties == {}
     assert side.event("input", 20, 30, 0.5) == "handled"
     assert calls[-1] == ("input", 20, 30, 0.5)
