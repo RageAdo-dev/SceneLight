@@ -105,7 +105,7 @@ init -999 python:
                 payload = json.load(stream)
             finally:
                 stream.close()
-            if payload.get("version") != 2 or payload.get("signature") != signature:
+            if payload.get("version") != 3 or payload.get("signature") != signature:
                 return None
             if payload.get("sprite_names") != sorted(sprite_names):
                 return None
@@ -152,7 +152,7 @@ init -999 python:
         if not signature:
             return
         payload = {
-            "version": 2,
+            "version": 3,
             "signature": signature,
             "sprite_names": sorted(sprite_names),
             "planned_forms": sorted(planned_forms),
@@ -1298,6 +1298,7 @@ init -999 python:
         full_sequence = []
         script = getattr(getattr(renpy, "game", None), "script", None)
         statements = getattr(script, "all_stmts", ()) or ()
+        say_type = getattr(getattr(renpy, "ast", None), "Say", ())
         statement_total = len(statements)
         if progress is not None and statement_total:
             progress("inventory", 0, statement_total)
@@ -1324,19 +1325,27 @@ init -999 python:
                 name = _scenelight_imspec_name(getattr(statement, "imspec", None))
                 if name:
                     scenes.add(name)
-                    sequence.append("scene")
-                    full_sequence.append("scene")
+                sequence.append("scene")
+                full_sequence.append("scene")
                 continue
-            if statement_type == "Say":
+            # Compiled dialogue may be a TranslateSay (a Say subclass). Losing
+            # its attributes also corrupts the inherited pose for later Show
+            # statements, leaving the runtime without the matching surface.
+            if isinstance(statement, say_type) or statement_type in ("Say", "TranslateSay"):
                 attributes = getattr(statement, "attributes", None)
                 who = str(getattr(statement, "who", "")).strip().lower()
                 tag = character_variable_tags.get(who)
-                if tag and isinstance(attributes, (tuple, list)) and attributes:
-                    name = " ".join([tag] + [str(part).lower() for part in attributes])
-                    show_names.add(name)
-                    show_counts[tag] = show_counts.get(tag, 0) + 1
-                    sequence.append("show " + name)
-                    full_sequence.append("show " + name)
+                temporary = list(getattr(statement, "temporary_attributes", None) or ())
+                speaking = getattr(config, "speaking_attribute", None)
+                if speaking and getattr(statement, "interact", True):
+                    temporary.insert(0, speaking)
+                for command, attrs in (("show", attributes), ("temporary", temporary)):
+                    if tag and isinstance(attrs, (tuple, list)) and attrs:
+                        name = " ".join([tag] + [str(part).lower() for part in attrs])
+                        show_names.add(name)
+                        show_counts[tag] = show_counts.get(tag, 0) + 1
+                        sequence.append(command + " " + name)
+                        full_sequence.append(command + " " + name)
                 continue
             if statement_type not in ("Show", "Hide"):
                 continue
@@ -1358,6 +1367,36 @@ init -999 python:
         if full_sequence:
             sequences.append(full_sequence)
         return scenes, show_counts, hidden_tags, show_names, sequences
+
+    def _scenelight_plan_sequence(sequence, sprite_names, plan_form):
+        """Resolve dialogue and show attributes through Ren'Py's own rules."""
+        shown = renpy.display.image.ShownImageInfo()
+        for event in sequence:
+            command, _separator, value = str(event).partition(" ")
+            if command == "scene":
+                shown = renpy.display.image.ShownImageInfo()
+                continue
+            parts = tuple(value.lower().split())
+            if not parts:
+                continue
+            if command == "hide":
+                shown.predict_hide(None, parts)
+                continue
+            if command not in ("show", "temporary"):
+                continue
+            requested_name = " ".join(parts)
+            try:
+                canonical = shown.apply_attributes(None, parts[0], parts)
+            except Exception:
+                canonical = None
+            if canonical is None:
+                continue
+            # Temporary dialogue/speaking attributes are visible for this line
+            # only. apply_attributes is read-only; do not remember its result.
+            if command == "show":
+                shown.predict_show(None, canonical)
+            if requested_name in sprite_names:
+                plan_form(requested_name, " ".join(canonical))
 
     def _scenelight_capture_filename(kind, name):
         readable = "_".join(part for part in name.lower().split() if part)[:52]
@@ -2070,30 +2109,7 @@ init -999 python:
             if all_sprite_sequences:
                 publish_progress("plan", 0, len(all_sprite_sequences))
             for sequence_index, sequence in enumerate(all_sprite_sequences, 1):
-                shown = renpy.display.image.ShownImageInfo()
-                for event in sequence:
-                    command, _separator, value = str(event).partition(" ")
-                    if command == "scene":
-                        shown = renpy.display.image.ShownImageInfo()
-                        continue
-                    parts = tuple(value.lower().split())
-                    if not parts:
-                        continue
-                    if command == "hide":
-                        shown.predict_hide(None, parts)
-                        continue
-                    if command != "show":
-                        continue
-                    requested_name = " ".join(parts)
-                    try:
-                        canonical = shown.apply_attributes(None, parts[0], parts)
-                    except Exception:
-                        canonical = None
-                    if canonical is None:
-                        continue
-                    shown.predict_show(None, canonical)
-                    if requested_name in sprite_names:
-                        plan_form(requested_name, " ".join(canonical))
+                _scenelight_plan_sequence(sequence, sprite_names, plan_form)
                 if (
                     sequence_index == 1
                     or sequence_index % 25 == 0

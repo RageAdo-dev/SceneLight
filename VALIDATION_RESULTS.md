@@ -3,7 +3,34 @@
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](docs/BETA_VALIDATION.md).
 
-- **Local candidate:** 641 tests passed on 17 September 2026, with no failures
+- **Layered sprite sampling:** reproduced displaced face and clothing shading in
+  an Interaction save with Sayori and Monika visible after the transition.
+  The shader received the 160 × 90 light-field dimensions through `res0`
+  instead of the sprite dimensions. A dedicated sprite-size uniform corrects
+  the sample offsets; missing-map sprites continue through the full lighting
+  pass. Verified the saved frame with lighting enabled, disabled, re-enabled,
+  and at multiple window sizes on Ren'Py 8.2.1. A separate DDLC fixture passed
+  pose changes, resizing and lighting on/off on Ren'Py 7.7.1. This is a regression
+  check, not a claim of complete mod playthrough coverage.
+- **Expression sequences:** replayed the reported classroom lines and eight
+  consecutive nurse-office dialogue states, including Monika's expression
+  change. The scanner skipped `TranslateSay` nodes, missing both the spoken
+  expression and the inherited pose used by later statements. Native planning
+  now includes those states. A second fault retained the previous pose's map
+  when `keep_running_transform` replaced its child with a named image.
+  Capture and replacement regressions cover these two paths, including
+  temporary attributes and rebinding maps after save loading. The previous
+  single-pass candidate was rejected because it weakened already-correct
+  lighting; the original pass structure is restored. At matching window size,
+  Monika's approved head-and-torso reference area is pixel-identical before
+  and after the full inventory repair. Native capture recovered 8,906 additional
+  states without capture errors. The original neighborhood line also uses its
+  current pose's map. After resizing away and back, and after toggling lighting
+  off and on, pixels above the dialogue area are unchanged at matching size.
+  Exact expression matching and the missing-map shadow guard remain. Player
+  saves are not used as test outputs. These checks
+  cover the reported sequences, not a complete playthrough of the mod.
+- **Local candidate:** 668 tests passed on 17 September 2026, with no failures
   or skips. Ruff checks and formatting passed; Bandit reported no medium/high
   severity findings, and the dependency audit found no known vulnerabilities.
   Wheel and source-distribution builds passed.

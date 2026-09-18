@@ -68,7 +68,7 @@ def test_release_record_names_every_cache_contract() -> None:
         "transport_algorithm": "14-spatial-radiance-basis",
         "sprite_form_version": 8,
         "capture_version": 42,
-        "capture_plan_version": 2,
+        "capture_plan_version": 3,
         "capture_pixel_version": 2,
         "content_sha256": fingerprint,
     }

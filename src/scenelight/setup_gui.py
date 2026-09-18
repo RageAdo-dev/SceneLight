@@ -33,6 +33,7 @@ from .release import (
     release_content_sha256_from_manifest,
     release_version_from_manifest,
 )
+from .setup_theme import soft_controls
 from .sidecar import (
     find_native_executable,
     managed_project_root,
@@ -244,7 +245,18 @@ class DependencyState:
 
     @property
     def verified_count(self) -> int:
-        return len(self.required) - len(self.missing)
+        return sum(ready for _, ready in self.component_statuses)
+
+    @property
+    def component_statuses(self) -> tuple[tuple[str, bool], ...]:
+        return (("SceneLight runtime", self.runtime_ready), *requirement_statuses(self))
+
+    @property
+    def verification_summary(self) -> str:
+        total = len(self.component_statuses)
+        if self.ready:
+            return f"{total} components verified."
+        return f"{self.verified_count} of {total} components verified"
 
 
 def normalize_project_path(value: str | os.PathLike[str]) -> Path:
@@ -348,7 +360,17 @@ def _missing_modules(
     dependencies: dict[str, str], python_executable: Path | None = None
 ) -> list[str]:
     program = Path(python_executable or sys.executable)
-    if program.resolve() == Path(sys.executable).resolve():
+    target = program.resolve()
+    active = Path(sys.executable).resolve()
+    # Windows' GUI and console executables in the same environment share their
+    # packages. Treating pythonw.exe as a different environment spawned a new
+    # interpreter (and blocked Tk) whenever Settings refreshed its component list.
+    same_environment = target == active or (
+        os.name == "nt"
+        and target.parent == active.parent
+        and {target.name.lower(), active.name.lower()} <= {"python.exe", "pythonw.exe"}
+    )
+    if same_environment:
         missing: list[str] = []
         for module, requirement in dependencies.items():
             distribution, separator, expected = requirement.partition("==")
@@ -433,9 +455,11 @@ def dependency_state(
     dependencies = dict(PREVIEW_DEPENDENCIES if include_preview else BASE_DEPENDENCIES)
     if include_cuda:
         dependencies["cupy"] = CUDA_REQUIREMENT
-    required = tuple(dependencies.values())
+    required = tuple(dict.fromkeys(dependencies.values()))
     runtime_ready = target.is_file()
-    missing = tuple(_missing_modules(dependencies, target)) if runtime_ready else required
+    missing = (
+        tuple(dict.fromkeys(_missing_modules(dependencies, target))) if runtime_ready else required
+    )
     return DependencyState(target, runtime_ready, required, missing)
 
 
@@ -1560,6 +1584,7 @@ class SceneLightSetup(tk.Tk):
             background=[("selected", "#242c36")],
             foreground=[("selected", "#f4f7fa")],
         )
+        self._control_images = soft_controls(self, style)
 
     def _apply_window_icon(self, window: tk.Misc) -> None:
         try:
@@ -1982,6 +2007,7 @@ class SceneLightSetup(tk.Tk):
                 requirements_view,
                 orient="vertical",
                 command=self.requirements_canvas.yview,
+                style="Dark.Vertical.TScrollbar",
             )
             self.requirements_canvas.configure(yscrollcommand=requirements_scrollbar.set)
             self.requirements_canvas.grid(row=0, column=0, sticky="nsew")
@@ -2266,10 +2292,7 @@ class SceneLightSetup(tk.Tk):
             return
         for child in frame.winfo_children():
             child.destroy()
-        rows = (
-            ("SceneLight runtime", state.runtime_ready),
-            *requirement_statuses(state),
-        )
+        rows = state.component_statuses
         row_count = (len(rows) + 1) // 2
         for index, (label, ready) in enumerate(rows):
             row = index % row_count
@@ -2322,7 +2345,7 @@ class SceneLightSetup(tk.Tk):
             source_mode=source_install,
         )
         self._dependency_state = state
-        key = (state.runtime_ready, state.missing, self.cuda_var.get())
+        key = (state.runtime_ready, state.required, state.missing, self.cuda_var.get())
         changed = key != self._dependency_key
         self._dependency_key = key
 
@@ -2334,11 +2357,7 @@ class SceneLightSetup(tk.Tk):
             self.runtime_status_var.set(
                 f"SceneLight runtime will be installed · {state.python_executable.parent}"
             )
-        self.dependencies_status_var.set(
-            f"{state.verified_count} of {len(state.required)} components verified"
-            if not state.ready
-            else f"{len(state.required)} components verified."
-        )
+        self.dependencies_status_var.set(state.verification_summary)
         self.dependency_detail_var.set(describe_dependency_plan(state))
         self._render_requirement_rows(state)
         if self.cuda_var.get():
@@ -2376,9 +2395,7 @@ class SceneLightSetup(tk.Tk):
                     state="disabled" if self._running else "normal",
                 )
         if changed and self._running:
-            self._append_log(
-                f"[dependency check: {state.verified_count}/{len(state.required)} verified]\n"
-            )
+            self._append_log(f"[dependency check: {state.verification_summary}]\n")
         return changed
 
     def _toggle_developer_mode(self) -> None:
@@ -3297,12 +3314,14 @@ class SceneLightSetup(tk.Tk):
         include_preview: bool = False,
     ) -> None:
         source_install = SDK_LAUNCHER.is_file() and not getattr(sys, "frozen", False)
+        include_cuda = self.cuda_var.get() and not include_preview
         state = dependency_state(
             include_preview=include_preview,
-            include_cuda=self.cuda_var.get(),
+            include_cuda=include_cuda,
             source_mode=source_install,
         )
-        self._dependency_state = state
+        if not include_preview:
+            self._dependency_state = state
         if state.ready:
             self._refresh_dependency_display()
             self.operation_var.set(
@@ -3338,7 +3357,7 @@ class SceneLightSetup(tk.Tk):
                 "preview-components" if include_preview else "components",
                 dependency_install_commands(
                     include_preview=include_preview,
-                    include_cuda=self.cuda_var.get(),
+                    include_cuda=include_cuda,
                     source_mode=source_install,
                 ),
             )
@@ -3350,7 +3369,9 @@ class SceneLightSetup(tk.Tk):
         project_root = selection.root if selection.valid else None
         state = dependency_state(
             include_preview=True,
-            include_cuda=self.cuda_var.get(),
+            # Preview renders through OpenGL. CUDA is optional analysis
+            # acceleration and must not gate opening an already usable viewer.
+            include_cuda=False,
             source_mode=SDK_LAUNCHER.is_file() and not getattr(sys, "frozen", False),
         )
         if not state.ready:
@@ -3374,7 +3395,7 @@ class SceneLightSetup(tk.Tk):
         except OSError as error:
             messagebox.showerror("Preview could not start", str(error))
             return
-        self.operation_var.set("Preview & Calibrator opened in its own window.")
+        self.operation_var.set("Starting Preview & Calibrator in its own window…")
 
     def _remove(self) -> None:
         selection = self._selection()

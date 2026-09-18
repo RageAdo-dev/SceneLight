@@ -8,7 +8,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from scenelight.preview.media import MediaClip, _verified_video_frame_count, environment_wrap
+from scenelight.preview.media import (
+    MediaClip,
+    _digest,
+    _verified_video_frame_count,
+    environment_wrap,
+)
 from scenelight.source_types import VIDEO_SOURCE_SUFFIXES
 
 
@@ -104,6 +109,60 @@ def test_animated_gif_keeps_timing_alpha_and_cached_frames(tmp_path: Path) -> No
         assert clip.frame_at(45).rgba[..., 3].max() == 255
         assert all(path.is_file() for path in clip.frame_paths)
         assert clip.temporal_anchor_indices() == (0, 1, 2)
+    finally:
+        clip.close()
+
+
+@pytest.mark.parametrize("format,suffix", [("MPO", ".jpeg"), ("MPO", ".mpo"), ("TIFF", ".tiff")])
+def test_auxiliary_images_and_document_pages_do_not_play_as_animation(tmp_path, format, suffix):
+    primary = Image.new("RGB", (40, 32), (40, 145, 215))
+    auxiliary = Image.new("RGB", (40, 32), (65, 65, 65))
+    source = tmp_path / ("still" + suffix)
+    primary.save(source, format=format, save_all=True, append_images=[auxiliary])
+    original = source.read_bytes()
+    with Image.open(source) as image:
+        assert image.n_frames == 2
+        expected = np.asarray(image.convert("RGBA"))
+
+    # Even an extracted animation left by an older build must be ignored.
+    cache = tmp_path / "cache"
+    stale = cache / _digest(source)
+    stale.mkdir(parents=True)
+    primary.save(stale / "frame_000000.png")
+    auxiliary.save(stale / "frame_000001.png")
+    (stale / "media.json").write_text(
+        '{"frames":["frame_000000.png","frame_000001.png"],"durations_ms":[100,100],"size":[40,32]}'
+    )
+    clip = MediaClip(source, cache)
+    try:
+        assert clip.kind == "static"
+        assert not clip.animated and clip.frame_count == 1
+        assert clip.reference_path == source
+        for timestamp in (0, 100, 200, 350, 1000, 10_000):
+            frame = clip.frame_at(timestamp)
+            assert frame.index == 0
+            np.testing.assert_array_equal(frame.rgba, expected)
+    finally:
+        clip.close()
+    assert source.read_bytes() == original
+
+
+def test_actual_animation_is_detected_from_content_not_extension(tmp_path):
+    source = tmp_path / "animation.jpeg"
+    Image.new("RGB", (20, 16), "red").save(
+        source,
+        format="GIF",
+        save_all=True,
+        append_images=[Image.new("RGB", (20, 16), "blue")],
+        duration=[100, 150],
+        loop=0,
+    )
+    clip = MediaClip(source, tmp_path / "cache")
+    try:
+        assert clip.animated and clip.frame_count == 2
+        assert clip.frame_at(0).index == 0
+        assert clip.frame_at(100).index == 1
+        assert clip.durations_ms == (100, 150)
     finally:
         clip.close()
 

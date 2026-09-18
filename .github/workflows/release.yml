@@ -95,6 +95,10 @@ jobs:
           python -m scenelight.compatibility
           if ($LASTEXITCODE -ne 0) { throw 'Compatibility runtime verification failed.' }
           .\tools\build_release_zip.ps1 -CompatibilityRuntime $env:SCENELIGHT_COMPATIBILITY_ROOT
+          $version = python -c "import scenelight; print(scenelight.__version__)"
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "v$version" }
+          python tools/build_online_installer.py "dist/SceneLight-v$version-Windows.zip" --release-tag $tag
+          if ($LASTEXITCODE -ne 0) { throw 'Online installer build failed.' }
           .\tools\build_release_zip.ps1 -Source
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -102,6 +106,8 @@ jobs:
           path: |
             dist/SceneLight-v*-Windows.zip
             dist/SceneLight-v*-Windows.zip.sha256
+            dist/SceneLight-v*-Windows-online.zip
+            dist/SceneLight-v*-Windows-online.zip.sha256
             dist/SceneLight-v*-Windows-source.zip
             dist/SceneLight-v*-Windows-source.zip.sha256
             dist/scenelight_renpy-*.whl
@@ -120,6 +126,8 @@ jobs:
           gh release create "$env:RELEASE_TAG" `
             dist/SceneLight-v*-Windows.zip `
             dist/SceneLight-v*-Windows.zip.sha256 `
+            dist/SceneLight-v*-Windows-online.zip `
+            dist/SceneLight-v*-Windows-online.zip.sha256 `
             dist/SceneLight-v*-Windows-source.zip `
             dist/SceneLight-v*-Windows-source.zip.sha256 `
             dist/scenelight_renpy-*.whl `

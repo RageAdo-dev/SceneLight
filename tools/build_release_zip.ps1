@@ -123,8 +123,9 @@ if ($Source) {
     )) {
         Copy-Item -LiteralPath (Join-Path $root $item) -Destination $packageRoot -Force
     }
-    # Keep the README's guides, images and artwork notices available offline.
-    Copy-Item -LiteralPath (Join-Path $root "docs") -Destination $packageRoot -Recurse -Force
+    # Written guides and small diagrams stay offline; large demos stay online.
+    & python (Join-Path $root "tools\windows_payload.py") docs $root $packageRoot
+    if ($LASTEXITCODE -ne 0) { throw "Windows documentation packaging failed." }
     # Ship the example effect packs so mod authors can open them without the
     # source tree, which stays out of the download.
     Copy-Item -LiteralPath (Join-Path $root "examples") -Destination $packageRoot -Recurse -Force
@@ -156,7 +157,8 @@ if ($Source) {
             -not (Test-Path -LiteralPath (Join-Path $desktopSource "pythonw.exe"))) {
             throw "Desktop runtime does not match the current requirements."
         }
-        Copy-Item -LiteralPath $desktopSource -Destination $desktopDestination -Recurse
+        & python (Join-Path $root "tools\windows_payload.py") desktop $desktopSource $desktopDestination
+        if ($LASTEXITCODE -ne 0) { throw "Windows desktop runtime packaging failed." }
     }
 }
 
@@ -168,8 +170,13 @@ if ($offline) {
 }
 
 if ($null -ne $resolvedCompatibilityRuntime) {
-    Copy-Item -LiteralPath $resolvedCompatibilityRuntime `
-        -Destination (Join-Path $payloadRoot "compatibility-runtime") -Recurse -Force
+    $compatibilityDestination = Join-Path $payloadRoot "compatibility-runtime"
+    if ($Source) {
+        Copy-Item -LiteralPath $resolvedCompatibilityRuntime -Destination $compatibilityDestination -Recurse
+    } else {
+        & python (Join-Path $root "tools\windows_payload.py") compatibility $resolvedCompatibilityRuntime $compatibilityDestination
+        if ($LASTEXITCODE -ne 0) { throw "Windows compatibility runtime packaging failed." }
+    }
 }
 
 # Keep Windows launchers conventional even when the source checkout uses LF.

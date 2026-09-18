@@ -793,7 +793,7 @@ class SceneLightGPUView(QOpenGLWidget):
         self._uniform("u_canvas_size", CANVAS_SIZE)
         self._uniform("u_sprite_position", (sprite_x, sprite_y))
         self._uniform("u_sprite_size", (sprite_width, sprite_height))
-        self._uniform("res0", self._sprite_source_size)
+        self._uniform("u_sc_sprite_size", self._sprite_source_size)
         self._uniform("u_lod_bias", 0.0)
         blend = None if self._using_live_analysis else self._scene_blend
         columns = 2 if blend is not None and blend.left is not blend.right else 1
@@ -811,6 +811,11 @@ class SceneLightGPUView(QOpenGLWidget):
         # Preview inputs are already the exact pixels selected by the user;
         # there is no outer Ren'Py matrixcolor transform to compensate for.
         self._uniform("u_sc_authored_grade", 0.0)
+        self._uniform("u_sc_exposure_owner", 1.0)
+        self._uniform("u_sc_exposure_bias_owner", 1.0)
+        exposure_calibration = self._calibration.uniform_blocks()[0]
+        self._uniform("u_sc_exposure_auto", exposure_calibration[0] * self._strength)
+        self._uniform("u_sc_exposure_bias", exposure_calibration[1] * self._strength)
         self._uniform("u_sc_chroma_range", CHROMA_RANGE)
         self._uniform("u_sc_target_range", 0.58)
         self._uniform(

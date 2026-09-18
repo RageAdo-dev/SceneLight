@@ -1077,32 +1077,20 @@ init -50 python:
         )
 
     def _scenelight_resolve_form_entry(form_key, base_form_key):
-        """Match Ren'Py's visible attributes to its captured canonical form.
-
-        LayeredImage omits internal/default attributes from DisplayableArguments.
-        The resolver capture includes those attributes because they can affect
-        conditional layers. Exact string lookup therefore misses legitimate
-        forms such as ``forward worr cm oe`` versus its captured canonical
-        ``forward worr cm n2 ldown oe``. A canonical candidate must contain
-        every runtime-visible attribute; the least-augmented candidate is the
-        deterministic form produced by those defaults. Character colors are
-        never considered.
-        """
-
+        """Use only the current expression's map, independent of attribute order."""
         exact = SCENELIGHT_FORM_SPRITES.get(form_key)
         if exact is not None:
             return exact
         parts = tuple(form_key.split())
         if parts:
             requested = frozenset(parts[1:])
-            candidates = []
             for attributes, name, entry in SCENELIGHT_FORM_CANDIDATES.get(parts[0], ()):
-                if requested.issubset(attributes):
-                    candidates.append((len(attributes - requested), name, entry))
-            if candidates:
-                candidates.sort(key=lambda item: (item[0], item[1]))
-                return candidates[0][2]
-        return SCENELIGHT_FORM_SPRITES.get(base_form_key)
+                if requested == attributes:
+                    return entry
+        # An arbitrary attribute superset can describe another mouth, eyes, or
+        # pose. Let the shader infer the surface from the actual composite when
+        # no exact map was captured; never borrow a different expression's map.
+        return None
 
     def _scenelight_visible_sources(displayable, st=0.0, at=0.0, depth=0, seen=None):
         """Read the selected image tree without calling DynamicDisplayable callbacks."""
@@ -1683,7 +1671,7 @@ init -50 python:
             uniform sampler2D tex5;
             uniform sampler2D tex6;
             uniform sampler2D tex7;
-            uniform vec2 res0;
+            uniform vec2 u_sc_sprite_size;
             uniform vec2 u_model_size;
             uniform mat4 u_transform;
             uniform vec4 u_sc_scene_uv;
@@ -1693,6 +1681,10 @@ init -50 python:
             uniform float u_sc_reference_mid;
             uniform float u_sc_strength;
             uniform float u_sc_authored_grade;
+            uniform float u_sc_exposure_owner;
+            uniform float u_sc_exposure_bias_owner;
+            uniform float u_sc_exposure_auto;
+            uniform float u_sc_exposure_bias;
             uniform float u_sc_chroma_range;
             uniform float u_sc_target_range;
             uniform vec3 u_sc_shadow_chroma;
@@ -2037,6 +2029,38 @@ init -50 python:
                     * step(0.001, color.a);
             }
 
+            float scenelight_colored_source_support(
+                vec4 primary_data,
+                vec4 primary_color,
+                vec2 primary_extra,
+                vec4 source_data,
+                vec4 source_color
+            ) {
+                // A broad hue family is ambient evidence unless a measured
+                // emitter agrees with both its color and its location. A
+                // white lamp cannot validate unrelated green scenery.
+                float compactness = 1.0 - smoothstep(0.55, 0.70, source_data.z);
+                float color_agreement = 1.0 - smoothstep(
+                    0.18, 0.50,
+                    distance(
+                        primary_color.rgb / max(length(primary_color.rgb), 0.0001),
+                        source_color.rgb / max(length(source_color.rgb), 0.0001)
+                    )
+                );
+                float position_agreement = 1.0 - smoothstep(
+                    0.12, 0.32, distance(primary_data.xy, source_data.xy)
+                );
+                float primary_chroma = max(primary_color.r, max(primary_color.g, primary_color.b))
+                    - min(primary_color.r, min(primary_color.g, primary_color.b));
+                float emitter = smoothstep(0.12, 0.45, primary_extra.x)
+                    * smoothstep(0.15, 0.45, primary_chroma)
+                    * color_agreement * position_agreement;
+                // Legacy records may contain additional physical lights.
+                // They already have measured energy; only hue-only regions
+                // (whose physical intensity is zero) need this extra gate.
+                return max(step(0.001, source_data.w), max(compactness, emitter));
+            }
+
             float scenelight_separation_pair_evidence(
                 vec4 data_a,
                 vec4 color_a,
@@ -2044,7 +2068,9 @@ init -50 python:
                 vec4 data_b,
                 vec4 color_b,
                 vec2 extra_b,
-                float layout_mix
+                float layout_mix,
+                float support_a,
+                float support_b
             ) {
                 // Hue-family sources are encoded with physical intensity off
                 // (data.w == 0) and their measured source energy in extra.x.
@@ -2074,7 +2100,7 @@ init -50 python:
                     0.82,
                     min(color_a.a, color_b.a)
                 );
-                return creative_a * creative_b * chroma_evidence
+                return support_a * support_b * creative_a * creative_b * chroma_evidence
                     * spatial_evidence * energy_evidence * confidence_evidence;
             }
 
@@ -2084,7 +2110,8 @@ init -50 python:
                 vec4 creative_data,
                 vec4 creative_color,
                 vec2 creative_extra,
-                float layout_mix
+                float layout_mix,
+                float source_support
             ) {
                 // One strongly colored practical plus a neutral key is already
                 // a separated-light scene. Keep the gate conservative so a
@@ -2112,7 +2139,7 @@ init -50 python:
                 );
                 float energy_evidence = smoothstep(0.72, 0.90, creative_extra.x);
                 float confidence_evidence = smoothstep(0.72, 0.90, creative_color.a);
-                return primary_present * creative_present * neutral_evidence
+                return source_support * primary_present * creative_present * neutral_evidence
                     * chroma_evidence * spatial_evidence
                     * energy_evidence * confidence_evidence;
             }
@@ -2157,6 +2184,12 @@ init -50 python:
                 sampler2D source_texture,
                 float lod_bias
             ) {
+                // Self-occlusion needs a prepared height field. Painted RGB
+                // is useful for a local normal fallback, but treating eyes or
+                // clothing colors as distant blockers projects copies of them
+                // across the sprite. Missing maps still receive normal-based
+                // directional lighting, rim, bounce, and the other effects.
+                if (u_sc_has_form < 0.5) return 0.0;
                 float center_height = scenelight_height(
                     sprite_uv, source_texture, lod_bias
                 ) + u_sc_height_range.x * 0.0;
@@ -2378,7 +2411,7 @@ init -50 python:
             // Keep later shader parts running, and retain the exact original
             // alpha threshold and shadow calculation below.
             if (alpha > 0.001) {
-            vec2 sprite_texel = 1.0 / max(res0, vec2(1.0));
+            vec2 sprite_texel = 1.0 / max(u_sc_sprite_size, vec2(1.0));
             vec3 normal = scenelight_form_normal(v_tex_coord, sprite_texel, tex0, u_lod_bias);
             // Fetch the Gaussian form neighborhood once and reuse it for all
             // four lights. This is both exact to the chosen kernel and much
@@ -2509,7 +2542,7 @@ init -50 python:
                     sprite_texel,
                     alpha,
                     v_tex_coord,
-                    res0,
+                    u_sc_sprite_size,
                     tex0,
                     u_lod_bias
                 );
@@ -2527,7 +2560,7 @@ init -50 python:
                     sprite_texel,
                     alpha,
                     v_tex_coord,
-                    res0,
+                    u_sc_sprite_size,
                     tex0,
                     u_lod_bias
                 );
@@ -2613,8 +2646,13 @@ init -50 python:
             float sc_authored_grade = clamp(u_sc_authored_grade, 0.0, 1.0)
                 * step(0.0001, u_sc_strength);
             float sc_environment_adaptation = 1.0 - sc_authored_grade;
-            float exposure = pow(scene_exposure, auto_amount * sc_environment_adaptation)
-                * exp2(u_sc_calibration0.y * u_sc_strength);
+            // Incoming paint may already be exposed by a whole-image alias.
+            // New highlights and the contrast pivot still need the absolute
+            // exposure, including exposure inherited through authored grading.
+            float input_exposure = pow(scene_exposure, auto_amount * sc_environment_adaptation * u_sc_exposure_owner)
+                * exp2(u_sc_calibration0.y * u_sc_strength * u_sc_exposure_bias_owner);
+            float exposure = pow(scene_exposure, u_sc_exposure_auto)
+                * exp2(u_sc_exposure_bias);
             float confidence = 0.34 + 0.66 * mix(u_sc_light_confidence, sc_light0_color.a, transport_mix);
             float key_amount = u_sc_calibration1.w * confidence * u_sc_strength;
             // High-key broad illumination in a photograph has normally
@@ -2737,6 +2775,17 @@ init -50 python:
                 vec3(u_sc_calibration0.w * auto_amount * sc_environment_adaptation)
             ), direct_fraction);
             vec3 source_tint = vec3(1.0);
+            // A broad colored region can be a painted surface or foliage.
+            // Its measured color already contributes to ambient/probe light;
+            // hue alone must not promote it to a second directional lamp.
+            // Automatic separation needs a compact source or independently
+            // measured emission. Explicit artistic separation is unchanged.
+            float sc_source_support1 = scenelight_colored_source_support(
+                sc_light0_data, sc_light0_color, sc_light0_extra, sc_light1_data, sc_light1_color);
+            float sc_source_support2 = scenelight_colored_source_support(
+                sc_light0_data, sc_light0_color, sc_light0_extra, sc_light2_data, sc_light2_color);
+            float sc_source_support3 = scenelight_colored_source_support(
+                sc_light0_data, sc_light0_color, sc_light0_extra, sc_light3_data, sc_light3_color);
             // The photographed, energy-balanced aggregate remains the normal
             // path. Automatic separation engages for two distinct hue-family
             // sources, or for one strong colored source separated from a
@@ -2745,16 +2794,19 @@ init -50 python:
             float sc_separation_evidence = max(
                 scenelight_separation_pair_evidence(
                     sc_light1_data, sc_light1_color, sc_light1_extra,
-                    sc_light2_data, sc_light2_color, sc_light2_extra, sc_layout_mix
+                    sc_light2_data, sc_light2_color, sc_light2_extra, sc_layout_mix,
+                    sc_source_support1, sc_source_support2
                 ),
                 max(
                     scenelight_separation_pair_evidence(
                         sc_light1_data, sc_light1_color, sc_light1_extra,
-                        sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix
+                        sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix,
+                        sc_source_support1, sc_source_support3
                     ),
                     scenelight_separation_pair_evidence(
                         sc_light2_data, sc_light2_color, sc_light2_extra,
-                        sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix
+                        sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix,
+                        sc_source_support2, sc_source_support3
                     )
                 )
             );
@@ -2763,16 +2815,19 @@ init -50 python:
                 max(
                     scenelight_primary_creative_evidence(
                         sc_light0_data, sc_light0_color,
-                        sc_light1_data, sc_light1_color, sc_light1_extra, sc_layout_mix
+                        sc_light1_data, sc_light1_color, sc_light1_extra, sc_layout_mix,
+                        sc_source_support1
                     ),
                     max(
                         scenelight_primary_creative_evidence(
                             sc_light0_data, sc_light0_color,
-                            sc_light2_data, sc_light2_color, sc_light2_extra, sc_layout_mix
+                            sc_light2_data, sc_light2_color, sc_light2_extra, sc_layout_mix,
+                            sc_source_support2
                         ),
                         scenelight_primary_creative_evidence(
                             sc_light0_data, sc_light0_color,
-                            sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix
+                            sc_light3_data, sc_light3_color, sc_light3_extra, sc_layout_mix,
+                            sc_source_support3
                         )
                     )
                 )
@@ -2785,6 +2840,13 @@ init -50 python:
                 2.0
             );
             if (sc_individual_light_colors > 0.0001) {
+                float sc_manual_separation = step(0.0001, u_sc_calibration4.y);
+                float sc_accepted_source1 = mix(sc_source_support1, 1.0, sc_manual_separation);
+                float sc_accepted_source2 = mix(sc_source_support2, 1.0, sc_manual_separation);
+                float sc_accepted_source3 = mix(sc_source_support3, 1.0, sc_manual_separation);
+                sc_creative_weight1 *= sc_accepted_source1;
+                sc_creative_weight2 *= sc_accepted_source2;
+                sc_creative_weight3 *= sc_accepted_source3;
                 // Creative mode gives every detected hue family equal artistic
                 // standing, then separates their directional lobes. Realistic
                 // mode above remains energy-weighted and fully additive.
@@ -2863,11 +2925,11 @@ init -50 python:
                 // a single orange tint.
                 float sc_creative_source_count =
                     (sc_layout_mix < 0.0 ? 1.0 - step(0.001, sc_light1_data.w) : sc_layout_mix)
-                        * smoothstep(0.0, 0.65, sc_light1_extra.x)
+                        * smoothstep(0.0, 0.65, sc_light1_extra.x) * sc_accepted_source1
                     + (sc_layout_mix < 0.0 ? 1.0 - step(0.001, sc_light2_data.w) : sc_layout_mix)
-                        * smoothstep(0.0, 0.65, sc_light2_extra.x)
+                        * smoothstep(0.0, 0.65, sc_light2_extra.x) * sc_accepted_source2
                     + (sc_layout_mix < 0.0 ? 1.0 - step(0.001, sc_light3_data.w) : sc_layout_mix)
-                        * smoothstep(0.0, 0.65, sc_light3_extra.x);
+                        * smoothstep(0.0, 0.65, sc_light3_extra.x) * sc_accepted_source3;
                 // With one colored source, retain the neutral aggregate in
                 // this mix so the two sources paint different body regions.
                 // With multiple hue families, omit the already-fused primary
@@ -2898,13 +2960,13 @@ init -50 python:
                 );
                 sc_creative_influence1 = exp(
                     (sc_creative_influence1 - sc_creative_peak) / sc_creative_temperature
-                );
+                ) * sc_accepted_source1;
                 sc_creative_influence2 = exp(
                     (sc_creative_influence2 - sc_creative_peak) / sc_creative_temperature
-                );
+                ) * sc_accepted_source2;
                 sc_creative_influence3 = exp(
                     (sc_creative_influence3 - sc_creative_peak) / sc_creative_temperature
-                );
+                ) * sc_accepted_source3;
                 float sc_creative_total = max(
                     sc_creative_influence0 + sc_creative_influence1
                         + sc_creative_influence2 + sc_creative_influence3,
@@ -2929,7 +2991,7 @@ init -50 python:
                     sc_separated_source_mix
                 );
             }
-            vec3 lit = base * exposure * u_sc_calibration0.z
+            vec3 lit = base * input_exposure * u_sc_calibration0.z
                 * ambient_tint * source_tint * form_light * (1.0 - occlusion);
 
             // Colored shadow transport is independent from source tint. It
@@ -3021,7 +3083,7 @@ init -50 python:
                 * u_sc_calibration2.w * 0.16 * u_sc_strength;
             vec3 ground_chroma = clamp(ground_rgb / max(ground_energy, 0.001), vec3(0.52), vec3(2.2));
             ground_chroma = mix(vec3(1.0), ground_chroma, sc_environment_adaptation);
-            lit += base * exposure * ground_chroma * bounce;
+            lit += base * input_exposure * ground_chroma * bounce;
 
             float saturation = max(base_srgb.r, max(base_srgb.g, base_srgb.b)) - min(base_srgb.r, min(base_srgb.g, base_srgb.b));
             vec3 half0 = normalize(center_light_vector0 + vec3(0.0, 0.0, 1.0));
@@ -3220,7 +3282,7 @@ init -50 python:
 
             if (sc_glitch_intensity > 0.0001 && alpha > 0.001) {
                 float sc_line = 0.5 + 0.5 * sin(
-                    (v_sc_screen.y * max(res0.y, 1.0) + u_sc_effect_time * 37.0) * 3.14159265359
+                    (v_sc_screen.y * max(u_sc_sprite_size.y, 1.0) + u_sc_effect_time * 37.0) * 3.14159265359
                 );
                 lit *= 1.0 - u_sc_glitch_extra.y * sc_glitch_intensity * sc_line * 0.12;
                 float sc_block = scenelight_fx_hash(
@@ -3336,12 +3398,13 @@ init -50 python:
                 0.0,
                 min(float(authored_grade_strength), 1.0),
             )
-            self.form_entry = _scenelight_resolve_form_entry(
-                self.form_key,
-                self.base_form_key,
-            )
-            self.has_form = self.form_entry is not None
-            form_assets = self.form_entry if self.has_form else SCENELIGHT_FORM_FALLBACK
+            self._sc_exposure_owner = True
+            self._sc_exposure_bias_owner = True
+            self._sc_exposure_auto = 0.0
+            self._sc_exposure_bias = 0.0
+            self._sc_exposure_subtree = None
+            self._sc_exposure_terms = None
+            self._sc_refresh_form_binding()
             # Ren'Py builds an animated transition from a frozen copy of the
             # previously rendered scene and the new live scene. Keep the last
             # state used by this displayable so that frozen copy cannot query
@@ -3364,15 +3427,124 @@ init -50 python:
             self._sc_last_rendered_controls = None
             self.irradiance = _scenelight_texture(SCENELIGHT_ATLAS["irradiance"])
             self.emitter = _scenelight_texture(SCENELIGHT_ATLAS["emitter"])
-            self.form_normal_noise = _scenelight_texture(form_assets["normal_noise"])
-            self.form_height_ao_edge = _scenelight_texture(form_assets["height_ao_edge"])
-            self.form_response = _scenelight_texture(form_assets["response"])
             self.wrap_atlas = _scenelight_texture(
                 SCENELIGHT_ATLAS.get("wrap", SCENELIGHT_ATLAS["irradiance"])
             )
             self.transport_atlas = _scenelight_texture(
                 SCENELIGHT_TRANSPORT_ATLAS.get("texture", SCENELIGHT_ATLAS["irradiance"])
             )
+
+        def _sc_refresh_form_binding(self):
+            self.form_entry = _scenelight_resolve_form_entry(
+                self.form_key,
+                self.base_form_key,
+            )
+            self.has_form = self.form_entry is not None
+            form_assets = self.form_entry if self.has_form else SCENELIGHT_FORM_FALLBACK
+            self.form_normal_noise = _scenelight_texture(form_assets["normal_noise"])
+            self.form_height_ao_edge = _scenelight_texture(form_assets["height_ao_edge"])
+            self.form_response = _scenelight_texture(form_assets["response"])
+            self._sc_form_binding_pending = False
+
+        def after_setstate(self):
+            # Saves retain the captured map and texture displayables from their
+            # installation. Rebind after loading, when the current inventory is
+            # available, before Ren'Py renders the first interaction.
+            self._sc_form_binding_pending = True
+
+        def _sc_exposure_coefficients(self):
+            # Claim only coefficients this pass really applies. Named image
+            # controls can bypass an inner alias independently of its parent.
+            if self._sc_snapshot_frozen:
+                scene = self._sc_frozen_scene
+                enabled = self._sc_frozen_enabled
+                strength = self._sc_frozen_strength
+                controls = self._sc_frozen_controls or {}
+            else:
+                scene, enabled, strength, _effects, _time, controls = self._live_lighting_state()
+            scene = _scenelight_resolve_live_scene(scene)
+            if not _SCENELIGHT_SHADER_AVAILABLE or not scene or not enabled or strength <= 0.0:
+                return (0.0, 0.0, 0.0)
+            calibration = _scenelight_calibration_blocks(scene, controls.get("calibration", {}))[0]
+            adaptation = 1.0 - (
+                getattr(self, "authored_grade_strength", 0.0) if strength >= 0.0001 else 0.0
+            )
+            auto_profile = calibration[0] * strength
+            return (auto_profile * adaptation, calibration[1] * strength, auto_profile)
+
+        def _sc_prepare_exposure_ownership(self):
+            # Ownership depends only on each wrapper's alias chain, never on
+            # render-stack depth. Shared/cached children therefore keep the
+            # same exposure whether rendered alone or through another alias.
+            # ImageReference.visit resolves late targets before they are used.
+            memo = {}
+            display = getattr(renpy, "display", None)
+            alias_classes = tuple(cls for cls in (
+                getattr(getattr(display, "image", None), "ImageReference", None),
+                getattr(getattr(display, "transform", None), "Transform", None),
+            ) if isinstance(cls, type))
+            empty = (0.0, 0.0, (), ())
+
+            def walk(current):
+                if current is None:
+                    return empty
+                identity = id(current)
+                if identity in memo:
+                    return memo[identity]
+                memo[identity] = empty
+                if isinstance(current, SceneLightSprite):
+                    frozen = getattr(current, "_sc_snapshot_frozen", False)
+                    captured = getattr(current, "_sc_exposure_subtree", None)
+                    captured_terms = getattr(current, "_sc_exposure_terms", None)
+                    if (
+                        frozen and captured is not None and captured_terms is not None
+                        and hasattr(current, "_sc_exposure_auto")
+                        and hasattr(current, "_sc_exposure_bias")
+                    ):
+                        result = captured + captured_terms
+                        memo[identity] = result
+                        return result
+                    child_auto, child_bias, auto_terms, bias_terms = walk(current.child)
+                    own_auto, own_bias, auto_profile = current._sc_exposure_coefficients()
+                    owner = own_auto != 0.0 and auto_profile not in auto_terms
+                    bias_owner = own_bias != 0.0 and own_bias not in bias_terms
+                    # Repeated aliases share one exposure profile, but a
+                    # distinct authored coefficient must still contribute.
+                    # Grade attenuation does not create a new profile: the
+                    # deepest active occurrence retains its graded value.
+                    absolute_auto = child_auto + (own_auto if owner else 0.0)
+                    absolute_bias = child_bias + (own_bias if bias_owner else 0.0)
+                    if owner:
+                        auto_terms += (auto_profile,)
+                    if bias_owner:
+                        bias_terms += (own_bias,)
+                    absolute = (absolute_auto, absolute_bias)
+                    result = absolute + (auto_terms, bias_terms)
+                    if captured is not None and (
+                        getattr(current, "_sc_exposure_owner", True) != owner
+                        or getattr(current, "_sc_exposure_bias_owner", True) != bias_owner
+                        or captured != absolute
+                    ):
+                        renpy.redraw(current, 0.0)
+                    current._sc_exposure_owner = owner
+                    current._sc_exposure_bias_owner = bias_owner
+                    current._sc_exposure_auto = absolute_auto
+                    current._sc_exposure_bias = absolute_bias
+                    current._sc_exposure_subtree = absolute
+                    current._sc_exposure_terms = (auto_terms, bias_terms)
+                else:
+                    visit = getattr(current, "visit", None)
+                    children = list((visit() if visit is not None else ()) or ())
+                    coverage = [walk(child) for child in children]
+                    # A lit descendant does not imply that every pixel of a
+                    # composite has been exposed. Only engine alias/transform
+                    # chains forward whole-image coverage. Unknown or branching
+                    # displayables retain the prior outer exposure behavior.
+                    result = coverage[0] if isinstance(current, alias_classes) and len(coverage) == 1 else empty
+                memo[identity] = result
+                return result
+
+            return walk(self)[:2]
 
         def visit(self):
             return [
@@ -3387,6 +3559,10 @@ init -50 python:
             ]
 
         def per_interact(self):
+            if getattr(self, "_sc_form_binding_pending", False):
+                self._sc_refresh_form_binding()
+                renpy.redraw(self, 0.0)
+            self._sc_prepare_exposure_ownership()
             # Static lighting remains valid across dialogue interactions. The
             # former unconditional redraw rebuilt every character shader pass
             # for every line of typewriter text. Procedural effects opt back
@@ -3428,11 +3604,28 @@ init -50 python:
         def _change_transform_child(self, child):
             # keep_running_transform supplies the new expression as the
             # replacement child. Preserve its own SceneLight metadata when the
-            # scene router has already wrapped it; otherwise retain this tag.
+            # scene router has already wrapped it.
             if isinstance(child, SceneLightSprite):
                 return child
             rv = self._copy()
             rv.child = child
+            reference_class = getattr(
+                getattr(renpy.display, "image", None), "ImageReference", None
+            )
+            if reference_class is not None and isinstance(child, reference_class):
+                # show() resolves inherited attributes before creating this
+                # reference. The retained transform can now contain a wholly
+                # different pose, so its old map must not survive replacement.
+                name = child.name
+                if isinstance(name, _SCENELIGHT_STRING_TYPES):
+                    name = tuple(name.split())
+                if isinstance(name, (tuple, list)) and name:
+                    rv.form_key = " ".join(name).strip().lower()
+                    rv.base_form_key = rv.form_key
+                    # Keep the scene tag (including `show ... as`) and the
+                    # grading supplied by the running outer transform.
+                    rv.image_name = (self.image_name[0],) + tuple(name[1:])
+                    rv._sc_refresh_form_binding()
             return rv
 
         def _live_scene(self):
@@ -3527,10 +3720,18 @@ init -50 python:
             rv._sc_frozen_controls = copy.deepcopy(frozen_controls)
             rv._sc_frozen_screen_rect = self._scenelight_screen_rect()
             rv._sc_transition_screen_rect = None
+            # Rebuild from the frozen children's last-rendered controls. Live
+            # rules may already describe the incoming scene at snapshot time.
+            rv._sc_exposure_subtree = None
+            rv._sc_prepare_exposure_ownership()
             return rv
 
         def render(self, width, height, st, at):
             child_render = renpy.render(self.child, width, height, st, at)
+            # A dynamic child may have resolved a new nested wrapper during
+            # its render. Its own ownership is already stable; refresh this
+            # ancestor before binding its uniforms, without flushing caches.
+            self._sc_prepare_exposure_ownership()
 
             if self._sc_snapshot_frozen:
                 scene = self._sc_frozen_scene
@@ -3619,6 +3820,11 @@ init -50 python:
             # a later outer pass. That keeps both stacks independent.
             result = renpy.Render(*child_render.get_size())
             result.blit(child_render, (0, 0))
+            # Ren'Py's resN uniforms follow sampler allocation order, not the
+            # texN name. Helper samplers can claim res0 for a light-field texture.
+            # Use the sprite canvas explicitly so normal/shadow offsets remain
+            # in sprite pixels, independent of sampler order and window scaling.
+            result.add_uniform("u_sc_sprite_size", tuple(float(v) for v in child_render.get_size()))
             live_fields = _scenelight_live_fields(scene)
             atlas_width = float(SCENELIGHT_ATLAS["tile_size"][0] * SCENELIGHT_ATLAS["columns"])
             atlas_height = float(SCENELIGHT_ATLAS["tile_size"][1] * SCENELIGHT_ATLAS["rows"])
@@ -3685,6 +3891,10 @@ init -50 python:
             result.add_uniform("u_sc_reference_mid", SCENELIGHT_REFERENCE_ART_MID)
             result.add_uniform("u_sc_strength", strength if enabled else 0.0)
             result.add_uniform("u_sc_authored_grade", self.authored_grade_strength)
+            result.add_uniform("u_sc_exposure_owner", float(self._sc_exposure_owner))
+            result.add_uniform("u_sc_exposure_bias_owner", float(self._sc_exposure_bias_owner))
+            result.add_uniform("u_sc_exposure_auto", float(self._sc_exposure_auto))
+            result.add_uniform("u_sc_exposure_bias", float(self._sc_exposure_bias))
             result.add_uniform("u_sc_effect_time", effect_time)
             result.add_uniform("u_sc_chroma_range", float(SCENELIGHT_ATLAS["chroma_range"]))
             result.add_uniform("u_sc_target_range", float(SCENELIGHT_ATLAS["target_mid_range"]))

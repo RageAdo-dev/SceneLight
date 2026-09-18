@@ -20,6 +20,10 @@ from PIL import Image, ImageSequence
 from ..source_types import VIDEO_SOURCE_SUFFIXES
 
 ANIMATED_IMAGE_EXTENSIONS = {".gif", ".apng", ".webp"}
+# Pillow also reports MPO auxiliary images and TIFF pages as multiple frames
+# (and MPO even sets is_animated). Only formats with a playback timeline belong
+# in the animation decoder. Inspect the decoded format, not the file extension.
+TIMED_IMAGE_FORMATS = {"GIF", "PNG", "WEBP", "AVIF", "FLI"}
 VIDEO_EXTENSIONS = VIDEO_SOURCE_SUFFIXES
 SUPPORTED_BACKGROUND_EXTENSIONS = {
     ".png",
@@ -167,7 +171,8 @@ class MediaClip:
         with Image.open(self.source) as image:
             self.size = image.size
             frame_count = int(getattr(image, "n_frames", 1))
-        if frame_count > 1:
+            animated = image.format in TIMED_IMAGE_FORMATS and frame_count > 1
+        if animated:
             self._open_animated_image()
 
     def _open_animated_image(self) -> None:

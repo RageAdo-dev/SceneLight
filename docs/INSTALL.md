@@ -3,9 +3,32 @@
 Back up your game or project folder and saves before installing. It gives you an
 easy way back if setup is interrupted or your game isn’t compatible.
 
-[Download the Windows package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0-beta/SceneLight-v1.0.0-Windows.zip).
-Extract `SceneLight-v1.0.0-Windows.zip`, then open **SceneLight.exe** in the
-extracted folder.
+[Open Windows downloads](https://github.com/RageAdo-dev/SceneLight/releases).
+Choose the small **Windows-online.zip** for online setup, or **Windows.zip** for
+the complete offline app. Extract the entire ZIP, then open **SceneLight.exe**.
+
+The online installer displays the download size, downloads the same tested payload
+as the offline ZIP, and checks its pinned SHA-256 before installing. It keeps the
+app and runtime under `%LOCALAPPDATA%\SceneLight\installed` and reuses them on later
+launches. No administrator access or system Python installation is needed. Close
+the download window to cancel; reopen the installer to retry a failed download.
+
+The offline ZIP runs directly from its extracted folder. Setup, Preview and the
+legacy compatibility runtime are included; optional CUDA acceleration may still
+need a download. Choosing online setup changes when the main payload is downloaded,
+not the total size of its required components.
+
+Private beta releases use the complete Windows ZIP. Download it while signed in
+to an account with repository access, or receive it directly from the maintainer.
+The current small online installer does not authenticate to private GitHub assets;
+publish it only when its matching payload is publicly downloadable.
+
+For release builders: build the complete ZIP first, then run
+`python tools/build_online_installer.py dist/SceneLight-v1.0.0-Windows.zip --release-tag <tag>`.
+Publish both ZIPs under that exact tag. The online ZIP pins the complete ZIP's hash;
+rebuild it whenever the payload changes. Local candidate installers cannot download
+their payload until that matching release asset is published. The release workflow
+builds and includes both variants automatically.
 
 ## Install without the Windows app
 

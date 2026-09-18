@@ -4,6 +4,11 @@
 
 ### Lighting and playback
 
+- Whole-image sprite aliases share automatic exposure instead of repeatedly darkening the same character. Authored grades, per-image controls, highlights and frozen transitions retain their own lighting behavior.
+- Automatic color separation no longer treats every broad patch of foliage or colored wall as an additional lamp. Environmental tint and bounce remain active, compact colored lights retain separation, and explicit artistic color separation is unchanged.
+- Capture now follows pose and expression changes in compiled dialogue, including translated dialogue and temporary speaking attributes. Old capture plans are rebuilt so those states receive matching surface maps.
+- Sprite replacements under a running animation now refresh their surface-map bindings instead of retaining the previous pose. Saved sprites rebind to the current inventory after loading. Existing lighting depth and grading are preserved; unmapped expressions cannot borrow another pose's geometry or cast distant shadows from painted colors.
+- Sprite sampling now uses the character canvas dimensions instead of a renderer-assigned texture slot. This fixes displaced facial and clothing shading on layered sprites while keeping lighting enabled, including sprites without prepared surface maps.
 - Surface direction is consistent across sprite resolutions, with bounded relief at painted color boundaries.
 - Side lights produce a stronger difference between lit and shaded surfaces.
 - Overlapping light regions prevent jumps when bright areas split or merge.
@@ -25,6 +30,10 @@
 
 ### Setup and author tools
 
+- Preview treats MPO/JPEG auxiliary images (including HDR gain maps) and TIFF pages as still-image data instead of animation frames. Existing mistaken animation caches are ignored; true GIF, APNG, WebP and other timed formats retain playback.
+- Rounded controls use larger image tiles to avoid thousands of native paint operations per button. Bundled menus check their own package environment directly instead of spawning another interpreter. Preview opens without requiring optional CUDA analysis components.
+- Setup uses rounded buttons and tabs with clear hover, selection and keyboard focus states. System and Advanced now share the same verified component count, including the runtime and counting shared package bindings once.
+- Windows releases offer a small online installer alongside the complete offline ZIP. Online setup downloads the exact verified offline payload into SceneLight's own cache and reuses it on later launches without modifying system Python.
 - SceneLight.exe opens Setup and Preview with a bundled Windows runtime.
 - SceneLight.exe and the bundled game launcher report the product name, version,
   publisher and copyright in Windows file properties.

@@ -1,9 +1,28 @@
 # Compatibility and validation
 
-Coverage updated on 17 September 2026. Automatic discovery does not recognize
+Coverage updated on 18 September 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
+
+The latest tester build passed **737 tests** locally. It includes the sprite-map
+and exposure corrections, responsive Setup controls, optional-CUDA-independent
+Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
+The reported HDR photo produced identical pixels across six consecutive Preview
+frames with live lighting active. Windows release ZIP integrity and bundled
+source contents were verified.
+
+| GPU family | Current evidence |
+| --- | --- |
+| NVIDIA | Current Preview rendering and reported game scenes checked on an RTX 4090 |
+| AMD | Previous physical Radeon HD 6700M coverage, detailed below; the latest build still needs a fresh AMD tester pass |
+| Intel | Uses the same capability-based OpenGL path; no physical Intel validation recorded for this candidate |
+
+CUDA is optional setup acceleration. Its absence does not block Preview, and the
+CPU analysis path remains available. These results do not establish support for
+every GPU or driver; testers should report their GPU model and driver version.
+
+## Earlier local candidate
 
 The local suite passed **641 tests**, with no failures or skips. Regression checks
 cover side-light reversal, consistent normals across sprite sizes, bounded painted

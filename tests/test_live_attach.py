@@ -121,10 +121,9 @@ def test_install_creates_full_hybrid_gpu_sidecar(
     assert "scenelight.dynamic_sprite" in runtime
     assert "SceneLightImageLike" in runtime
     assert "def _scenelight_resolve_form_entry(form_key, base_form_key):" in runtime
-    assert "requested.issubset(attributes)" in runtime
-    assert runtime.index("requested.issubset(attributes)") < runtime.index(
-        "return SCENELIGHT_FORM_SPRITES.get(base_form_key)"
-    )
+    assert "requested == attributes" in runtime
+    assert "requested.issubset(attributes)" not in runtime
+    assert "return SCENELIGHT_FORM_SPRITES.get(base_form_key)" not in runtime
     assert manifest["version"] == 8
     assert manifest["transport_atlas"]["planes"] == 26
     assert list(forms["sprites"]) == ["nova idle"]

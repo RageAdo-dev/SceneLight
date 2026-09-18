@@ -509,7 +509,7 @@ def test_open_preview_does_not_require_a_selected_game(
         assert "--project" not in command
     else:
         assert command[-2:] == ["--project", str(project)]
-    assert statuses == ["Preview & Calibrator opened in its own window."]
+    assert statuses == ["Starting Preview & Calibrator in its own window…"]
 
 
 def test_standalone_preview_can_install_missing_optional_components(monkeypatch) -> None:
@@ -582,6 +582,68 @@ def test_missing_parent_of_preview_module_is_reported_as_missing(monkeypatch):
     ]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows GUI/console interpreter pair")
+def test_gui_interpreter_checks_its_console_packages_without_spawning(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup_gui.sys, "executable", str(tmp_path / "pythonw.exe"))
+    monkeypatch.setattr(setup_gui, "version", lambda name: "2.1.3")
+    monkeypatch.setattr(setup_gui.importlib.util, "find_spec", lambda name: object())
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Opening a bundled menu must not spawn an interpreter")
+
+    monkeypatch.setattr(setup_gui.subprocess, "run", forbidden)
+    assert setup_gui._missing_modules({"numpy": "numpy==2.1.3"}, tmp_path / "python.exe") == []
+    assert setup_gui._missing_modules({"numpy": "numpy==1.0.0"}, tmp_path / "python.exe") == [
+        "numpy==1.0.0"
+    ]
+
+
+def test_different_interpreter_directory_is_still_probed(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup_gui.sys, "executable", str(tmp_path / "pythonw.exe"))
+    target = tmp_path / "other" / "python.exe"
+    target.parent.mkdir()
+    target.touch()
+    commands = []
+
+    def probe(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout='["numpy"]')
+
+    monkeypatch.setattr(setup_gui.subprocess, "run", probe)
+    assert setup_gui._missing_modules({"numpy": "numpy==2.1.3"}, target) == ["numpy==2.1.3"]
+    assert commands[0][0] == str(target)
+
+
+def test_preview_opens_with_optional_cuda_missing(tmp_path, monkeypatch):
+    probes = []
+    launches = []
+    status = []
+
+    def dependencies(**kwargs):
+        probes.append(kwargs)
+        missing = (CUDA_REQUIREMENT,) if kwargs["include_cuda"] else ()
+        return setup_gui.DependencyState(tmp_path / "python.exe", True, (), missing)
+
+    def forbidden(**kwargs):
+        pytest.fail("Preview must not request CUDA installation")
+
+    monkeypatch.setattr(setup_gui, "dependency_state", dependencies)
+    monkeypatch.setattr(setup_gui, "preferred_runtime_python", lambda: tmp_path / "python.exe")
+    monkeypatch.setattr(
+        setup_gui.subprocess, "Popen", lambda command, **kwargs: launches.append(command)
+    )
+    view = SimpleNamespace(
+        _selection=lambda: ProjectSelection(None, False, "No game selected"),
+        cuda_var=SimpleNamespace(get=lambda: True),
+        _install_components=forbidden,
+        operation_var=SimpleNamespace(set=status.append),
+    )
+    setup_gui.SceneLightSetup._open_preview(view)
+    assert probes == [{"include_preview": True, "include_cuda": False, "source_mode": True}]
+    assert len(launches) == 1
+    assert status[-1].startswith("Starting Preview")
+
+
 def test_dependency_state_reports_every_exact_missing_version_for_new_environment(
     tmp_path: Path,
 ) -> None:
@@ -594,12 +656,45 @@ def test_dependency_state_reports_every_exact_missing_version_for_new_environmen
 
     assert not state.runtime_ready
     assert state.missing == state.required
-    assert len(state.required) == len(PREVIEW_DEPENDENCIES)
+    assert len(state.required) == len(set(PREVIEW_DEPENDENCIES.values()))
     assert "NumPy 2.1.3" in describe_dependency_plan(state)
     assert format_requirement("opencv-python-headless==4.10.0.84") == "OpenCV 4.10.0.84"
     statuses = requirement_statuses(state)
     assert statuses[0] == ("NumPy 2.1.3", False)
-    assert len(statuses) == len(PREVIEW_DEPENDENCIES)
+    assert len(statuses) == len(set(PREVIEW_DEPENDENCIES.values()))
+    assert state.verified_count == 0
+    assert state.verification_summary == "0 of 8 components verified"
+
+
+def test_verification_summary_matches_rows_including_runtime_and_optional_cuda(
+    tmp_path, monkeypatch
+):
+    from scenelight import setup_gui
+
+    python = tmp_path / "python.exe"
+    python.touch()
+    monkeypatch.setattr(setup_gui, "_missing_modules", lambda *args: [])
+    for cuda, expected in ((False, 7), (True, 8)):
+        state = dependency_state(include_preview=False, include_cuda=cuda, python_executable=python)
+        assert len(state.component_statuses) == expected
+        assert all(ready for _, ready in state.component_statuses)
+        assert state.verified_count == expected
+        assert state.verification_summary == f"{expected} components verified."
+
+
+def test_missing_preview_binding_marks_shared_package_once(tmp_path, monkeypatch):
+    from scenelight import setup_gui
+
+    python = tmp_path / "python.exe"
+    python.touch()
+    qt = "PySide6-Essentials==6.9.2"
+    monkeypatch.setattr(setup_gui, "_missing_modules", lambda *args: [qt, qt])
+    state = dependency_state(include_preview=True, python_executable=python)
+    assert state.required.count(qt) == 1
+    assert state.missing == (qt,)
+    assert state.verified_count == 7
+    assert state.verification_summary == "7 of 8 components verified"
+    assert dict(state.component_statuses)["PySide6-Essentials 6.9.2"] is False
 
 
 def test_vm_renderer_failure_is_not_mislabeled_as_a_dependency_failure() -> None:

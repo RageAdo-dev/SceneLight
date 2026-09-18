@@ -9,17 +9,22 @@ light and color as they move through a scene.
 
 > **Before you start:** Back up your game or project folder and saves. You’ll have an easy way back if setup is interrupted or your game isn’t compatible.
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0-beta/SceneLight-v1.0.0-Windows.zip)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
+**[Windows downloads](https://github.com/RageAdo-dev/SceneLight/releases)** · [Installation guide](docs/INSTALL.md) · [Author guide](docs/AUTHOR_QUICKSTART.md)
 
 ![Character lighting before and after SceneLight](docs/media/lighting-comparison.png)
 
 ## Installation
 
-1. Extract `SceneLight-v1.0.0-Windows.zip` and open **SceneLight.exe**.
+1. Download the small `Windows-online.zip`, extract it and open **SceneLight.exe**. It downloads and verifies the required components once. For a computer without internet, choose the full `Windows.zip` instead.
 2. Select your game folder and review the detected characters.
 3. Choose **Add to this game** or **Create separate copy**, then let setup finish.
 
 Launch the game normally. Videos are prepared once during setup for faster playback.
+The online and offline options install the same tested build. The online installer
+shows the download size before starting; it reduces the initial file size, not the
+total data required. No system Python installation is needed.
+For private beta releases, use the complete **Windows.zip**. The small online
+installer is for publicly downloadable releases and does not sign in to GitHub.
 
 ## Example scenes
 

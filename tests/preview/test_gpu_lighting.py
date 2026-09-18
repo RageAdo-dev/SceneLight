@@ -144,6 +144,63 @@ def test_dark_scene_has_no_constant_fill_and_a_flash_reaches_the_sprite(renderer
     assert levels[-1] == levels[0], levels
 
 
+def test_broad_environment_color_is_retained_without_inventing_a_second_lamp(renderer):
+    from scenelight.calibration import Calibration
+
+    renderer.set_live_analysis_enabled(True)
+    renderer.set_placement(0.5, 1.0, 0.92)
+    pixels = np.full((144, 256, 4), 255, np.uint8)
+    pixels[..., :3] = (52, 145, 70)
+    try:
+        renderer.set_calibration(Calibration())
+        renderer.set_background_frame(pixels)
+        automatic = renderer.render_rgba((640, 360))
+        renderer.set_calibration(Calibration(adaptive_light_colors=0.0))
+        ambient = renderer.render_rgba((640, 360))
+        subject = automatic[65:110, 285:355, :3].mean(axis=(0, 1))
+        # Compare the same painted material under equal-luminance neutral
+        # surroundings; warm material need not become literally green-dominant.
+        from scenelight.engine import _linear_to_srgb, _luminance, _srgb_to_linear
+
+        neutral = round(
+            float(
+                _linear_to_srgb(
+                    _luminance(_srgb_to_linear(np.array([52, 145, 70], dtype=np.float32) / 255.0))
+                )
+            )
+            * 255
+        )
+        pixels[..., :3] = neutral
+        renderer.set_background_frame(pixels)
+        gray = renderer.render_rgba((640, 360))[65:110, 285:355, :3].mean(axis=(0, 1))
+        # Green reflected light increases green relative to BOTH opponent
+        # channels. G/R alone misses the blue reduction on this orange paint.
+        green_share = subject[1] / (subject[0] + subject[2])
+        neutral_share = gray[1] / (gray[0] + gray[2])
+        assert green_share > neutral_share * 1.08, (subject, gray)
+        np.testing.assert_array_equal(automatic, ambient)
+    finally:
+        renderer.set_calibration(Calibration())
+        renderer.set_placement(0.65, 1.0, 0.92)
+
+
+def test_compact_colored_lamps_keep_distinct_directional_colors(renderer):
+    from scenelight.calibration import Calibration
+
+    renderer.set_live_analysis_enabled(True)
+    renderer.set_placement(0.5, 1.0, 0.92)
+    try:
+        renderer.set_calibration(Calibration())
+        renderer.set_background_frame(_lamps(1.0))
+        frame = renderer.render_rgba((640, 360))
+        left = frame[65:105, 280:305, :3].mean(axis=(0, 1))
+        right = frame[65:105, 335:360, :3].mean(axis=(0, 1))
+        assert left[0] / max(left[2], 1) > right[0] / max(right[2], 1) * 1.2, (left, right)
+    finally:
+        renderer.set_calibration(Calibration())
+        renderer.set_placement(0.65, 1.0, 0.92)
+
+
 def test_prepared_replay_matches_live_and_preserves_flashes_and_cuts(renderer, tmp_path):
     from scenelight.prepared import FramePreparer, Writer
     from scenelight.runtime.prepared import Reader

@@ -1032,7 +1032,7 @@ def test_runtime_inventory_limits_forms_to_compiled_story_use() -> None:
     helper = capture_source().read_text(encoding="utf-8")
 
     assert "show_names.add(name)" in helper
-    assert 'statement_type == "Say"' in helper
+    assert "isinstance(statement, say_type)" in helper
     assert "script_sprite_sequences" in helper
     assert "story_names_by_tag" in helper
     assert "registered_name in story_names_by_tag[parts[0]]" in helper
