@@ -63,6 +63,16 @@ The Windows package includes the components needed for Setup and Preview.
 Video preparation can take a while; completed work is reused on later launches.
 Optional components are installed only with your permission.
 
+You can select the outer folder created by extracting a game ZIP. Setup looks
+inside a few levels and uses the game folder when it finds exactly one. If there
+are several games, it asks you to choose the intended one.
+
+Setup detects optional CUDA acceleration in the background and shows the NVIDIA
+GPU it found. It verifies an installed CUDA backend or checks for compatible
+CUDA 12 tools before recommending the download. Choosing **No** on the optional
+CUDA prompt continues with CPU analysis; live lighting still uses compatible
+graphics hardware. Settings → Advanced shows the detection result.
+
 ## Open Preview
 
 Choose **Settings → Tools → Open Preview & Calibrator**. Load a background and

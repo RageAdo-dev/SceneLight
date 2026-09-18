@@ -5,12 +5,19 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The latest tester build passed **737 tests** locally. It includes the sprite-map
+The latest tester build passed **756 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
 frames with live lighting active. Windows release ZIP integrity and bundled
 source contents were verified.
+
+Setup now queries the actual CUDA driver in a separate process and recommends
+acceleration only when a compatible runtime or CUDA 12 toolkit is available.
+The RTX 4090 was detected with a working backend and with a fresh runtime missing
+CuPy. Declining the optional download continued on CPU. The reported nested
+Graveyard Girls extraction resolved to its inner game folder without reselection;
+the maximum UI event gap during combined discovery was about 40 ms locally.
 
 | GPU family | Current evidence |
 | --- | --- |

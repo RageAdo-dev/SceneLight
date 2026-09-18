@@ -12,7 +12,7 @@ import json
 import os
 import queue
 import re
-import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -26,6 +26,7 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__
 from .calibration import profile_path
 from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility_root
+from .cuda_detection import CudaSupport, detect_cuda_support
 from .developer import DeveloperStatus, developer_status
 from .release import (
     ReleaseRelation,
@@ -259,13 +260,52 @@ class DependencyState:
         return f"{self.verified_count} of {total} components verified"
 
 
-def normalize_project_path(value: str | os.PathLike[str]) -> Path:
-    """Resolve a selected project path, accepting its ``game`` folder too."""
+def normalize_project_path(value: str | os.PathLike[str], *, find_nested: bool = True) -> Path:
+    """Accept a project, its game folder, or an unambiguous extraction wrapper."""
 
     expanded = Path(os.path.expandvars(os.path.expanduser(str(value).strip().strip('"'))))
     resolved = expanded.resolve()
     if resolved.name.lower() == "game" and resolved.is_dir():
         return resolved.parent
+    if not find_nested or not resolved.is_dir() or (resolved / "game").is_dir():
+        return resolved
+
+    pending = [(resolved, 0)]
+    candidates: list[Path] = []
+    visited = 0
+    entries_seen = 0
+    while pending:
+        directory, depth = pending.pop(0)
+        visited += 1
+        if visited > 64:
+            raise ValueError("Too many subfolders. Choose a folder closer to the game.")
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                entries_seen += 1
+                if entries_seen > 2048:
+                    raise ValueError("Too many files. Choose the game's extracted folder.")
+                if entry.name.startswith(".") or entry.name == "__MACOSX":
+                    continue
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+                if attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+                    continue
+                child = Path(entry.path)
+                game = child / "game"
+                if (
+                    game.is_dir()
+                    and not game.is_symlink()
+                    and game.resolve().is_relative_to(resolved)
+                ):
+                    candidates.append(child)
+                elif depth < 2:
+                    pending.append((child, depth + 1))
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        names = ", ".join(str(path.relative_to(resolved)) for path in sorted(candidates))
+        raise ValueError(f"More than one game was found ({names}). Choose the game you want.")
     return resolved
 
 
@@ -550,41 +590,6 @@ def describe_operation_failure(output: str) -> tuple[str, str]:
         f"The operation did not complete: {detail}\n\nThe complete output is in the activity "
         "log. The selected game or mod was not changed.",
     )
-
-
-def nvidia_gpu_detected() -> bool:
-    """Check NVIDIA's normal local marker without probing or uploading data."""
-
-    return shutil.which("nvidia-smi") is not None
-
-
-def cuda_toolkit_detected() -> bool:
-    """Return whether a local CUDA toolkit can satisfy the optional CuPy wheel.
-
-    The NVIDIA display driver alone is sufficient for Ren'Py's live OpenGL
-    shader, but CuPy's CUDA 12 wheel expects a compatible toolkit.  Recommending
-    the optional analyzer from ``nvidia-smi`` alone caused clean machines to
-    download a component they could not load.
-    """
-
-    if shutil.which("nvcc") is not None:
-        return True
-    roots = {
-        Path(value).expanduser()
-        for name, value in os.environ.items()
-        if value and (name == "CUDA_PATH" or name.startswith("CUDA_PATH_V"))
-    }
-    for root in roots:
-        binary = root / "bin"
-        if (binary / "nvcc.exe").is_file() or (binary / "nvcc").is_file():
-            return True
-    return False
-
-
-def cuda_acceleration_recommended() -> bool:
-    """Recommend CUDA only when both NVIDIA hardware and its toolkit exist."""
-
-    return nvidia_gpu_detected() and cuda_toolkit_detected()
 
 
 def cuda_dependency_installed(python_executable: Path | None = None) -> bool:
@@ -1334,7 +1339,15 @@ class SceneLightSetup(tk.Tk):
 
         self.project_var = tk.StringVar(value=initial_project or "")
         self.sdk_var = tk.StringVar()
-        self.cuda_var = tk.BooleanVar(value=cuda_acceleration_recommended())
+        self.cuda_var = tk.BooleanVar(value=False)
+        self._cuda_support: CudaSupport | None = None
+        self._cuda_user_choice = False
+        self._cuda_probe_generation = 0
+        self._applying_cuda_default = False
+        self._cuda_apply_when_idle = False
+        self.cuda_detail_var = tk.StringVar(
+            value="Checking this computer for optional CUDA acceleration…"
+        )
         self.status_var = tk.StringVar(value="Choose a Ren'Py project to begin.")
         self.preview_var = tk.StringVar(value="Nothing has been scanned or changed.")
         self.operation_var = tk.StringVar(value="Ready")
@@ -1424,6 +1437,7 @@ class SceneLightSetup(tk.Tk):
         self._refresh_dependency_display()
         self._project_changed()
         self.after(self._dependency_poll_delay(), self._poll_dependency_state)
+        self._begin_cuda_detection()
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self)
@@ -1964,14 +1978,14 @@ class SceneLightSetup(tk.Tk):
             )
             self.cuda_check = ttk.Checkbutton(
                 advanced_tab,
-                text="Use NVIDIA CUDA for first-time analysis when available",
+                text="Use the detected NVIDIA GPU to speed up first-time analysis",
                 variable=self.cuda_var,
                 style="Dark.TCheckbutton",
             )
             self.cuda_check.grid(row=1, column=0, columnspan=3, sticky="w")
             ttk.Label(
                 advanced_tab,
-                text="CUDA speeds setup only; live lighting supports every compatible GPU.",
+                textvariable=self.cuda_detail_var,
                 style="Body.TLabel",
                 wraplength=660,
                 justify="left",
@@ -2200,8 +2214,46 @@ class SceneLightSetup(tk.Tk):
         self._begin_project_inspection()
 
     def _cuda_changed(self, *_: object) -> None:
+        if not self._applying_cuda_default:
+            self._cuda_user_choice = True
         self._refresh_dependency_display()
         self._refresh_project_state()
+
+    def _begin_cuda_detection(self) -> None:
+        # Driver initialization and optional compiler checks never run on Tk's thread.
+        self._cuda_probe_generation += 1
+        generation = self._cuda_probe_generation
+        python = component_python()
+        target_exists = python.is_file()
+        if not target_exists:
+            python = Path(sys.executable)
+
+        def worker() -> None:
+            support = detect_cuda_support(python, check_backend=target_exists)
+            self._events.put(("cuda-detection", generation, support))
+
+        threading.Thread(target=worker, name="scenelight-cuda-detection", daemon=True).start()
+
+    def _finish_cuda_detection(self, support: CudaSupport, generation: int | None = None) -> None:
+        if generation is not None and generation != self._cuda_probe_generation:
+            return
+        self._cuda_support = support
+        self.cuda_detail_var.set(support.message)
+        if self._running:
+            self._cuda_apply_when_idle = True
+            return
+        self._cuda_apply_when_idle = False
+        if (
+            not support.recommended or not self._cuda_user_choice
+        ) and self.cuda_var.get() != support.recommended:
+            self._applying_cuda_default = True
+            try:
+                self.cuda_var.set(support.recommended)
+            finally:
+                self._applying_cuda_default = False
+        else:
+            self._refresh_dependency_display()
+            self._refresh_project_state()
 
     def _selection(self) -> ProjectSelection:
         value = self.project_var.get()
@@ -2367,7 +2419,9 @@ class SceneLightSetup(tk.Tk):
                 if cuda_ready
                 else "NVIDIA CUDA selected · component setup required."
             )
-        elif cuda_acceleration_recommended():
+        elif self._cuda_support is None:
+            self.gpu_status_var.set("Analysis: CPU · Checking optional CUDA acceleration…")
+        elif self._cuda_support.recommended:
             self.gpu_status_var.set("Analysis: CPU (CUDA available) · Lighting: Intel, AMD, NVIDIA")
         else:
             self.gpu_status_var.set("Analysis: CPU · Lighting: Intel, AMD, NVIDIA")
@@ -2597,9 +2651,15 @@ class SceneLightSetup(tk.Tk):
             self.project_browse.configure(text="Choose…")
             self.state_row.grid_remove()
             self.install_choice_frame.grid_remove()
-        for widget in (self.sdk_entry, self.sdk_browse, self.cuda_check):
+        for widget in (self.sdk_entry, self.sdk_browse):
             if widget is not None:
                 widget.configure(state=editing_state)
+        if self.cuda_check is not None:
+            self.cuda_check.configure(
+                state=editing_state
+                if self._cuda_support and self._cuda_support.recommended
+                else "disabled"
+            )
         for widget in (self.verify_button, self.review_button):
             if widget is not None:
                 allowed = can_use
@@ -2829,7 +2889,11 @@ class SceneLightSetup(tk.Tk):
         selection = self._selection()
         if not selection.valid or selection.root is None:
             raise ValueError(selection.message)
-        sdk = normalize_project_path(self.sdk_var.get()) if self.sdk_var.get().strip() else None
+        sdk = (
+            normalize_project_path(self.sdk_var.get(), find_nested=False)
+            if self.sdk_var.get().strip()
+            else None
+        )
         analyzer = "auto" if self.cuda_var.get() else "cpu"
         return build_cli_command(
             operation,
@@ -3332,11 +3396,7 @@ class SceneLightSetup(tk.Tk):
             if continue_setup:
                 self.after(50, self._run_primary_action)
             return
-        destination = (
-            f"SceneLight runtime:\n{component_environment_root()}"
-            if source_install
-            else "the Python environment where SceneLight is installed"
-        )
+        destination = f"SceneLight runtime:\n{state.python_executable.parent}"
         exact = "\n".join(f"  • {format_requirement(item)}" for item in state.missing)
         bootstrap = ""
         if source_install and not state.runtime_ready:
@@ -3344,13 +3404,25 @@ class SceneLightSetup(tk.Tk):
                 "\n\nSceneLight will first install its runtime and prepare these installer tools:\n"
                 + "\n".join(f"  • {format_requirement(item)}" for item in PACKAGING_REQUIREMENTS)
             )
-        approved = messagebox.askyesno(
-            "Set up Preview & Calibrator?" if include_preview else "Set up SceneLight?",
-            f"SceneLight will install and verify these "
-            f"{'optional Preview components' if include_preview else 'required components'}:"
-            f"\n\n{exact}"
-            f"{bootstrap}\n\nLocation:\n{destination}\n\nContinue?",
+        cuda_only = (
+            include_cuda and state.runtime_ready and set(state.missing) == {CUDA_REQUIREMENT}
         )
+        if cuda_only:
+            gpu = ", ".join(self._cuda_support.devices) if self._cuda_support else "your NVIDIA GPU"
+            approved = messagebox.askyesno(
+                "Speed up setup with your GPU?",
+                f"Detected: {gpu}\n\nThis GPU can speed up first-time analysis. "
+                f"SceneLight can also continue using the CPU.\n\nOptional component:\n{exact}"
+                f"\n\nLocation:\n{destination}\n\nYes: install CUDA acceleration.\nNo: continue with CPU analysis.",
+            )
+        else:
+            approved = messagebox.askyesno(
+                "Set up Preview & Calibrator?" if include_preview else "Set up SceneLight?",
+                f"SceneLight will install and verify these "
+                f"{'optional Preview components' if include_preview else 'selected components'}:"
+                f"\n\n{exact}"
+                f"{bootstrap}\n\nLocation:\n{destination}\n\nContinue?",
+            )
         if approved:
             self._continue_after_components = continue_setup
             self._start_operation(
@@ -3363,6 +3435,10 @@ class SceneLightSetup(tk.Tk):
             )
         else:
             self._continue_after_components = False
+            if cuda_only:
+                self.cuda_var.set(False)
+                if continue_setup:
+                    self.after(50, self._run_primary_action)
 
     def _open_preview(self) -> None:
         selection = self._selection()
@@ -3755,6 +3831,8 @@ class SceneLightSetup(tk.Tk):
                     self._refresh_dependency_display()
                 elif event[0] == "project-inspection" and isinstance(event[3], ProjectInspection):
                     self._finish_project_inspection(int(event[1]), str(event[2]), event[3])
+                elif event[0] == "cuda-detection" and isinstance(event[2], CudaSupport):
+                    self._finish_cuda_detection(event[2], int(event[1]))
         except queue.Empty:
             pass
         self.after(100, self._drain_events)
@@ -3922,6 +4000,7 @@ class SceneLightSetup(tk.Tk):
                 )
             elif operation == "components":
                 importlib.invalidate_caches()
+                self._begin_cuda_detection()
                 self._refresh_dependency_display()
                 if self._dependency_state is not None and self._dependency_state.ready:
                     self.operation_var.set(
@@ -3944,6 +4023,8 @@ class SceneLightSetup(tk.Tk):
             self._append_log(f"[{operation} failed with exit code {return_code}]\n")
             messagebox.showerror(title, message)
         self._refresh_dependency_display()
+        if self._cuda_apply_when_idle and self._cuda_support is not None:
+            self._finish_cuda_detection(self._cuda_support)
         if operation in {
             "attach",
             "install",

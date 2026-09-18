@@ -30,6 +30,8 @@
 
 ### Setup and author tools
 
+- Setup detects actual NVIDIA CUDA devices in the background, checks the selected runtime or compatible CUDA 12 tools, and names the GPU in its recommendation. Optional acceleration can be declined to continue on CPU; prompts show the actual installation directory.
+- The game picker resolves a single game inside nested extraction folders. Multiple matches require an explicit choice, and discovery stays bounded without following linked directories. SDK paths retain their separate behavior.
 - Preview treats MPO/JPEG auxiliary images (including HDR gain maps) and TIFF pages as still-image data instead of animation frames. Existing mistaken animation caches are ignored; true GIF, APNG, WebP and other timed formats retain playback.
 - Rounded controls use larger image tiles to avoid thousands of native paint operations per button. Bundled menus check their own package environment directly instead of spawning another interpreter. Preview opens without requiring optional CUDA analysis components.
 - Setup uses rounded buttons and tabs with clear hover, selection and keyboard focus states. System and Advanced now share the same verified component count, including the runtime and counting shared package bindings once.

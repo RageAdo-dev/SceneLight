@@ -28,8 +28,6 @@ from scenelight.setup_gui import (
     component_command_status,
     component_environment_root,
     component_python,
-    cuda_acceleration_recommended,
-    cuda_toolkit_detected,
     dependency_install_commands,
     dependency_state,
     describe_dependency_plan,
@@ -80,6 +78,115 @@ def test_project_picker_rejects_unrelated_folder(tmp_path: Path) -> None:
     result = inspect_project_path(tmp_path)
     assert not result.valid
     assert "No 'game' folder" in result.message
+
+
+def test_project_picker_unwraps_nested_extraction_and_ignores_macos_metadata(tmp_path):
+    outer = tmp_path / "GraveyardGirls-1.2-pc"
+    project = outer / "GraveyardGirls-1.2-pc"
+    (project / "game").mkdir(parents=True)
+    (project / "game/script.rpy").write_text("label start:\n    return\n")
+    (outer / "__MACOSX/duplicate/game").mkdir(parents=True)
+    (outer / "README.txt").write_text("Read me")
+    result = inspect_project_path(outer)
+    assert result.valid and result.root == project.resolve()
+    assert "1 script" in result.message
+    assert normalize_project_path(project / "game") == project.resolve()
+
+
+def test_project_picker_finds_unique_game_under_several_wrapper_levels(tmp_path):
+    project = tmp_path / "download" / "windows" / "title"
+    (project / "game").mkdir(parents=True)
+    (tmp_path / "documentation").mkdir()
+    assert normalize_project_path(tmp_path) == project
+
+
+def test_project_picker_never_chooses_between_two_games(tmp_path):
+    for name in ("Game One", "Game Two"):
+        (tmp_path / name / "game").mkdir(parents=True)
+    result = inspect_project_path(tmp_path)
+    assert not result.valid
+    assert "More than one game" in result.message
+    assert "Game One" in result.message and "Game Two" in result.message
+
+
+def test_direct_game_selection_takes_priority_over_nested_backups(tmp_path):
+    (tmp_path / "game").mkdir()
+    (tmp_path / "backup/game").mkdir(parents=True)
+    assert normalize_project_path(tmp_path) == tmp_path
+
+
+def test_sdk_path_is_not_mistaken_for_its_bundled_sample_games(tmp_path, monkeypatch):
+    sdk = tmp_path / "SDK"
+    for name in ("launcher", "tutorial", "the_question"):
+        (sdk / name / "game").mkdir(parents=True)
+    project = tmp_path / "my-game"
+    view = SimpleNamespace(
+        _selection=lambda: ProjectSelection(project, True, "Game"),
+        sdk_var=SimpleNamespace(get=lambda: str(sdk)),
+        cuda_var=SimpleNamespace(get=lambda: False),
+    )
+    command = setup_gui.SceneLightSetup._command(view, "scan")
+    assert command[command.index("--renpy-sdk") + 1] == str(sdk)
+
+
+def test_project_picker_bounds_broad_folder_search(tmp_path):
+    for index in range(70):
+        (tmp_path / f"folder-{index}").mkdir()
+    result = inspect_project_path(tmp_path)
+    assert not result.valid and "Too many subfolders" in result.message
+
+
+def test_cuda_detection_does_not_override_an_active_operation_or_user_choice():
+    from scenelight.cuda_detection import CudaSupport
+
+    values = []
+    support = CudaSupport(("GPU",), True, False, "GPU detected")
+    window = SimpleNamespace(
+        _cuda_probe_generation=2,
+        _cuda_support=None,
+        _running=True,
+        _cuda_user_choice=False,
+        _cuda_apply_when_idle=False,
+        cuda_detail_var=SimpleNamespace(set=lambda text: None),
+        cuda_var=SimpleNamespace(get=lambda: False, set=values.append),
+        _refresh_dependency_display=lambda: None,
+        _refresh_project_state=lambda: None,
+    )
+    setup_gui.SceneLightSetup._finish_cuda_detection(window, support, 1)
+    assert window._cuda_support is None
+    setup_gui.SceneLightSetup._finish_cuda_detection(window, support, 2)
+    assert window._cuda_apply_when_idle and values == []
+    window._running = False
+    window._cuda_user_choice = True
+    setup_gui.SceneLightSetup._finish_cuda_detection(window, support)
+    assert values == []
+
+
+def test_declining_optional_cuda_continues_with_cpu_and_shows_actual_target(tmp_path, monkeypatch):
+    from scenelight.cuda_detection import CudaSupport
+
+    runtime = tmp_path / "bundled-runtime/python.exe"
+    state = setup_gui.DependencyState(runtime, True, (CUDA_REQUIREMENT,), (CUDA_REQUIREMENT,))
+    monkeypatch.setattr(setup_gui, "dependency_state", lambda **kwargs: state)
+    prompts, values, scheduled = [], [], []
+
+    def decline(title, message):
+        prompts.append((title, message))
+        return False
+
+    monkeypatch.setattr(setup_gui.messagebox, "askyesno", decline)
+    window = SimpleNamespace(
+        cuda_var=SimpleNamespace(get=lambda: True, set=values.append),
+        _cuda_support=CudaSupport(("NVIDIA Test GPU",), True, False, "Detected"),
+        after=lambda delay, callback: scheduled.append(callback),
+        _run_primary_action=lambda: None,
+    )
+    setup_gui.SceneLightSetup._install_components(window, continue_setup=True)
+    assert values == [False]
+    assert scheduled == [window._run_primary_action]
+    assert "NVIDIA Test GPU" in prompts[0][1]
+    assert str(runtime.parent) in prompts[0][1]
+    assert "No: continue with CPU analysis" in prompts[0][1]
 
 
 def test_project_inspection_reports_unmanaged_reserved_namespace(tmp_path: Path) -> None:
@@ -401,36 +508,6 @@ def test_setup_offers_in_place_or_separate_copy_after_scan() -> None:
 
 def test_cuda_dependency_is_an_explicit_release_requirement() -> None:
     assert CUDA_REQUIREMENT == "cupy-cuda12x==13.4.1"
-
-
-def test_cuda_is_recommended_only_with_nvidia_and_a_local_toolkit(
-    tmp_path: Path, monkeypatch
-) -> None:
-    toolkit = tmp_path / "cuda"
-    (toolkit / "bin").mkdir(parents=True)
-    (toolkit / "bin" / "nvcc.exe").write_bytes(b"test marker")
-    monkeypatch.setenv("CUDA_PATH", str(toolkit))
-    monkeypatch.setattr(
-        "scenelight.setup_gui.shutil.which",
-        lambda command: "nvidia-smi.exe" if command == "nvidia-smi" else None,
-    )
-
-    assert cuda_toolkit_detected()
-    assert cuda_acceleration_recommended()
-
-
-def test_cuda_is_not_recommended_from_the_display_driver_alone(monkeypatch) -> None:
-    monkeypatch.delenv("CUDA_PATH", raising=False)
-    for name in tuple(os.environ):
-        if name.startswith("CUDA_PATH_V"):
-            monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(
-        "scenelight.setup_gui.shutil.which",
-        lambda command: "nvidia-smi.exe" if command == "nvidia-smi" else None,
-    )
-
-    assert not cuda_toolkit_detected()
-    assert not cuda_acceleration_recommended()
 
 
 def test_private_environment_bootstrap_tools_are_security_pinned() -> None:
