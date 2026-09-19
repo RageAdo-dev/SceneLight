@@ -38,6 +38,7 @@ uniform vec2 u_canvas_size;
 uniform vec2 u_sprite_position;
 uniform vec2 u_sprite_size;
 uniform vec2 u_sc_form_center;
+uniform float u_sc_render_local;
 out vec2 v_tex_coord;
 out vec2 v_sc_screen;
 out vec2 v_sc_center;
@@ -49,6 +50,7 @@ void main() {
         1.0 - pixel.y / u_canvas_size.y * 2.0
     );
     gl_Position = vec4(clip, 0.0, 1.0);
+    if (u_sc_render_local > 0.5) gl_Position = vec4(in_unit * 2.0 - 1.0, 0.0, 1.0);
     v_tex_coord = in_uv;
     v_sc_screen = pixel / u_canvas_size;
     v_sc_center = (u_sprite_position + u_sc_form_center * u_sprite_size) / u_canvas_size;
@@ -129,6 +131,25 @@ def live_probe_fragment_source() -> str:
         + variables
         + "\nout vec4 fragColor;\nvoid main() {\n"
         + body
+        + "\n}\n"
+    )
+
+
+def color_glow_fragment_source(stage: str = "composite") -> str:
+    if stage not in {"composite", "mask", "blur"}:
+        raise ValueError("Unknown selective glow shader stage")
+    prefix = "color_glow_blur" if stage == "blur" else "color_glow"
+    body_prefix = "color_glow" if stage == "composite" else f"color_glow_{stage}"
+    variables = _extract(prefix + "_variables").replace("varying ", "in ")
+    functions = _extract(prefix + "_functions").replace("texture2D", "texture")
+    body = _extract(body_prefix + "_fragment").replace("texture2D", "texture")
+    return (
+        "#version 330 core\n"
+        + variables
+        + "\nout vec4 fragColor;\n"
+        + functions
+        + "\nvoid main() {\n"
+        + body.replace("gl_FragColor", "fragColor")
         + "\n}\n"
     )
 

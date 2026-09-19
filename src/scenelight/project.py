@@ -191,6 +191,7 @@ class ProjectDiscovery:
     runtime_sprite_names: list[str] = field(default_factory=list)
     runtime_sprite_sequences: list[list[str]] = field(default_factory=list)
     explicit_character_tags: list[str] = field(default_factory=list)
+    excluded_character_tags: list[str] = field(default_factory=list)
     character_candidates: dict[str, str | None] = field(default_factory=dict)
     suggested_character_tags: list[str] = field(default_factory=list)
     character_selection: str = "automatic"
@@ -220,6 +221,8 @@ class ProjectDiscovery:
             "runtime_sprite_names": self.runtime_sprite_names,
             "runtime_sprite_sequences": self.runtime_sprite_sequences,
             "explicit_character_tags": self.explicit_character_tags,
+            "excluded_character_tags": self.excluded_character_tags,
+            "auto_include_new_characters": self.character_selection == "automatic",
             "character_candidates": self.character_candidates,
             "suggested_character_tags": self.suggested_character_tags,
             "character_selection": self.character_selection,
@@ -564,10 +567,23 @@ def discover_project(
     selection_mode = str(config.get("character_selection", "automatic")).strip().lower()
     if selection_mode not in {"automatic", "manual"}:
         raise ValueError("character_selection must be 'automatic' or 'manual'")
+    auto_include = config.get("auto_include_new_characters")
+    if auto_include is not None:
+        if not isinstance(auto_include, bool):
+            raise ValueError("auto_include_new_characters must be true or false")
+        selection_mode = "automatic" if auto_include else "manual"
+    excluded_character_tags = set()
+    excluded = config.get("excluded_character_tags", [])
+    if isinstance(excluded, list):
+        excluded_character_tags = {
+            parts[0] for value in excluded if (parts := _normal_name(str(value)).split())
+        }
+    explicit_character_tags.difference_update(excluded_character_tags)
     if selection_mode == "manual":
         character_image_tags = set(explicit_character_tags)
     else:
         character_image_tags.update(explicit_character_tags)
+    character_image_tags.difference_update(excluded_character_tags)
     for tag in explicit_character_tags:
         representative_by_tag.setdefault(tag, None)
 
@@ -589,13 +605,20 @@ def discover_project(
                 for name in image_files
                 if not name.startswith("bg ") and name.split()[0] in character_image_tags
             }
+        # Checking an unusual/effect family is an explicit opt-in even if its
+        # forms are not reached by the conservative story parser.
+        exact_used.update(
+            name
+            for name in image_files
+            if not name.startswith("bg ") and name.split()[0] in explicit_character_tags
+        )
     configured_include = config.get("sprite_include")
     if isinstance(configured_include, list):
         requested = {_normal_name(str(name)) for name in configured_include}
         missing = sorted(requested - image_files.keys())
         if missing:
             raise KeyError("Configured sprite declarations were not found: " + ", ".join(missing))
-        exact_used = requested
+        exact_used = {name for name in requested if name.split()[0] not in excluded_character_tags}
     sprites = {
         name: SpriteSpec(name, image_files[name])
         for name in sorted(exact_used)
@@ -636,6 +659,7 @@ def discover_project(
         runtime_sprite_names=runtime_sprite_names,
         runtime_sprite_sequences=runtime_sprite_sequences,
         explicit_character_tags=sorted(explicit_character_tags),
+        excluded_character_tags=sorted(excluded_character_tags),
         character_candidates=representative_by_tag,
         suggested_character_tags=sorted(inferred_character_tags),
         character_selection=selection_mode,

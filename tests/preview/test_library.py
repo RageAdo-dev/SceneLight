@@ -5,7 +5,7 @@ import textwrap
 import pytest
 from PIL import Image
 
-from scenelight.calibration import Calibration
+from scenelight.calibration import Calibration, ColorGlowRule
 from scenelight.preview.library import (
     Actor,
     Layer,
@@ -116,3 +116,35 @@ def test_scene_supports_assets_on_a_different_windows_drive(tmp_path, monkeypatc
     background, actors = load_scene(scene)
     assert background == source
     assert actors[0].source == str(source)
+
+
+def test_color_glow_rules_survive_library_scene_and_author_export_without_leaking(tmp_path):
+    source = tmp_path / "sprite.png"
+    Image.new("RGBA", (8, 8), "red").save(source)
+    selected = Actor(
+        name="Gem",
+        source=str(source),
+        image_name="gem idle",
+        strength=0.45,
+        calibration=Calibration(
+            glow_rules=(
+                ColorGlowRule(name="Red gems", color=(1, 0, 0), tolerance=0.25, strength=0.8),
+                ColorGlowRule(name="Blue cloth", color=(0, 0, 1), radius=0, strength=0.4),
+            )
+        ),
+    )
+    neighbor = Actor(name="Neighbor", source=str(source), image_name="hero idle")
+    path = tmp_path / "scene.json"
+    save_scene(path, None, [selected, neighbor])
+    _, restored = load_scene(path)
+    assert restored[0].calibration == selected.calibration
+    assert restored[1].calibration.glow_rules == ()
+    library = Library(tmp_path / "library")
+    entry = library.add("sprite", source, actor=selected)
+    assert Actor.from_payload(entry["actor"]).calibration == selected.calibration
+    calls = []
+    api = type("API", (), {"image": lambda self, name, **values: calls.append((name, values))})()
+    exec(textwrap.dedent(author_rules(restored).split("init python:\n", 1)[1]), {"scenelight": api})
+    assert calls[0][1]["strength"] == 0.45
+    assert calls[0][1]["glow_rules"] == selected.calibration.as_dict()["glow_rules"]
+    assert calls[1][1]["glow_rules"] == []

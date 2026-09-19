@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -12,6 +13,71 @@ from typing import Any
 from .sidecar import storage_root
 
 CALIBRATION_VERSION = 1
+
+
+def color_glow_blur_steps(size: tuple[int, int], radius: float) -> tuple[float, ...]:
+    """Smooth before widening samples; small selected details cannot become ghost copies."""
+    variance = (0.014 * min(size) * max(0.0, radius)) ** 2
+    step_size = 1.0
+    steps = []
+    while variance > 0.000001:
+        step = min(step_size, (variance / 2.854054054) ** 0.5)
+        steps.append(step)
+        variance = max(0.0, variance - 2.854054054 * step * step)
+        step_size *= 2.0
+    return tuple(steps)
+
+
+@dataclass(frozen=True, slots=True)
+class ColorGlowRule:
+    """Select a soft range of original artwork colors for local emission."""
+
+    name: str = "Color glow"
+    enabled: bool = True
+    color: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    strength: float = 1.0
+    radius: float = 1.0
+    tolerance: float = 0.15
+    softness: float = 0.10
+
+    def normalized(self) -> "ColorGlowRule":
+        return type(self).from_mapping(asdict(self))
+
+    def as_dict(self) -> dict[str, Any]:
+        values = asdict(self.normalized())
+        values["color"] = list(values["color"])
+        return values
+
+    @classmethod
+    def from_mapping(cls, value: object) -> "ColorGlowRule":
+        if isinstance(value, cls):
+            value = asdict(value)
+        if not isinstance(value, dict):
+            raise ValueError("Each SceneLight glow rule must be an object")
+        unknown = sorted(set(value) - {field.name for field in fields(cls)})
+        if unknown:
+            raise ValueError("Unknown SceneLight glow rule setting(s): " + ", ".join(unknown))
+        values = asdict(cls())
+        values.update(value)
+        if not isinstance(values["name"], str) or not isinstance(values["enabled"], bool):
+            raise ValueError("Glow rule name must be text and enabled must be true or false")
+        values["name"] = values["name"].strip() or "Color glow"
+
+        def bounded(raw, high):
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise ValueError("Glow rule values must be finite numbers")
+            number = float(raw)
+            if not math.isfinite(number):
+                raise ValueError("Glow rule values must be finite numbers")
+            return max(0.0, min(number, high))
+
+        color = values["color"]
+        if not isinstance(color, (list, tuple)) or len(color) != 3:
+            raise ValueError("Glow rule color must contain three RGB numbers")
+        values["color"] = tuple(bounded(channel, 1.0) for channel in color)
+        for name in ("strength", "radius", "tolerance", "softness"):
+            values[name] = bounded(values[name], 2.0 if name in {"strength", "radius"} else 1.0)
+        return cls(**values)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +114,16 @@ class Calibration:
     glow_green: float = 1.0
     glow_blue: float = 1.0
     glow_color_mix: float = 0.0
+    glow_rules: tuple[ColorGlowRule, ...] = ()
 
     def normalized(self) -> "Calibration":
         values = asdict(self)
         for name in values:
-            if name == "exposure_bias":
+            if name == "glow_rules":
+                if not isinstance(values[name], (list, tuple)):
+                    raise ValueError("SceneLight glow_rules must be a list")
+                values[name] = tuple(ColorGlowRule.from_mapping(rule) for rule in values[name])
+            elif name == "exposure_bias":
                 values[name] = max(-4.0, min(float(values[name]), 4.0))
             elif name in {"glow_red", "glow_green", "glow_blue", "glow_color_mix"}:
                 values[name] = max(0.0, min(float(values[name]), 1.0))
@@ -60,8 +131,11 @@ class Calibration:
                 values[name] = max(0.0, min(float(values[name]), 2.0))
         return Calibration(**values)
 
-    def as_dict(self) -> dict[str, float]:
-        return asdict(self.normalized())
+    def as_dict(self) -> dict[str, Any]:
+        value = self.normalized()
+        values = asdict(value)
+        values["glow_rules"] = [rule.as_dict() for rule in value.glow_rules]
+        return values
 
     def uniform_blocks(self) -> tuple[tuple[float, float, float, float], ...]:
         value = self.normalized()
@@ -123,6 +197,11 @@ class Calibration:
             raise ValueError("Unknown SceneLight calibration setting(s): " + ", ".join(unknown))
         values = asdict(base or cls())
         for name, raw in value.items():
+            if name == "glow_rules":
+                if not isinstance(raw, (list, tuple)):
+                    raise ValueError("SceneLight glow_rules must be a list")
+                values[name] = tuple(ColorGlowRule.from_mapping(rule) for rule in raw)
+                continue
             if isinstance(raw, bool) or not isinstance(raw, (int, float)):
                 raise ValueError(f"SceneLight calibration {name!r} must be a number")
             values[name] = float(raw)

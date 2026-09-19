@@ -1124,12 +1124,30 @@ def character_review_candidates(payload: dict[str, object]) -> dict[str, str | N
 
 
 def character_review_mode(payload: dict[str, object]) -> str:
-    """Preserve a prior review mode while defaulting unknown data to manual."""
+    """Keep existing choices; new installations include detected characters."""
 
+    auto_include = payload.get("auto_include_new_characters")
+    if isinstance(auto_include, bool):
+        return "automatic" if auto_include else "manual"
     mode = payload.get("character_selection")
     if isinstance(mode, str) and mode in {"manual", "automatic"}:
         return mode
-    return "manual"
+    return "automatic" if mode is None else "manual"
+
+
+def character_review_selected_tags(payload: dict[str, object]) -> set[str]:
+    """Use one selection rule for visible checks and persisted update policy."""
+
+    def tags(key: str) -> set[str]:
+        values = payload.get(key, [])
+        return (
+            {str(value).strip().lower() for value in values} if isinstance(values, list) else set()
+        )
+
+    chosen = tags("explicit_character_tags")
+    if character_review_mode(payload) == "automatic":
+        chosen.update(tags("suggested_character_tags") | tags("character_tags"))
+    return chosen - tags("excluded_character_tags")
 
 
 def character_review_required(
@@ -1153,7 +1171,9 @@ def character_review_required(
         if isinstance(suggested, list)
         else set()
     )
-    return bool(suggested_tags - explicit_tags)
+    excluded = payload.get("excluded_character_tags", [])
+    excluded_tags = set(excluded) if isinstance(excluded, list) else set()
+    return bool(suggested_tags - explicit_tags - excluded_tags)
 
 
 def thumbnail_subsample_factor(width: int, height: int, limit: int = 72) -> int:
@@ -1164,7 +1184,13 @@ def thumbnail_subsample_factor(width: int, height: int, limit: int = 72) -> int:
     return max(1, (max(1, width) + limit - 1) // limit, (max(1, height) + limit - 1) // limit)
 
 
-def save_character_selection(project_root: Path, mode: str, tags: list[str]) -> Path:
+def save_character_selection(
+    project_root: Path,
+    mode: str,
+    tags: list[str],
+    *,
+    candidates: list[str] | None = None,
+) -> Path:
     """Save an authoritative per-user selection outside the chosen game."""
 
     normalized_mode = mode.strip().lower()
@@ -1178,13 +1204,28 @@ def save_character_selection(project_root: Path, mode: str, tags: list[str]) -> 
     normalized_tags = sorted(set(normalized_tags))
     destination = profile_path(project_root)
     payload: dict[str, object] = {}
+    project_config = project_root / "scenelight.json"
+    if project_config.is_file():
+        configured = json.loads(project_config.read_text(encoding="utf-8"))
+        if isinstance(configured, dict) and "excluded_character_tags" in configured:
+            payload["excluded_character_tags"] = configured["excluded_character_tags"]
     if destination.is_file():
         loaded = json.loads(destination.read_text(encoding="utf-8"))
         if not isinstance(loaded, dict):
             raise ValueError("The existing SceneLight profile is not a JSON object")
         payload.update(loaded)
     payload["character_selection"] = normalized_mode
-    payload["character_tags"] = normalized_tags if normalized_mode == "manual" else []
+    payload["auto_include_new_characters"] = normalized_mode == "automatic"
+    payload["character_tags"] = normalized_tags
+    prior_exclusions = payload.get("excluded_character_tags", [])
+    prior_exclusions = prior_exclusions if isinstance(prior_exclusions, list) else []
+    excluded = set()
+    for value in [*prior_exclusions, *(candidates or [])]:
+        parts = str(value).strip().lower().split()
+        if parts and re.fullmatch(r"[a-z0-9_]+", parts[0]):
+            excluded.add(parts[0])
+    excluded.difference_update(normalized_tags)
+    payload["excluded_character_tags"] = sorted(excluded)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -1427,6 +1468,7 @@ class SceneLightSetup(tk.Tk):
         self.open_button: ttk.Button | None = None
         self.preview_button: ttk.Button | None = None
         self.review_button: ttk.Button | None = None
+        self.characters_button: ttk.Button | None = None
         self.remove_button: ttk.Button | None = None
         self.embed_button: ttk.Button | None = None
         self.unembed_button: ttk.Button | None = None
@@ -1772,6 +1814,13 @@ class SceneLightSetup(tk.Tk):
             style="Secondary.TButton",
         )
         self.project_browse.grid(row=0, column=1, rowspan=2, padx=(14, 0))
+        self.characters_button = ttk.Button(
+            selection,
+            text="Characters…",
+            command=self._review_characters,
+            style="Secondary.TButton",
+        )
+        self.characters_button.grid(row=0, column=2, rowspan=2, padx=(8, 0))
 
         self.project_status = tk.Label(
             flow,
@@ -2682,7 +2731,7 @@ class SceneLightSetup(tk.Tk):
                 if self._cuda_support and self._cuda_support.recommended
                 else "disabled"
             )
-        for widget in (self.verify_button, self.review_button):
+        for widget in (self.verify_button, self.review_button, self.characters_button):
             if widget is not None:
                 allowed = can_use
                 if widget is self.verify_button:
@@ -2967,15 +3016,10 @@ class SceneLightSetup(tk.Tk):
             self._character_review_window = None
         project_root = selection.root
         candidates = character_review_candidates(payload)
-        raw_existing_tags = payload.get("explicit_character_tags", [])
-        existing_tags = (
-            {
-                str(tag).strip().lower()
-                for tag in raw_existing_tags
-                if isinstance(tag, str) and tag.strip()
-            }
-            if isinstance(raw_existing_tags, list)
-            else set()
+        existing_tags = character_review_selected_tags(payload)
+        inspection = self._project_inspection
+        installed = bool(
+            self._attached or inspection is not None and inspection.managed_install_present
         )
         raw_suggested_tags = payload.get(
             "suggested_character_tags", payload.get("character_tags", [])
@@ -2999,7 +3043,15 @@ class SceneLightSetup(tk.Tk):
         window.transient(self)
         self._apply_window_icon(window)
         window.after(50, lambda: self._apply_dark_titlebar(window))
-        window.after_idle(lambda: self._fit_to_screen(window, 680, 560))
+
+        def fit_review() -> None:
+            # Measure after Tk has laid out DPI-scaled fonts and controls.
+            window.update_idletasks()
+            self._fit_to_screen(
+                window, max(680, window.winfo_reqwidth()), max(640, window.winfo_reqheight())
+            )
+
+        window.after_idle(fit_review)
         window.grab_set()
 
         def cancel_review() -> None:
@@ -3016,7 +3068,7 @@ class SceneLightSetup(tk.Tk):
         page.grid_rowconfigure(4, weight=1)
         tk.Label(
             page,
-            text="Which image families are characters?",
+            text="Choose characters to light",
             background="#0d1014",
             foreground="#f7f9fb",
             font=("Segoe UI Semibold", 20),
@@ -3027,7 +3079,7 @@ class SceneLightSetup(tk.Tk):
             text=(
                 "Suggestions come from this game's images. Select the characters to light; "
                 "each family includes its poses and expressions. Leave backgrounds, UI and "
-                "props unchecked."
+                "props unchecked. Apply an update after changing these choices."
             ),
             background="#0d1014",
             foreground="#98a4b1",
@@ -3037,21 +3089,21 @@ class SceneLightSetup(tk.Tk):
             wraplength=610,
         ).grid(row=1, column=0, sticky="ew", pady=(5, 14))
 
-        mode_var = tk.StringVar(value=character_review_mode(payload))
+        automatic_var = tk.BooleanVar(value=character_review_mode(payload) == "automatic")
         mode_row = tk.Frame(page, background="#0d1014")
         mode_row.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        ttk.Radiobutton(
+        ttk.Checkbutton(
             mode_row,
-            text="Use my selection",
-            value="manual",
-            variable=mode_var,
-        ).pack(side="left")
-        ttk.Radiobutton(
+            text="Automatically include new characters on scan / update",
+            variable=automatic_var,
+        ).pack(anchor="w")
+        tk.Label(
             mode_row,
-            text="Automatic suggestions",
-            value="automatic",
-            variable=mode_var,
-        ).pack(side="left", padx=(20, 0))
+            text="Unchecked families stay excluded. Turn off to keep only your selection.",
+            background="#0d1014",
+            foreground="#98a4b1",
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 0))
 
         controls = tk.Frame(page, background="#0d1014")
         controls.grid(row=3, column=0, sticky="ew", pady=(0, 8))
@@ -3205,7 +3257,6 @@ class SceneLightSetup(tk.Tk):
             ).grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=18)
 
         def set_all(value: bool) -> None:
-            mode_var.set("manual")
             for variable in tag_vars.values():
                 variable.set(value)
 
@@ -3256,7 +3307,7 @@ class SceneLightSetup(tk.Tk):
 
         def save_review() -> None:
             chosen = sorted(tag for tag, variable in tag_vars.items() if variable.get())
-            if mode_var.get() == "manual" and not chosen:
+            if not chosen:
                 if not messagebox.askyesno(
                     "No characters selected",
                     "No image families will receive SceneLight. Save this empty selection?",
@@ -3264,22 +3315,28 @@ class SceneLightSetup(tk.Tk):
                 ):
                     return
             try:
-                save_character_selection(project_root, mode_var.get(), chosen)
+                save_character_selection(
+                    project_root,
+                    "automatic" if automatic_var.get() else "manual",
+                    chosen,
+                    candidates=sorted(tag_vars),
+                )
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 messagebox.showerror("Selection could not be saved", str(error), parent=window)
                 return
             self._close_character_review_window()
             self._review_completed_for = project_root
             self._character_review_pending_for = None
-            self.operation_var.set("Character selection saved. Finishing game preparation…")
-            self._start_operation("scan", self._command("scan"))
+            operation = "refresh" if self._attached else "install" if installed else "scan"
+            self.operation_var.set("Character selection saved. Applying your choices…")
+            self._start_operation(operation, self._command(operation))
 
         ttk.Button(actions, text="Cancel", command=cancel_review, style="Quiet.TButton").grid(
             row=0, column=1, padx=(0, 8)
         )
         ttk.Button(
             actions,
-            text="Save selection and continue",
+            text="Apply selection & update" if installed else "Save selection and continue",
             command=save_review,
             style="Primary.TButton",
         ).grid(row=0, column=2)

@@ -342,6 +342,7 @@ def test_sprite_lighting_uses_child_dimensions_with_or_without_form_map(has_form
         "_scenelight_resolve_live_scene": lambda value: value,
         "_scenelight_active_custom_effects": lambda effects: [],
         "_scenelight_sprite_emitters": lambda tag: (),
+        "_scenelight_color_glow_rules": lambda *args: (),
         "_scenelight_emission_controls": lambda scene, tag, controls: controls,
         "_scenelight_fx_active": lambda name: False,
         "_scenelight_calibration_blocks": lambda *args: ((1.0, 0.0, 1.0, 1.0),),
@@ -662,6 +663,9 @@ def test_character_registration_preserves_existing_wrappers_and_wraps_new_aliase
     register("sayori")
     register("sayori")
     register("bg")
+    register("")
+    namespace["SCENELIGHT_MANIFEST"] = {"excluded_character_tags": ["monika"]}
+    register("monika")
     assert namespace["SCENELIGHT_CHARACTER_TAGS"] == {"sayori"}
     assert registry[("sayori",)] is alias
     assert isinstance(registry[("sayori", "tap")], Sprite)
@@ -760,6 +764,15 @@ def _exposure_runtime():
             "_SCENELIGHT_SHADER_AVAILABLE": True,
             "_SCENELIGHT_STRING_TYPES": (str,),
             "_SCENELIGHT_CONTROL_ALIASES": {},
+            "_SCENELIGHT_INITIAL_CONTROL_STATE": {
+                "version": 1,
+                "revision": 0,
+                "defaults": {},
+                "scene": {},
+                "backgrounds": {},
+                "characters": {},
+                "images": {},
+            },
             "_SCENELIGHT_CONTROL_KEYS": set(defaults) | {"enabled", "strength"},
             "_SCENELIGHT_CALIBRATION_DEFAULTS": defaults,
             "SCENELIGHT_FORM_FALLBACK": {
@@ -777,14 +790,17 @@ def _exposure_runtime():
             "_scenelight_resolve_live_scene": lambda scene: scene,
         },
         "SceneLightSprite",
+        "_scenelight_control_initial_state",
         "_scenelight_control_current_state",
         "_scenelight_control_assign",
         "_scenelight_control_name",
         "_scenelight_control_values",
+        "_scenelight_control_glow_rules",
         "_scenelight_control_update",
         "_scenelight_control_snapshot",
         "_scenelight_calibration_blocks",
         "_scenelight_emission_controls",
+        "_scenelight_color_glow_rules",
         "_SceneLightAPI",
     )
     return namespace["SceneLightSprite"], Displayable, redraws

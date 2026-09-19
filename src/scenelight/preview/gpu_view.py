@@ -14,7 +14,7 @@ from PIL import Image
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from ..calibration import Calibration
+from ..calibration import Calibration, color_glow_blur_steps
 from ..runtime.live_gpu import Analysis
 from ..runtime.shader_stages import supported
 from .artifacts import FormArtifacts, SceneArtifacts
@@ -30,6 +30,7 @@ from .library import Actor
 from .shader_source import (
     BACKGROUND_FRAGMENT,
     BACKGROUND_VERTEX,
+    color_glow_fragment_source,
     fragment_source,
     production_shader_sha256,
     transport_blend_fragment_source,
@@ -174,6 +175,14 @@ class SceneLightGPUView(QOpenGLWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMouseTracking(True)
         self._program = 0
+        self._color_glow_program = 0
+        self._color_glow_mask_program = 0
+        self._color_glow_blur_program = 0
+        self._flat_sprite_program = 0
+        self._color_glow_fbo = 0
+        self._color_glow_targets = ()
+        self._color_glow_size = None
+        self._color_glow_target_cache = OrderedDict()
         self._scene_sprites: list[SceneSprite] | None = None
         self._scene_active_id: str | None = None
         self._scene_texture_cache = OrderedDict()
@@ -422,9 +431,36 @@ class SceneLightGPUView(QOpenGLWidget):
             # Framebuffer names belong to the context, unlike shared textures.
             # Qt can recreate the widget context when it changes top-level window.
             self._transport_fbo = 0
+            self._color_glow_fbo = 0
+            self._color_glow_targets = ()
+            self._color_glow_size = None
+            self._color_glow_target_cache.clear()
             self._transport_rendered_key = None
             self._program = _sprite_program()
             self._background_program = _link_program(BACKGROUND_VERTEX, BACKGROUND_FRAGMENT)
+            self._flat_sprite_program = _link_program(
+                vertex_source(), BACKGROUND_FRAGMENT.replace("v_uv", "v_tex_coord")
+            )
+            self._color_glow_program = _link_program(
+                BACKGROUND_VERTEX.replace("v_uv", "v_tex_coord").replace(
+                    "1.0 - in_unit.y * 2.0", "in_unit.y * 2.0 - 1.0"
+                ),
+                color_glow_fragment_source(),
+            )
+            for field, stage in (
+                ("_color_glow_mask_program", "mask"),
+                ("_color_glow_blur_program", "blur"),
+            ):
+                setattr(
+                    self,
+                    field,
+                    _link_program(
+                        BACKGROUND_VERTEX.replace("v_uv", "v_tex_coord").replace(
+                            "1.0 - in_unit.y * 2.0", "in_unit.y * 2.0 - 1.0"
+                        ),
+                        color_glow_fragment_source(stage),
+                    ),
+                )
             self._transport_blend_program = _link_program(
                 BACKGROUND_VERTEX.replace("v_uv", "v_tex_coord").replace(
                     "1.0 - in_unit.y * 2.0", "in_unit.y * 2.0 - 1.0"
@@ -460,7 +496,15 @@ class SceneLightGPUView(QOpenGLWidget):
             GL.glBindVertexArray(self._vao)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL.GL_STATIC_DRAW)
-            for program in (self._program, self._background_program, self._transport_blend_program):
+            for program in (
+                self._program,
+                self._background_program,
+                self._transport_blend_program,
+                self._color_glow_program,
+                self._flat_sprite_program,
+                self._color_glow_mask_program,
+                self._color_glow_blur_program,
+            ):
                 for name, offset in (("in_unit", 0), ("in_uv", 2 * vertices.itemsize)):
                     location = GL.glGetAttribLocation(program, name)
                     if location >= 0:
@@ -525,6 +569,16 @@ class SceneLightGPUView(QOpenGLWidget):
         self._borrowed_textures.clear()
         self._using_live_analysis = False
         self._analyzed_generation = -1
+
+    def _delete_color_glow_targets(self) -> None:
+        for targets in self._color_glow_target_cache.values():
+            GL.glDeleteTextures(list(targets))
+        self._color_glow_target_cache.clear()
+        self._color_glow_targets = ()
+        self._color_glow_size = None
+        if self._color_glow_fbo:
+            GL.glDeleteFramebuffers(1, [self._color_glow_fbo])
+            self._color_glow_fbo = 0
 
     def _store_texture(
         self, key: str, texture: int, size: tuple[int, int], *, borrowed=False
@@ -920,6 +974,7 @@ class SceneLightGPUView(QOpenGLWidget):
         sprite_y = self._baseline * CANVAS_SIZE[1] - sprite_height
 
         self._uniform("u_canvas_size", CANVAS_SIZE)
+        self._uniform("u_sc_render_local", 0.0)
         self._uniform("u_sprite_position", (sprite_x, sprite_y))
         self._uniform("u_sprite_size", (sprite_width, sprite_height))
         self._uniform("u_sc_sprite_size", self._sprite_source_size)
@@ -1017,8 +1072,126 @@ class SceneLightGPUView(QOpenGLWidget):
             self._uniform(f"u_sc_probe{index}_data", probe["direction_luminance_enabled"])
             self._uniform(f"u_sc_probe{index}_color", probe["chroma"])
 
-        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        rules = tuple(
+            rule for rule in self._calibration.glow_rules if rule.enabled and rule.strength > 0.0
+        )
+        if rules and self._compare_mode != 1.0:
+            self._draw_color_glow(rules, (sprite_x, sprite_y), (sprite_width, sprite_height))
+        else:
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
         GL.glDisable(GL.GL_BLEND)
+
+    def _draw_color_glow(self, rules, position, size) -> None:
+        """Light once, then apply any number of rules against the original source."""
+        width, height = self._sprite_source_size
+        if self._color_glow_size != (width, height):
+            self._color_glow_size = (width, height)
+            cached = self._color_glow_target_cache.get((width, height))
+            if cached is None:
+                cached = tuple(int(v) for v in GL.glGenTextures(4))
+                self._color_glow_target_cache[(width, height)] = cached
+                for texture in cached:
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, texture)
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+                    GL.glTexImage2D(
+                        GL.GL_TEXTURE_2D,
+                        0,
+                        GL.GL_RGBA16F,
+                        width,
+                        height,
+                        0,
+                        GL.GL_RGBA,
+                        GL.GL_FLOAT,
+                        None,
+                    )
+            self._color_glow_target_cache.move_to_end((width, height))
+            self._color_glow_targets = cached
+            while len(self._color_glow_target_cache) > 2 and (
+                len(self._color_glow_target_cache) > 16
+                or sum(w * h * 32 for w, h in self._color_glow_target_cache) > 256 * 1024 * 1024
+            ):
+                _size, expired = self._color_glow_target_cache.popitem(last=False)
+                GL.glDeleteTextures(list(expired))
+            # Allocation changes the active texture binding; restore the main
+            # shader's sampler before its one and only lighting pass.
+            self._bind_texture(self._program, "tex7", 7, "transport")
+        if not self._color_glow_fbo:
+            self._color_glow_fbo = GL.glGenFramebuffers(1)
+        previous_fbo = int(GL.glGetIntegerv(GL.GL_FRAMEBUFFER_BINDING))
+        viewport = tuple(GL.glGetIntegerv(GL.GL_VIEWPORT))
+        main_program = self._program
+
+        def target(texture):
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self._color_glow_fbo)
+            GL.glFramebufferTexture2D(
+                GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, texture, 0
+            )
+            if GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER) != GL.GL_FRAMEBUFFER_COMPLETE:
+                raise RuntimeError("Selective glow framebuffer is incomplete")
+
+        def sampler(program, name, unit, texture):
+            GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, texture)
+            GL.glUniform1i(self._uniform_location(program, name), unit)
+
+        try:
+            GL.glDisable(GL.GL_BLEND)
+            GL.glViewport(0, 0, width, height)
+            current, other, mask_a, mask_b = self._color_glow_targets
+            target(current)
+            self._uniform("u_sc_render_local", 1.0)
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+            self._uniform("u_sc_render_local", 0.0)
+            for rule in rules:
+                rule_data = (rule.strength, rule.radius, rule.tolerance, rule.softness)
+                target(mask_a)
+                self._program = self._color_glow_mask_program
+                GL.glUseProgram(self._program)
+                sampler(self._program, "tex0", 0, self._textures["source"])
+                self._uniform("u_sc_rule_color", rule.color)
+                self._uniform("u_sc_rule_data", rule_data)
+                GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+                self._program = self._color_glow_blur_program
+                GL.glUseProgram(self._program)
+                for step in color_glow_blur_steps((width, height), rule.radius):
+                    for direction in ((step / width, 0.0), (0.0, step / height)):
+                        target(mask_b)
+                        sampler(self._program, "tex0", 0, mask_a)
+                        self._uniform("u_sc_rule_step", direction)
+                        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+                        mask_a, mask_b = mask_b, mask_a
+                target(other)
+                self._program = self._color_glow_program
+                GL.glUseProgram(self._program)
+                sampler(self._program, "tex0", 0, current)
+                sampler(self._program, "tex1", 1, self._textures["source"])
+                sampler(self._program, "tex2", 2, mask_a)
+                self._uniform("u_sc_rule_color", rule.color)
+                self._uniform("u_sc_rule_data", rule_data)
+                self._uniform("u_sc_rule_compare", self._compare_mode)
+                GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+                current, other = other, current
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, previous_fbo)
+            GL.glViewport(*viewport)
+            self._program = self._flat_sprite_program
+            GL.glUseProgram(self._program)
+            self._uniform("u_canvas_size", CANVAS_SIZE)
+            self._uniform("u_sprite_position", position)
+            self._uniform("u_sprite_size", size)
+            self._uniform("u_sc_render_local", 0.0)
+            sampler(self._program, "background_texture", 0, current)
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        finally:
+            self._program = main_program
+            GL.glUseProgram(main_program)
+            self._uniform("u_sc_render_local", 0.0)
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, previous_fbo)
+            GL.glViewport(*viewport)
 
     def _uniform_location(self, program: int, name: str) -> int:
         key = (program, name)
@@ -1239,6 +1412,15 @@ class SceneLightGPUView(QOpenGLWidget):
                 GL.glDeleteProgram(self._background_program)
             if self._transport_blend_program:
                 GL.glDeleteProgram(self._transport_blend_program)
+            if self._color_glow_program:
+                GL.glDeleteProgram(self._color_glow_program)
+            if self._color_glow_mask_program:
+                GL.glDeleteProgram(self._color_glow_mask_program)
+            if self._color_glow_blur_program:
+                GL.glDeleteProgram(self._color_glow_blur_program)
+            if self._flat_sprite_program:
+                GL.glDeleteProgram(self._flat_sprite_program)
+            self._delete_color_glow_targets()
             if self._transport_fbo:
                 GL.glDeleteFramebuffers(1, [self._transport_fbo])
             self._uniform_locations.clear()
@@ -1253,6 +1435,9 @@ class SceneLightGPUView(QOpenGLWidget):
 
     def _cleanup_live_analysis(self) -> None:
         self.reset_live_history()
+        self.makeCurrent()
+        self._delete_color_glow_targets()
+        self.doneCurrent()
         if self._analyzer is not None:
             self.makeCurrent()
             self._analyzer.device.close()

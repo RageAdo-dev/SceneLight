@@ -194,6 +194,7 @@ def _project_signature(discovery: ProjectDiscovery, *, content_signature: str | 
     digest.update(json.dumps(discovery.runtime_sprite_names, sort_keys=True).encode("utf-8"))
     digest.update(json.dumps(discovery.runtime_sprite_sequences, sort_keys=True).encode("utf-8"))
     digest.update(json.dumps(discovery.explicit_character_tags, sort_keys=True).encode("utf-8"))
+    digest.update(json.dumps(discovery.excluded_character_tags, sort_keys=True).encode("utf-8"))
     digest.update(discovery.character_selection.encode("ascii"))
     digest.update(discovery.scene_analysis.encode("ascii"))
     digest.update(b"\1" if discovery.requires_runtime_inventory else b"\0")
@@ -1571,6 +1572,7 @@ def preflight_runtime(
         "sprite_sequences": [],
         "character_tags": discovery.character_tags,
         "explicit_character_tags": discovery.explicit_character_tags,
+        "excluded_character_tags": discovery.excluded_character_tags,
         "character_selection": discovery.character_selection,
         "inventory_backgrounds": False,
         "inventory_characters": False,
@@ -1621,6 +1623,7 @@ def capture_runtime_review(
     review_discovery = replace(
         discovery,
         explicit_character_tags=[],
+        excluded_character_tags=[],
         character_selection="automatic",
     )
     signature = _project_signature(review_discovery)
@@ -1656,6 +1659,7 @@ def capture_runtime_review(
         "sprite_sequences": [],
         "character_tags": [],
         "explicit_character_tags": [],
+        "excluded_character_tags": [],
         "character_selection": "automatic",
         "inventory_backgrounds": False,
         "inventory_characters": True,
@@ -2059,6 +2063,7 @@ def _run_parallel_capture_workers(
             "sprite_sequences": [],
             "character_tags": master_payload.get("character_tags", []),
             "explicit_character_tags": discovery.explicit_character_tags,
+            "excluded_character_tags": discovery.excluded_character_tags,
             "character_selection": discovery.character_selection,
             "inventory_backgrounds": False,
             "inventory_characters": False,
@@ -2207,6 +2212,7 @@ def capture_runtime_assets(
         "sprite_sequences": discovery.runtime_sprite_sequences,
         "character_tags": discovery.character_tags,
         "explicit_character_tags": discovery.explicit_character_tags,
+        "excluded_character_tags": discovery.excluded_character_tags,
         "character_selection": discovery.character_selection,
         # Source parsing is intentionally conservative and cannot see every
         # archive image, alias, ATL block, Movie, Composite, LiveTile, or
@@ -2215,8 +2221,10 @@ def capture_runtime_assets(
         # fast parser already found a usable subset.
         "inventory_backgrounds": True,
         "scene_analysis": discovery.scene_analysis,
-        "inventory_characters": discovery.requires_runtime_inventory
-        or not discovery.character_tags,
+        # A project can mix source declarations with archive-only additions.
+        # Refresh the authoritative registry even when static discovery found
+        # existing characters; selection filtering still applies in the game.
+        "inventory_characters": True,
     }
     if _capture_form_worker_count(CAPTURE_PARALLEL_MIN_FORMS) > 1:
         request["plan_only_threshold"] = CAPTURE_PARALLEL_MIN_FORMS
@@ -2512,11 +2520,14 @@ def merge_capture(discovery: ProjectDiscovery, capture: CaptureResult) -> None:
                 spec = SpriteSpec(name=name, layers=(path,))
             captured_by_tag.setdefault(parts[0], []).append((name, spec))
 
-    explicit_tags = set(discovery.explicit_character_tags)
-    eligible_tags = set(explicit_tags)
+    excluded_tags = set(discovery.excluded_character_tags)
+    explicit_tags = set(discovery.explicit_character_tags) - excluded_tags
+    eligible_tags = explicit_tags & set(capture.character_tags)
     ignored_tags: list[str] = []
     captured_tags = (
-        explicit_tags if discovery.character_selection == "manual" else set(capture.character_tags)
+        explicit_tags & set(capture.character_tags)
+        if discovery.character_selection == "manual"
+        else set(capture.character_tags) - excluded_tags
     )
     for tag in captured_tags:
         if tag in explicit_tags or any(
@@ -2530,11 +2541,10 @@ def merge_capture(discovery: ProjectDiscovery, capture: CaptureResult) -> None:
     for tag in sorted(eligible_tags):
         for name, spec in captured_by_tag.get(tag, ()):
             discovery.sprites.setdefault(name, spec)
-    discovery.character_tags = (
-        sorted(explicit_tags)
-        if discovery.character_selection == "manual"
-        else sorted(set(discovery.character_tags) | eligible_tags)
-    )
+    active_tags = {name.split()[0] for name in discovery.sprites} | eligible_tags
+    if discovery.character_selection == "manual":
+        active_tags.intersection_update(explicit_tags)
+    discovery.character_tags = sorted(active_tags - excluded_tags)
     discovery.unsupported.extend(
         "runtime inventory ignored non-character image family: %s" % tag
         for tag in sorted(ignored_tags)

@@ -241,7 +241,7 @@ _COMMANDS = (
         COMMANDS,
         "Register another tag",
         "scenelight_register_tag(tag)",
-        "Routes another registered character image tag through SceneLight. Use Check new assets → Update SceneLight to prepare matching surface maps for new images.",
+        "Routes another registered character image tag through SceneLight unless explicitly unchecked in Characters…. Recheck and update to enable an excluded family. Use Check new assets → Update SceneLight to prepare matching surface maps for new images.",
         example="""
             init python:
                 scenelight_register_tag("companion")
@@ -545,6 +545,30 @@ _SETTINGS = tuple(
     for name, title, limits, value, description, keywords in _SETTING_ROWS
 )
 
+_SETTINGS += (
+    _topic(
+        "setting-glow_rules",
+        SETTINGS,
+        "Glow only selected colors",
+        "glow_rules",
+        "Add independent color glow rules to one character or exact image. Matching uses the original artwork, not the scene's lighting color. Nearby shades match smoothly; transparent pixels cannot become sources.",
+        "Each rule has a name, enabled switch, RGB color (0–1 per channel), strength (0–2), radius (0–2), tolerance (0–1), and softness (0–1). Tolerance widens the color range; softness feathers its edge. Zero radius keeps the glow inside the artwork.",
+        "Preview → select a character → Calibrate → Color glow offers Add, Duplicate, Remove, and live sliders. Save the scene/library preset or Export sprite rules. Rules add together; more active rules take more rendering time.",
+        "Use glow_rules=[] to clear the rules for that target. This replaces the inherited list; other lighting controls and other sprites stay independent. Whole-sprite glow and light cast onto neighbors are separate controls.",
+        example="""
+            init python:
+                scenelight.image("hero magic", strength=0.7, glow_rules=[
+                    {"name": "Red gems", "color": [1.0, 0.05, 0.02],
+                     "tolerance": 0.15, "softness": 0.1, "strength": 0.8, "radius": 1.0},
+                    {"name": "Blue markings", "color": [0.05, 0.2, 1.0],
+                     "tolerance": 0.2, "softness": 0.1, "strength": 0.5, "radius": 0.6}
+                ])
+        """,
+        placement=INIT,
+        keywords="selective glow color colour red blue mask hue tolerance range softness multiple rules",
+    ),
+)
+
 _WORKFLOW = (
     _topic(
         "sprite-glow",
@@ -568,17 +592,20 @@ _WORKFLOW = (
     _topic(
         "selection",
         WORKFLOW,
-        "Save character selection",
-        "Keep your selected image tags with the project.",
+        "Choose characters and discover new ones",
+        "Reopen Characters… beside the game folder in either Setup mode.",
+        "Characters… refreshes discovery before showing the checklist. Automatically include new characters on scan / update is on for new projects. Unchecked families stay excluded. Turn it off to keep only your chosen tags. Existing manual selections stay manual.",
+        "For an installed project, Apply selection & update prepares the changed selection. After adding or replacing game assets, run Scan/Update; SceneLight does not watch the project folder continuously. The update keeps your lighting profile and saves.",
         "Place scenelight.json beside game/, not inside it. Each tag covers its expressions and poses. Merge these keys into an existing configuration instead of replacing its other settings.",
         example="""
             {
-              "character_selection": "manual",
-              "character_tags": ["hero", "companion"]
+              "auto_include_new_characters": true,
+              "character_tags": ["hero", "companion"],
+              "excluded_character_tags": ["sticker"]
             }
         """,
         placement="scenelight.json in your project root, beside game/. This is JSON.",
-        keywords="selection tags config json manual version control",
+        keywords="selection tags config json manual automatic exclude new character rescan update version control",
     ),
     _topic(
         "preview",

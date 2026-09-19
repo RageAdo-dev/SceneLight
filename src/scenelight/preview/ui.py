@@ -368,6 +368,9 @@ class MainWindow(SceneWorkspace, QMainWindow):
 
     def _open_calibration(self) -> None:
         dialog = CalibrationDialog(self._calibration, self._set_calibration, self)
+        actor = self._selected_actor()
+        if actor:
+            dialog.setWindowTitle(f"Lighting · {actor.name}")
         if dialog.exec():
             self._set_calibration(dialog.calibration)
             self.statusBar().showMessage(

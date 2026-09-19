@@ -29,6 +29,18 @@ Preview's **Export config** can save lighting settings and strength into the sam
 project configuration. Tags refer to Ren'Py image names: selecting `hero` covers
 `hero happy`, `hero worried` and its other expressions.
 
+Use **Characters…** beside the selected folder to refresh discovery and reopen
+the checklist at any time. **Automatically include new characters on scan / update**
+defaults on for new projects; unchecked families remain excluded. Turning it off
+keeps a fixed selection. Existing manual selections retain that choice. For an
+installed project, **Apply selection & update** saves the choices and prepares them.
+
+For the same automatic policy in project configuration, use
+`"auto_include_new_characters": true` and
+`"excluded_character_tags": ["sticker"]`; `character_tags` can also explicitly
+include unusual families such as fire or other glow artwork. User selections in
+Setup override project configuration without rewriting your configuration file.
+
 ## Set the lighting
 
 Automatic lighting needs no script calls. Add defaults or change a sequence when needed:
@@ -74,8 +86,11 @@ for composition and bypass examples.
 ## Update and check your project
 
 After adding assets, use **For mod developers → Check new assets → Update SceneLight**.
-Review new character tags. Existing poses can use the generic fallback until their
+Newly detected characters follow the saved automatic-inclusion policy. Existing poses can use the generic fallback until their
 own maps are prepared. Updates stop if SceneLight-owned files were edited.
+SceneLight does not continuously monitor your source directory; run this update
+after adding, replacing, or removing assets. Downloading a newer app alone does not
+refresh a game's installed runtime.
 
 Before distributing a game, check movement, expression changes, scene transitions,
 custom shaders, unlit UI and save/load/rollback with your own assets.

@@ -4,6 +4,10 @@
 
 ### Lighting and playback
 
+- Added independent color-selective glow rules per sprite. Match nearby artwork shades with range and softness controls, adjust each rule's strength and halo spread, and retain the rules in saved scenes, library presets, profiles, and author exports.
+- Init-authored lighting rules now seed new games correctly and recover from older untouched empty save states. Save/load keeps intentional runtime overrides and resets.
+- Character exclusions remain effective during gameplay, including when a mod registers the same tag during initialization.
+
 - Removed the fixed floor-shadow oval previously drawn into transparent sprite pixels. Interior lighting and self-shading remain active.
 - Added independent per-image/tag glow and emitted-light controls. Effect sprites can glow, illuminate nearby selected characters, or do both; defaults remain off. Preview calibration and the Developer guide include the controls. Rain, glitch, and custom effect packs remain deferred.
 
@@ -32,6 +36,8 @@
 - Live analysis runs in about a quarter less time on an older Radeon laptop GPU, with fewer GPU passes and smaller analysis buffers.
 
 ### Setup and author tools
+
+- Character selection can be reopened and refreshed for installed projects. Automatic inclusion of newly detected characters defaults on, with persistent exclusions; disabling it keeps a fixed selection. Asset changes are prepared by Scan/Update in both player and developer workflows.
 
 - Added persistent support sessions with searchable stage/error views, separate retained console output, capture-worker context, runtime sprite-binding evidence, and exportable support ZIPs. Reports include a readable HTML browser and omit artwork/saves; common secrets and personal home paths are redacted.
 - Preview now supports saved asset libraries, editable still-image layer recipes, scene save/load, and up to 16 independently configured characters. Composition and animation exports include visible characters, and emitted lights affect neighboring characters in Preview.

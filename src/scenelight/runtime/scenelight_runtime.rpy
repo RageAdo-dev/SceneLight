@@ -9,15 +9,7 @@
 
 default persistent.scenelight_enabled = True
 default persistent.scenelight_strength = 1.0
-default scenelight_control_state = {
-    "version": 1,
-    "revision": 0,
-    "defaults": {},
-    "scene": {},
-    "backgrounds": {},
-    "characters": {},
-    "images": {},
-}
+default scenelight_control_state = _scenelight_control_initial_state()
 default scenelight_fx_state = {
     "version": 1,
     "revision": 0,
@@ -114,6 +106,7 @@ init -50 python:
         "glow_green": 1.0,
         "glow_blue": 1.0,
         "glow_color_mix": 0.0,
+        "glow_rules": (),
     }
     _SCENELIGHT_CONTROL_KEYS = frozenset(
         ("enabled", "strength") + tuple(_SCENELIGHT_CALIBRATION_DEFAULTS.keys())
@@ -157,23 +150,40 @@ init -50 python:
     except NameError:
         _SCENELIGHT_STRING_TYPES = (str,)
 
+    _SCENELIGHT_INITIAL_CONTROL_STATE = {
+        "version": 1,
+        "revision": 0,
+        "defaults": {},
+        "scene": {},
+        "backgrounds": {},
+        "characters": {},
+        "images": {},
+    }
+
+    def _scenelight_control_initial_state():
+        # Ren'Py executes defaults again at New Game. Seed each new playthrough
+        # from init-authored rules without sharing mutable save/rollback state.
+        return copy.deepcopy(_SCENELIGHT_INITIAL_CONTROL_STATE)
+
     def _scenelight_control_current_state():
         state = getattr(renpy.store, "scenelight_control_state", None)
         if not isinstance(state, dict) or state.get("version") != 1:
-            state = {
-                "version": 1,
-                "revision": 0,
-                "defaults": {},
-                "scene": {},
-                "backgrounds": {},
-                "characters": {},
-                "images": {},
-            }
+            state = _scenelight_control_initial_state()
+        elif state.get("revision", 0) == 0 and not any(
+            state.get(scope) for scope in ("defaults", "scene", "backgrounds", "characters", "images")
+        ):
+            # Older saves may contain the untouched empty default that used to
+            # erase init-authored rules. An intentional runtime clear/reset has
+            # a nonzero revision and must remain empty when that save is loaded.
+            state = _scenelight_control_initial_state()
         return state
 
     def _scenelight_control_assign(state):
+        global _SCENELIGHT_INITIAL_CONTROL_STATE
         state["revision"] = int(state.get("revision", 0)) + 1
         renpy.store.scenelight_control_state = state
+        if getattr(renpy, "is_init_phase", lambda: False)():
+            _SCENELIGHT_INITIAL_CONTROL_STATE = copy.deepcopy(state)
         redraw_visible = globals().get("_scenelight_redraw_visible_sprites")
         if redraw_visible is not None:
             redraw_visible()
@@ -198,6 +208,50 @@ init -50 python:
             raise ValueError("SceneLight %s overrides require a name" % scope)
         return name
 
+    def _scenelight_control_glow_rules(raw_rules):
+        """Normalize a serializable rule list without retaining caller-owned state."""
+        import math
+        try:
+            import builtins as _sc_builtins
+        except ImportError:
+            import __builtin__ as _sc_builtins
+        if not isinstance(raw_rules, (_sc_builtins.list, _sc_builtins.tuple)):
+            raise ValueError("SceneLight glow_rules must be a list")
+        rules = []
+        defaults = {"name": "Color glow", "enabled": True,
+            "color": (1.0, 0.0, 0.0), "strength": 1.0, "radius": 1.0,
+            "tolerance": 0.15, "softness": 0.10}
+
+        def bounded(raw, high):
+            if isinstance(raw, (bool,) + _SCENELIGHT_STRING_TYPES):
+                raise ValueError("Glow rule values must be finite numbers")
+            try:
+                number = float(raw)
+            except (TypeError, ValueError):
+                raise ValueError("Glow rule values must be finite numbers")
+            if math.isnan(number) or math.isinf(number):
+                raise ValueError("Glow rule values must be finite numbers")
+            return max(0.0, min(number, high))
+
+        for raw in raw_rules:
+            if not isinstance(raw, _sc_builtins.dict):
+                raise ValueError("Each SceneLight glow rule must be an object")
+            unknown = sorted(set(raw) - set(defaults))
+            if unknown:
+                raise ValueError("Unknown SceneLight glow rule setting(s): " + ", ".join(unknown))
+            rule = dict(defaults)
+            rule.update(raw)
+            if not isinstance(rule["name"], _SCENELIGHT_STRING_TYPES) or not isinstance(rule["enabled"], bool):
+                raise ValueError("Glow rule name must be text and enabled must be true or false")
+            rule["name"] = rule["name"].strip() or "Color glow"
+            if not isinstance(rule["color"], (_sc_builtins.list, _sc_builtins.tuple)) or len(rule["color"]) != 3:
+                raise ValueError("Glow rule color must contain three RGB numbers")
+            rule["color"] = tuple(bounded(channel, 1.0) for channel in rule["color"])
+            for name in ("strength", "radius", "tolerance", "softness"):
+                rule[name] = bounded(rule[name], 2.0 if name in ("strength", "radius") else 1.0)
+            rules.append(rule)
+        return rules
+
     def _scenelight_control_values(settings):
         normalized = {}
         raw_mode = settings.get("light_mode")
@@ -215,6 +269,9 @@ init -50 python:
                 continue
             if name not in _SCENELIGHT_CONTROL_KEYS:
                 raise ValueError("Unknown SceneLight lighting setting: %s" % raw_name)
+            if name == "glow_rules":
+                normalized[name] = _scenelight_control_glow_rules(raw_value)
+                continue
             if name == "enabled":
                 if isinstance(raw_value, _SCENELIGHT_STRING_TYPES):
                     value = raw_value.strip().lower()
@@ -289,7 +346,9 @@ init -50 python:
                 result["strength_override"] = True
             for key in _SCENELIGHT_CALIBRATION_DEFAULTS:
                 if key in layer:
-                    result["calibration"][key] = float(layer[key])
+                    result["calibration"][key] = (
+                        copy.deepcopy(layer[key]) if key == "glow_rules" else float(layer[key])
+                    )
         # A scripted scene bypass is absolute. It must not be undone by a
         # reusable character or image rule authored at a narrower scope.
         if isinstance(scene_layer, dict) and scene_layer.get("enabled") is False:
@@ -1130,9 +1189,16 @@ init -50 python:
                     if key in visible["calibration"]:
                         updated["calibration"][key] = visible["calibration"][key]
             if not visible["enabled"]:
-                updated["calibration"].update(glow_strength=0.0, emission_strength=0.0)
+                updated["calibration"].update(glow_strength=0.0, emission_strength=0.0, glow_rules=[])
             return updated
         return controls
+
+    def _scenelight_color_glow_rules(scene, controls):
+        rules = SCENELIGHT_MANIFEST.get("calibration", {}).get("glow_rules", ())
+        rules = (scene or {}).get("calibration", {}).get("glow_rules", rules)
+        rules = controls.get("calibration", {}).get("glow_rules", rules)
+        return tuple(rule for rule in _scenelight_control_glow_rules(rules)
+                     if rule["enabled"] and rule["strength"] > 0.0)
 
     def _scenelight_sprite_emitters(receiver_tag):
         """Resolve visible emitters from the scene, independent of draw order."""
@@ -1771,6 +1837,191 @@ init -50 python:
         state[1][key] = result
         while len(state[1]) > 8:
             state[1].popitem(last=False)
+        return result
+
+    # Every rule is a separate three-texture pass. tex1 is ALWAYS the immutable
+    # input artwork; tex0 is only the accumulated result. No lighting is rerun,
+    # no rule limit is imposed by a fixed uniform array or sampler allocation.
+    _scenelight_shader_color_glow_variables = """
+        uniform sampler2D tex0;
+        uniform sampler2D tex1;
+        uniform sampler2D tex2;
+        uniform vec3 u_sc_rule_color;
+        uniform vec4 u_sc_rule_data;
+        uniform vec2 u_sc_rule_size;
+        uniform float u_sc_rule_compare;
+        varying vec2 v_tex_coord;
+    """
+    _scenelight_shader_color_glow_functions = """
+        vec3 scenelight_rule_hsv(vec3 color) {
+            vec4 k = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+            vec4 p = mix(vec4(color.bg, k.wz), vec4(color.gb, k.xy), step(color.b, color.g));
+            vec4 q = mix(vec4(p.xyw, color.r), vec4(color.r, p.yzx), step(p.x, color.r));
+            float delta = q.x - min(q.w, q.y);
+            return vec3(abs(q.z + (q.w-q.y)/(6.0*delta+0.00001)),
+                        delta/(q.x+0.00001), q.x);
+        }
+        vec4 scenelight_rule_sample(vec4 sample_color, vec3 target_color, vec4 rule) {
+            if (sample_color.a <= 0.001) return vec4(0.0);
+            vec3 color = clamp(sample_color.rgb / sample_color.a, 0.0, 1.0);
+            vec3 hsv = scenelight_rule_hsv(color);
+            vec3 target = scenelight_rule_hsv(target_color);
+            float hue = abs(hsv.x-target.x);
+            hue = min(hue, 1.0-hue)*2.0;
+            float chromatic = hue * sqrt(hsv.y*target.y)
+                + 0.25*abs(hsv.y-target.y) + 0.03*abs(hsv.z-target.z);
+            float neutral = length(color-target_color)/1.7320508;
+            float distance = mix(neutral, chromatic, smoothstep(0.02, 0.12, target.y));
+            float selection = 1.0 - smoothstep(rule.z,
+                rule.z + max(0.0001, rule.w), distance);
+            return sample_color * selection;
+        }
+    """
+    _scenelight_shader_color_glow_fragment = """
+        vec4 base = texture2D(tex0, v_tex_coord);
+        float shown = 1.0 - step(0.5, u_sc_rule_compare)
+            + step(1.5, u_sc_rule_compare) * step(0.5, v_tex_coord.x);
+        float strength = u_sc_rule_data.x * shown;
+        vec4 selected = scenelight_rule_sample(texture2D(tex1, v_tex_coord), u_sc_rule_color, u_sc_rule_data);
+        vec4 blurred = vec4(0.0);
+        if (u_sc_rule_data.y > 0.0 && strength > 0.0) {
+            blurred = texture2D(tex2, v_tex_coord);
+        }
+        float halo_alpha = 1.0 - exp(-blurred.a * strength * 1.8);
+        float alpha = max(base.a, halo_alpha);
+        vec3 added = selected.rgb * (0.65 * strength) + blurred.rgb * (0.8 * strength);
+        gl_FragColor = vec4(min(base.rgb + added, vec3(alpha)), alpha);
+    """
+    _scenelight_shader_color_glow_mask_fragment = """
+        gl_FragColor = scenelight_rule_sample(texture2D(tex0, v_tex_coord), u_sc_rule_color, u_sc_rule_data);
+    """
+    _scenelight_shader_color_glow_blur_variables = """
+        uniform sampler2D tex0;
+        uniform vec2 u_sc_rule_step;
+        varying vec2 v_tex_coord;
+    """
+    _scenelight_shader_color_glow_blur_functions = """
+        vec4 scenelight_rule_blur_sample(sampler2D source_texture, vec2 uv) {
+            if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(0.0);
+            return texture2D(source_texture, uv);
+        }
+    """
+    _scenelight_shader_color_glow_blur_fragment = """
+        vec4 blurred = texture2D(tex0, v_tex_coord) * 0.2270270270;
+        blurred += (scenelight_rule_blur_sample(tex0, v_tex_coord + u_sc_rule_step)
+                  + scenelight_rule_blur_sample(tex0, v_tex_coord - u_sc_rule_step)) * 0.1945945946;
+        blurred += (scenelight_rule_blur_sample(tex0, v_tex_coord + u_sc_rule_step * 2.0)
+                  + scenelight_rule_blur_sample(tex0, v_tex_coord - u_sc_rule_step * 2.0)) * 0.1216216216;
+        blurred += (scenelight_rule_blur_sample(tex0, v_tex_coord + u_sc_rule_step * 3.0)
+                  + scenelight_rule_blur_sample(tex0, v_tex_coord - u_sc_rule_step * 3.0)) * 0.0540540541;
+        blurred += (scenelight_rule_blur_sample(tex0, v_tex_coord + u_sc_rule_step * 4.0)
+                  + scenelight_rule_blur_sample(tex0, v_tex_coord - u_sc_rule_step * 4.0)) * 0.0162162162;
+        gl_FragColor = blurred;
+    """
+    if _SCENELIGHT_SHADER_AVAILABLE:
+        renpy.register_shader("scenelight.color_glow",
+            variables=_scenelight_shader_color_glow_variables,
+            fragment_functions=_scenelight_shader_color_glow_functions,
+            fragment_350=_scenelight_shader_color_glow_fragment)
+        renpy.register_shader("scenelight.color_glow_mask",
+            variables=_scenelight_shader_color_glow_variables,
+            fragment_functions=_scenelight_shader_color_glow_functions,
+            fragment_350=_scenelight_shader_color_glow_mask_fragment)
+        renpy.register_shader("scenelight.color_glow_blur",
+            variables=_scenelight_shader_color_glow_blur_variables,
+            fragment_functions=_scenelight_shader_color_glow_blur_functions,
+            fragment_350=_scenelight_shader_color_glow_blur_fragment)
+
+    def _scenelight_color_glow_steps(size, radius):
+        """Widen an already smoothed mask, so small features never form sparse lobes."""
+        variance = (0.014 * min(size) * radius) ** 2
+        step_size = 1.0
+        steps = []
+        while variance > 0.000001:
+            step = min(step_size, (variance / 2.854054054) ** 0.5)
+            steps.append(step)
+            variance = max(0.0, variance - 2.854054054 * step * step)
+            step_size *= 2.0
+        return steps
+
+    def _scenelight_color_glow_render(lit, source, rules, master=1.0):
+        if master <= 0.0:
+            return lit
+        for rule in rules:
+            mask = renpy.Render(*source.get_size())
+            mask.blit(source, (0, 0))
+            mask.mesh = True
+            mask.add_shader("renpy.texture")
+            mask.add_shader("scenelight.color_glow_mask")
+            mask.add_uniform("u_sc_rule_color", tuple(rule["color"]))
+            mask.add_uniform("u_sc_rule_data", (rule["strength"], rule["radius"], rule["tolerance"], rule["softness"]))
+            size = source.get_size()
+            for step in _scenelight_color_glow_steps(size, rule["radius"]):
+                for direction in ((step / max(size[0], 1.0), 0.0), (0.0, step / max(size[1], 1.0))):
+                    blurred = renpy.Render(*size)
+                    blurred.blit(mask, (0, 0))
+                    blurred.mesh = True
+                    blurred.add_shader("renpy.texture")
+                    blurred.add_shader("scenelight.color_glow_blur")
+                    blurred.add_uniform("u_sc_rule_step", direction)
+                    mask = blurred
+            result = renpy.Render(*lit.get_size())
+            result.blit(lit, (0, 0))
+            result.blit(source, (0, 0))
+            result.blit(mask, (0, 0))
+            result.mesh = True
+            result.add_shader("renpy.texture")
+            result.add_shader("scenelight.color_glow")
+            result.add_uniform("u_sc_rule_color", tuple(rule["color"]))
+            result.add_uniform("u_sc_rule_data", (rule["strength"] * master,
+                rule["radius"], rule["tolerance"], rule["softness"]))
+            result.add_uniform("u_sc_rule_size", tuple(float(v) for v in source.get_size()))
+            result.add_uniform("u_sc_rule_compare", 0.0)
+            lit = result
+        return lit
+
+    def _scenelight_color_glow_tree(root, original=False, memo=None):
+        """Keep composite geometry, but recover source art or strip earlier rule passes.
+
+        A Composite can contain registered image pieces that each resolve their
+        own SceneLight wrapper. The final composite owns the color selection:
+        earlier selective passes are removed, and its immutable mask source is
+        rebuilt without SceneLight lighting. Foreign authored shaders, offsets,
+        clipping, alpha and transforms retain their original render properties.
+        Only newly created Render nodes are changed; cached children are untouched.
+        """
+        if not isinstance(root, renpy.Render):
+            return root
+        if memo is None:
+            memo = {}
+        if id(root) in memo:
+            return memo[id(root)]
+        memo[id(root)] = root
+        children = getattr(root, "children", ())
+        shaders = getattr(root, "shaders", ()) or ()
+        if "scenelight.color_glow" in shaders and len(children) >= 2:
+            result = _scenelight_color_glow_tree(children[1 if original else 0][0], original, memo)
+            memo[id(root)] = result
+            return result
+        if original and globals().get("_scenelight_sprite_shader") in shaders and children:
+            result = _scenelight_color_glow_tree(children[0][0], original, memo)
+            memo[id(root)] = result
+            return result
+        replacements = [_scenelight_color_glow_tree(item[0], original, memo) for item in children]
+        if all(child is item[0] for child, item in zip(replacements, children)):
+            return root
+        result = renpy.Render(*root.get_size())
+        # These are Render's public draw/geometry properties in Ren'Py 7/8.
+        # Texture/model/cache fields must stay new, not copied from the source.
+        for name in ("forward", "reverse", "alpha", "over", "nearest", "xclipping",
+                     "yclipping", "operation", "operation_complete", "operation_alpha",
+                     "operation_parameter", "mesh", "shaders", "uniforms", "properties"):
+            if hasattr(root, name):
+                setattr(result, name, getattr(root, name))
+        for child, item in zip(replacements, children):
+            result.subpixel_blit(child, (item[1], item[2]), focus=False, main=item[4])
+        result.depends_on(root, focus=True)
+        memo[id(root)] = result
         return result
 
     _scenelight_shader_variables = """
@@ -3805,14 +4056,11 @@ init -50 python:
         def _live_lighting_state(self):
             """Resolve a complete state even before this displayable's first frame."""
             scene_key, scene = self._live_scene_entry()
-            if scene is not None:
-                controls = _scenelight_control_snapshot(
-                    scene_key,
-                    self.image_name[0],
-                    self.form_key,
-                )
-            else:
-                controls = {"enabled": True, "strength": 1.0, "calibration": {}}
+            controls = _scenelight_control_snapshot(
+                scene_key or "unknown",
+                self.image_name[0],
+                self.form_key,
+            )
             controls = _scenelight_emission_controls(scene_key, self.image_name[0], controls)
             enabled = bool(getattr(persistent, "scenelight_enabled", True)) and bool(
                 controls["enabled"]
@@ -3875,10 +4123,13 @@ init -50 python:
                         controls = current._sc_frozen_controls or {}
                     else:
                         scene, enabled, child_strength, _fx, _time, controls = current._live_lighting_state()
-                    if scene and enabled:
-                        receive = receive or child_strength > 0.0
-                        block = _scenelight_calibration_blocks(scene, controls.get("calibration", {}))[5]
-                        glow = glow or block[0] > 0.0
+                    if enabled:
+                        receive = receive or bool(scene and child_strength > 0.0)
+                        block = _scenelight_calibration_blocks(scene or {}, controls.get("calibration", {}))[5]
+                        # Selective passes are stripped/reapplied on the outer
+                        # resolved image below. They must not bypass this alias's
+                        # normal lighting, even when the rule matches no pixels.
+                        glow = glow or bool(scene and block[0] > 0.0)
                     current = current.child
                 elif isinstance(current, aliases):
                     children = list(current.visit() or ())
@@ -4008,9 +4259,16 @@ init -50 python:
             # They remain available in games that use procedural, video, or
             # otherwise unrecognized scenes, while ordinary lighting still
             # requires a valid SceneLight scene record.
+            rules = _scenelight_color_glow_rules(scene, controls) if enabled else ()
+            master = max(0.0, float(getattr(persistent, "scenelight_strength", 1.0)))
             if not scene:
+                _receive_covered, glow_covered = self._sc_emission_coverage()
+                source = _scenelight_color_glow_tree(child_render, original=True) if rules and not glow_covered else child_render
+                base = _scenelight_color_glow_tree(child_render) if rules and not glow_covered else child_render
+                result = _scenelight_color_glow_render(base, source,
+                    () if glow_covered else rules, master)
                 return _scenelight_custom_effect_render(
-                    child_render,
+                    result,
                     active_custom_effects,
                 )
             if not enabled and not effects_active:
@@ -4032,6 +4290,11 @@ init -50 python:
                 # alpha-shaped halo. An alias must not relight that completed
                 # emission texture or turn its halo back into dark geometry.
                 return _scenelight_custom_effect_render(child_render, active_custom_effects)
+
+            rule_source = child_render
+            if rules:
+                rule_source = _scenelight_color_glow_tree(child_render, original=True)
+                child_render = _scenelight_color_glow_tree(child_render)
 
             # This render-to-texture boundary is intentional. Never copy a
             # child's shaders, uniforms, or GL properties onto SceneLight's
@@ -4276,7 +4539,7 @@ init -50 python:
                     "frozen_transition": self._sc_snapshot_frozen,
                 })
             return _scenelight_custom_effect_render(
-                result,
+                _scenelight_color_glow_render(result, rule_source, rules, master),
                 active_custom_effects,
             )
 
@@ -4350,8 +4613,13 @@ init -50 python:
         """Route another Ren'Py character image tag through the same shader."""
         if not _SCENELIGHT_SHADER_AVAILABLE:
             return
-        tag = str(tag).split()[0]
-        if not tag or tag == "bg":
+        parts = str(tag).split()
+        if not parts or parts[0] == "bg":
+            return
+        tag = parts[0]
+        # Author registration may discover a tag that static analysis missed,
+        # but must not override an explicit choice in the Characters checklist.
+        if tag in globals().get("SCENELIGHT_MANIFEST", {}).get("excluded_character_tags", ()):
             return
         SCENELIGHT_CHARACTER_TAGS.add(tag)
         for image_name in list(_scenelight_registered_image_names()):
@@ -4575,24 +4843,15 @@ init -50 python:
 
 
 init 999 python:
-    # Character(image="tag") declarations opt in automatically. The set only
-    # decides which displayables are routed through SceneLight; character names
-    # and sprite pixels never affect exposure or any shader coefficient.
+    # Scan/update resolves automatic inclusion and explicit exclusions. Keep
+    # that manifest selection authoritative; discovering Character declarations
+    # again here would silently re-enable families the user unchecked.
     if _SCENELIGHT_SHADER_AVAILABLE:
         _scenelight_movie_texture = getattr(renpy.display.video, "get_movie_texture", None)
         if callable(_scenelight_movie_texture):
             if getattr(_scenelight_movie_texture, "_scenelight_movie_hook", False):
                 _scenelight_movie_texture = _scenelight_movie_texture._scenelight_original
             renpy.display.video.get_movie_texture = _scenelight_movie_texture_hook(_scenelight_movie_texture)
-        for _scenelight_value in list(vars(renpy.store).values()):
-            if not isinstance(_scenelight_value, renpy.character.ADVCharacter):
-                continue
-            _scenelight_tag = _scenelight_value.image_tag
-            if not _scenelight_tag:
-                _scenelight_tag = _scenelight_value.show_args.get("image")
-            if isinstance(_scenelight_tag, str) and _scenelight_tag:
-                SCENELIGHT_CHARACTER_TAGS.add(_scenelight_tag.split()[0])
-
         # Re-register the finished image displayables under the same names. All
         # existing show statements and ATL transforms therefore continue to work.
         for _scenelight_tag in list(SCENELIGHT_CHARACTER_TAGS):

@@ -92,6 +92,24 @@ runtime or surface maps.
 For developer projects, use **For mod developers → Check new assets → Update
 SceneLight**. [Author guide](AUTHOR_QUICKSTART.md).
 
+### Change which characters receive lighting
+
+Choose **Characters…** beside the game folder in either mode. It rescans the
+project and reopens the character checklist, including newly found tags. Each tag
+covers that character's poses and expressions. On an installed project, **Apply
+selection & update** saves the choices and prepares the changed installation.
+
+**Automatically include new characters on scan / update** starts on for new
+projects. Unchecked families stay excluded even with this on. Turn it off to add
+characters only when you explicitly select them. Existing manual choices remain
+manual after upgrading. Settings are saved per project.
+
+After adding or changing game assets, run Scan/Update. There is no continuous
+folder watcher; new characters need discovery and prepared lighting maps before
+they can use the full effect. Player-copy updates synchronize authored game files
+while preserving saves and your lighting choices. Developer updates refresh the
+embedded runtime and generated maps without replacing story scripts.
+
 ## Remove
 
 Use **Settings** to remove the selected installation. SceneLight checks its

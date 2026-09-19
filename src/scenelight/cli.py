@@ -527,13 +527,15 @@ def _scan_runtime_review(
                     native_runtime=native_runtime,
                     renderer=renderer,
                 )
-                if discovery.requires_runtime_inventory:
-                    review = capture_runtime_review(
-                        discovery,
-                        executable,
-                        native_runtime=native_runtime,
-                        renderer=renderer,
-                    )
+                # Mixed source/archive games can gain registered characters
+                # that static parsing cannot see. The review cache is keyed by
+                # authored content, so unchanged projects remain inexpensive.
+                review = capture_runtime_review(
+                    discovery,
+                    executable,
+                    native_runtime=native_runtime,
+                    renderer=renderer,
+                )
             except CaptureInstanceConflict:
                 raise
             except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
@@ -565,7 +567,10 @@ def _scan_runtime_review(
         suggestions = set(discovery.suggested_character_tags) | set(review.character_tags)
         discovery.suggested_character_tags = sorted(suggestions)
         if discovery.character_selection == "automatic":
-            discovery.character_tags = sorted(set(discovery.character_tags) | suggestions)
+            discovery.character_tags = sorted(
+                (set(discovery.character_tags) | suggestions)
+                - set(discovery.excluded_character_tags)
+            )
         for tag in discovery.explicit_character_tags:
             discovery.character_candidates.setdefault(tag, None)
 

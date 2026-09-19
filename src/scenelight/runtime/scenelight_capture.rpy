@@ -1584,6 +1584,10 @@ init -999 python:
         explicit_character_tags = set(
             str(tag).split()[0] for tag in request.get("explicit_character_tags", ())
         )
+        excluded_character_tags = set(
+            str(tag).split()[0] for tag in request.get("excluded_character_tags", ())
+        )
+        explicit_character_tags.difference_update(excluded_character_tags)
         manual_character_selection = request.get("character_selection") == "manual"
         review_only = bool(request.get("review_only"))
         review_tags = set(explicit_character_tags)
@@ -1737,7 +1741,11 @@ init -999 python:
                 # Require foreground-scale portrait geometry for every
                 # automatically discovered family. Explicit author config is
                 # the intentional escape hatch for chibis and unusual art.
-                eligible_character_tags = set(explicit_character_tags)
+                # Keep selection preferences in the profile, but do not keep
+                # removed families active in the generated runtime manifest.
+                eligible_character_tags = explicit_character_tags & (
+                    registered_tags | set(script_show_counts)
+                )
                 geometry_candidates = {}
                 for registered_name in registered_names:
                     parts = tuple(registered_name.split())
@@ -1745,7 +1753,7 @@ init -999 python:
                         geometry_candidates.setdefault(parts[0], []).append(registered_name)
                 automatic_tags = (
                     set() if manual_character_selection
-                    else character_tags - explicit_character_tags
+                    else character_tags - explicit_character_tags - excluded_character_tags
                 )
                 ordered_automatic_tags = sorted(automatic_tags)
                 if ordered_automatic_tags:
@@ -1779,7 +1787,7 @@ init -999 python:
                                 renpy.display.render.free_memory()
                             except Exception:
                                 pass
-                character_tags = eligible_character_tags
+                character_tags = eligible_character_tags - excluded_character_tags
 
                 if review_only:
                     for registered_name in sorted(registered_names):

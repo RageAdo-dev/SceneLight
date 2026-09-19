@@ -29,6 +29,9 @@ init python:
     scenelight.character("hero_sticker", enabled=False)
 ```
 
+Explicit exclusions in **Characters…** take precedence over tag registration.
+Recheck a family and apply the update to enable it again.
+
 After adding assets, use **Check new assets → Update SceneLight**. Existing poses
 can use a generic surface until their own maps are ready. Updates reuse valid
 analysis and stop if an owned runtime file was changed.
@@ -206,6 +209,35 @@ Setting `glow_color_mix=0` restores artwork colors. A zero `glow_strength`
 disables self glow regardless of the chosen color.
 
 Rain, glitch, and custom effect packs remain deferred until after launch.
+
+### Glow selected colors on a sprite
+
+Use **Calibrate → Color glow** on the selected Preview character. Add as many color
+rules as needed, choose an artwork color, and adjust **Color range** to include similar
+shades. **Soft edges** feathers the match, **Glow strength** controls brightness, and
+**Halo spread** controls its reach. Each rule can be disabled, duplicated, or removed.
+More active rules require more rendering time. Leave transparent padding for halos.
+
+```renpy
+init python:
+    scenelight.image("hero magic", strength=0.7, glow_rules=[
+        {"name": "Red gems", "color": [1.0, 0.05, 0.02],
+         "tolerance": 0.15, "softness": 0.1, "strength": 0.8, "radius": 1.0},
+        {"name": "Blue markings", "color": [0.05, 0.2, 1.0],
+         "tolerance": 0.2, "softness": 0.1, "strength": 0.5, "radius": 0.6}
+    ])
+```
+
+Matching samples the original artwork, so changing scene lighting does not move
+the selected color regions. The rules affect only their target; they do not make
+every red object in the scene glow. They work on the composed result of layered
+sprites. Existing whole-sprite glow/tint and emitted light remain separate.
+
+Rule ranges: RGB channels, tolerance, and softness are 0–1; strength and radius
+are 0–2. `enabled=False` keeps a rule saved but inactive. `radius=0` suppresses the
+halo while brightening the matching artwork. `glow_rules=[]` clears the list at
+that scope. A more specific list replaces the inherited list. Scene files, library
+presets, profiles, and **Export sprite rules** preserve these values.
 
 ## Shaders and transforms
 

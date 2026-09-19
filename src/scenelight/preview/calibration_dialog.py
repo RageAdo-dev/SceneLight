@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..calibration import Calibration
+from .color_glow_ui import ColorGlowEditor
 
 _BASIC = (
     ("auto_strength", "Automatic match", 0.0, 2.0, 0.01),
@@ -73,7 +74,7 @@ class CalibrationDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("SceneLight calibration")
-        self.setMinimumWidth(470)
+        self.setMinimumWidth(560)
         self._initial = calibration.normalized()
         self._on_change = on_change
         self._controls: dict[str, QDoubleSpinBox] = {}
@@ -85,6 +86,9 @@ class CalibrationDialog(QDialog):
         tabs.addTab(self._page(_BASIC), "Basic")
         tabs.addTab(self._page(_ADVANCED), "Advanced")
         tabs.addTab(self._glow_page(), "Glow && emitted light")
+        self._color_glow = ColorGlowEditor()
+        self._color_glow.changed.connect(self._changed)
+        tabs.addTab(self._color_glow, "Color glow")
         layout.addWidget(tabs)
 
         buttons = QHBoxLayout()
@@ -220,11 +224,13 @@ class CalibrationDialog(QDialog):
             glow_green=self._glow_color.greenF(),
             glow_blue=self._glow_color.blueF(),
             glow_color_mix=self._glow_color_mix,
+            glow_rules=[rule.as_dict() for rule in self._color_glow.rules],
         )
         return Calibration.from_mapping(values)
 
     def _set_calibration(self, calibration: Calibration, *, notify: bool = True) -> None:
         values = calibration.as_dict()
+        self._color_glow.set_rules(calibration.glow_rules)
         self._glow_color = QColor.fromRgbF(
             values["glow_red"], values["glow_green"], values["glow_blue"]
         )

@@ -25,6 +25,7 @@ from scenelight.setup_gui import (
     character_review_candidates,
     character_review_mode,
     character_review_required,
+    character_review_selected_tags,
     component_command_status,
     component_environment_root,
     component_python,
@@ -1274,7 +1275,8 @@ def test_character_review_mode_preserves_only_supported_modes() -> None:
     assert character_review_mode({"character_selection": "manual"}) == "manual"
     assert character_review_mode({"character_selection": "surprise"}) == "manual"
     assert character_review_mode({"character_selection": []}) == "manual"
-    assert character_review_mode({}) == "manual"
+    assert character_review_mode({}) == "automatic"
+    assert character_review_mode({"auto_include_new_characters": False}) == "manual"
 
 
 def test_character_review_is_automatic_only_for_first_install_or_new_suggestions() -> None:
@@ -1319,6 +1321,39 @@ def test_manual_character_selection_is_saved_outside_the_game(tmp_path: Path, mo
     assert project.resolve() not in saved.parents
     assert payload["character_selection"] == "manual"
     assert payload["character_tags"] == ["chibi", "nova"]
+
+
+def test_automatic_selection_keeps_exclusions_and_can_be_frozen(tmp_path, monkeypatch):
+    import json
+
+    project = tmp_path / "mod"
+    (project / "game").mkdir(parents=True)
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed" / "projects"))
+    saved = save_character_selection(project, "automatic", ["nova"], candidates=["nova", "sticker"])
+    payload = json.loads(saved.read_text())
+    assert payload["auto_include_new_characters"] is True
+    assert payload["character_tags"] == ["nova"]
+    assert payload["excluded_character_tags"] == ["sticker"]
+    review = {
+        **payload,
+        "explicit_character_tags": payload["character_tags"],
+        "suggested_character_tags": ["nova", "sticker", "guest"],
+    }
+    assert character_review_selected_tags(review) == {"nova", "guest"}
+
+    save_character_selection(project, "manual", ["nova"], candidates=["nova", "guest"])
+    frozen = json.loads(saved.read_text())
+    assert frozen["auto_include_new_characters"] is False
+    assert frozen["excluded_character_tags"] == ["guest", "sticker"]
+    frozen_review = {**review, **frozen, "explicit_character_tags": ["nova"]}
+    assert character_review_selected_tags(frozen_review) == {"nova"}
+    assert not character_review_required(frozen_review, installed=True)
+
+    save_character_selection(
+        project, "automatic", ["nova", "sticker"], candidates=["nova", "sticker"]
+    )
+    restored = json.loads(saved.read_text())
+    assert restored["excluded_character_tags"] == ["guest"]
 
 
 def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):

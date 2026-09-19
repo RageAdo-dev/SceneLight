@@ -41,6 +41,7 @@ def test_every_lighting_setting_is_independent_per_tag_and_exact_image():
     ns = _runtime_api()
     api = ns["scenelight"]
     values = {name: 0.37 for name in ns["_SCENELIGHT_CALIBRATION_DEFAULTS"]}
+    values["glow_rules"] = []
     api.character("hero", strength=0.45, **values)
     api.character("friend", strength=0.85, rim_strength=0.9)
     api.image("hero worried", strength=1.2, glow_strength=0.0, exposure_bias=-0.4)

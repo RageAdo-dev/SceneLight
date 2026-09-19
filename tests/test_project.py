@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -296,6 +297,35 @@ def test_manual_character_selection_replaces_automatic_inference(tmp_path: Path)
     assert discovery.character_tags == ["guest"]
     assert discovery.sprites == {}
     assert discovery.character_candidates["nova"].endswith("nova.png")
+
+
+@pytest.mark.parametrize("auto_include", [True, False])
+def test_added_families_follow_policy_and_explicit_exclusions(tmp_path, auto_include):
+    project = make_project(tmp_path / "project")
+    script = project / "game" / "script.rpy"
+    script.write_text(
+        script.read_text()
+        + '\ndefine g = Character("Guest", image="guest")\n'
+        + 'image guest idle = "images/nova.png"\n'
+        + '\ndefine b = Character("Blocked", image="blocked")\n'
+        + 'image blocked idle = "images/nova.png"\nshow guest idle\nshow blocked idle\n'
+    )
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps(
+            {
+                "auto_include_new_characters": auto_include,
+                "character_tags": ["nova"],
+                "excluded_character_tags": ["blocked"],
+            }
+        )
+    )
+    discovery = discover_project(project, profile)
+    assert discovery.character_tags == (["guest", "nova"] if auto_include else ["nova"])
+    assert "blocked" in discovery.suggested_character_tags
+    assert "blocked" in discovery.character_candidates
+    assert all(not name.startswith("blocked ") for name in discovery.sprites)
+    assert discovery.summary()["auto_include_new_characters"] is auto_include
 
 
 def test_manual_selection_includes_selected_forms_not_reached_by_static_story_scan(

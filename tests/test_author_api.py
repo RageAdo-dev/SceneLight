@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from test_developer_guide import _runtime_api
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy"
 
@@ -22,7 +24,7 @@ def test_temporal_scene_fields_advance_and_redraw_without_affecting_static_scene
 def test_author_api_is_save_and_rollback_aware() -> None:
     runtime = runtime_source()
 
-    assert "default scenelight_control_state = {" in runtime
+    assert "default scenelight_control_state = _scenelight_control_initial_state()" in runtime
     assert "renpy.store.scenelight_control_state = state" in runtime
     assert "class _SceneLightAPI(object):" in runtime
     assert "scenelight = _SceneLightAPI()" in runtime
@@ -32,6 +34,47 @@ def test_author_api_is_save_and_rollback_aware() -> None:
     assert "def character(self, tag, **settings):" in runtime
     assert "def image(self, name, **settings):" in runtime
     assert "def clear_scene(self):" in runtime
+
+
+def test_init_authored_rules_seed_new_games_without_overwriting_saved_runtime_changes():
+    ns = _runtime_api()
+    engine = ns["renpy"]
+    api = ns["scenelight"]
+    engine.is_init_phase = lambda: True
+    api.character("hero", strength=0.43, exposure_bias=-0.35)
+    api.image("hero idle", strength=0.67, glow_rules=[{"color": (1, 0, 0)}])
+    initial = ns["_scenelight_control_initial_state"]
+    engine.is_init_phase = lambda: False
+    engine.store.scenelight_control_state = initial()
+    assert ns["_scenelight_control_snapshot"]("room", "hero", "hero idle")["strength"] == 0.67
+    api.image("hero idle", strength=0.9)
+    saved = api.state()
+    api.reset()
+    assert not api.state()["images"]
+    engine.store.scenelight_control_state = saved
+    assert ns["_scenelight_control_snapshot"]("room", "hero", "hero idle")["strength"] == 0.9
+    api.clear_image("hero idle")
+    assert ns["_scenelight_control_snapshot"]("room", "hero", "hero idle")["strength"] == 0.43
+    engine.store.scenelight_control_state = initial()
+    assert ns["_scenelight_control_snapshot"]("room", "hero", "hero idle")["strength"] == 0.67
+    engine.store.scenelight_control_state["images"]["hero idle"]["glow_rules"][0]["strength"] = 0
+    assert initial()["images"]["hero idle"]["glow_rules"][0]["strength"] == 1
+
+
+def test_legacy_empty_save_gains_init_rules_but_intentional_reset_stays_empty():
+    ns = _runtime_api()
+    engine = ns["renpy"]
+    api = ns["scenelight"]
+    legacy_empty = api.state()
+    engine.is_init_phase = lambda: True
+    api.character("hero", strength=0.43)
+    engine.is_init_phase = lambda: False
+    engine.store.scenelight_control_state = legacy_empty
+    assert ns["_scenelight_control_snapshot"]("room", "hero", "hero idle")["strength"] == 0.43
+    api.reset()
+    explicit_empty = api.state()
+    engine.store.scenelight_control_state = explicit_empty
+    assert not api.state()["characters"]
 
 
 def test_author_api_uses_documented_precedence() -> None:

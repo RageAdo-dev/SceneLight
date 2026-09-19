@@ -1051,7 +1051,9 @@ def test_runtime_character_inventory_requires_structural_or_character_evidence()
     assert "width < maximum_width" in helper
     assert "portrait_ratio <= 1.05" in helper
     assert "config.screen_height * 0.35" in helper
-    assert "eligible_character_tags = set(explicit_character_tags)" in helper
+    assert "eligible_character_tags = explicit_character_tags & (" in helper
+    assert "registered_tags | set(script_show_counts)" in helper
+    assert "character_tags - explicit_character_tags - excluded_character_tags" in helper
     assert "character_tags = eligible_character_tags" in helper
     assert "story_tags = set(script_show_counts) | set(script_hidden_tags)" not in helper
 
@@ -1689,3 +1691,52 @@ def test_manual_capture_never_adds_unselected_runtime_families(tmp_path: Path) -
 
     assert discovery.character_tags == ["hero"]
     assert list(discovery.sprites) == ["hero idle"]
+
+
+def test_capture_policy_changes_invalidate_plan_but_reuse_unchanged_pixels(tmp_path):
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "script.rpy").write_text('image nova idle = "nova.png"\n')
+    discovery = ProjectDiscovery(tmp_path, game, {}, {}, ["nova"])
+    content = _capture_content_signature(discovery)
+    automatic = _project_signature(discovery)
+    discovery.excluded_character_tags = ["nova"]
+    excluded = _project_signature(discovery)
+    discovery.character_selection = "manual"
+    frozen = _project_signature(discovery)
+    assert len({automatic, excluded, frozen}) == 3
+    assert _capture_content_signature(discovery) == content
+    (game / "new.rpa").write_bytes(b"new archived character")
+    assert _capture_content_signature(discovery) != content
+
+
+def test_runtime_merge_keeps_explicit_exclusions_and_removes_missing_family(tmp_path):
+    game = tmp_path / "game"
+    game.mkdir()
+    sprite = game / "hero.png"
+    image = Image.new("RGBA", (400, 720), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((80, 10, 300, 710), fill=(210, 120, 90, 255))
+    image.save(sprite)
+    discovery = ProjectDiscovery(
+        tmp_path,
+        game,
+        {},
+        {},
+        ["hero", "removed"],
+        explicit_character_tags=["hero", "removed"],
+        excluded_character_tags=["blocked"],
+    )
+    capture = CaptureResult(
+        scenes={},
+        sprites={"hero idle": sprite, "guest idle": sprite, "blocked idle": sprite},
+        character_tags=["hero", "guest", "blocked"],
+        background_inventory_requested=True,
+        scene_requests=0,
+        resolved_requests=[],
+        errors=[],
+        cached=False,
+    )
+    merge_capture(discovery, capture)
+    assert discovery.character_tags == ["guest", "hero"]
+    assert set(discovery.sprites) == {"guest idle", "hero idle"}
+    assert discovery.explicit_character_tags == ["hero", "removed"]

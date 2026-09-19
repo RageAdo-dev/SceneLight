@@ -17,6 +17,15 @@ Open **Calibrate → Glow & emitted light** and choose a custom color. The
 (100%). Intermediate values tint the glowing sprite and halo. Sprite glow must be
 above zero. Cast-light color remains separate and controls illumination of neighbors.
 
+Use **Calibrate → Color glow** when only particular colors in the selected artwork
+should glow. Add a color rule, choose its color, and adjust **Color range** to match
+nearby shades. **Soft edges** feathers the selection; **Glow strength** and **Halo
+spread** control the result. Duplicate or add rules for more colors, or disable a
+rule without deleting it. Matching uses the original artwork, not a tint created by
+scene lighting. Rules affect their character only and are saved with scenes,
+library entries, profiles, and exported sprite rules. More active rules take more
+rendering time. Existing whole-sprite glow and emitted light are independent.
+
 To use a character's values in a mod, enter its Ren'Py image name, such as `hero happy`,
 then choose **Export sprite rules**. Export the selected character or all characters.
 Put the resulting `.rpy` file under `game/` after installing the SceneLight developer

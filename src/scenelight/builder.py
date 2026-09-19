@@ -1727,6 +1727,8 @@ def build_project(
         "virtual_size": [1280, 720],
         "reference_art_mid": REFERENCE_ART_MID,
         "character_tags": discovery.character_tags,
+        "excluded_character_tags": discovery.excluded_character_tags,
+        "auto_include_new_characters": discovery.character_selection == "automatic",
         "strength": discovery.strength,
         "calibration": discovery.calibration.as_dict(),
         "atlas": {

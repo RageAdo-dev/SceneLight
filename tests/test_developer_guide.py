@@ -26,6 +26,7 @@ def _runtime_api():
         "_SCENELIGHT_PHYSICAL_MODE",
         "_SCENELIGHT_SEPARATE_MODE",
         "_SCENELIGHT_LIGHT_MODES",
+        "_SCENELIGHT_INITIAL_CONTROL_STATE",
         "scenelight",
     }
     functions = {
