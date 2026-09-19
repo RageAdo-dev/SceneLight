@@ -69,6 +69,9 @@ the lighting shape and detail.
 
 ## For game creators
 
+Open **Settings → Advanced → Developer guide** for searchable commands, plain-language
+explanations, and copyable examples. The guide is included and works offline.
+
 Choose **For mod developers → Install developer API** in Setup. Your existing
 `scene`, `show`, ATL and transitions continue to work.
 

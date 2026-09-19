@@ -1,5 +1,9 @@
 # Author quickstart
 
+For a searchable command browser, open **Settings → Advanced → Developer guide**.
+It works offline and includes explanations, accepted ranges, and copyable examples
+with instructions for where to put them. No project selection is needed to read it.
+
 Keep a backup of your project and saves before installing. You can restore it if
 setup is interrupted or your project isn’t compatible.
 

@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
-PROFILES = ("desktop", "compatibility", "docs")
+PROFILES = ("desktop", "compatibility", "docs", "examples")
 DEVELOPMENT_SUFFIXES = {".a", ".lib", ".pdb", ".h", ".hpp", ".pyi"}
 DEVELOPMENT_DIRECTORIES = {"include", "headers", "cmake", "pkgconfig", "test", "tests"}
 PREBUILT_PACKAGES = {"numpy", "cv2", "pil", "pyside6", "shiboken6", "psutil"}
@@ -65,7 +65,11 @@ def keep(relative: Path, profile: str) -> bool:
             "renpy",
             "module",
         }
+    if profile == "examples":
+        return parts[0] != "effect-packs"
     if profile == "docs":
+        if parts[0] == "effect_packs.md":
+            return False
         if parts[0] != "media" or len(parts) == 1:
             return True
         return relative.as_posix().lower() in OFFLINE_DIAGRAMS or relative.suffix.lower() in {

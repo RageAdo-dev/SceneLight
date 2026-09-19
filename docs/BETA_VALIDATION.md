@@ -5,12 +5,19 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The latest tester build passed **762 tests** locally. It includes the sprite-map
+The latest tester build passed **768 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
 frames with live lighting active. Windows release ZIP integrity and bundled
 source contents were verified.
+
+Settings → Advanced includes a native, offline Developer guide. Coverage checks
+compare its lighting settings and public command names with the runtime API;
+copyable examples run against the real author controls. Search, category filters,
+clipboard output, empty results, window cleanup, and a 760×500 layout were checked.
+Rain, glitch, and custom effects remain deferred to a post-launch update; their
+guide pages and example packs are excluded from the Windows tester package.
 
 Setup now queries the actual CUDA driver in a separate process and recommends
 acceleration only when a compatible runtime or CUDA 12 toolkit is available.

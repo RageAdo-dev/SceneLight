@@ -1396,6 +1396,7 @@ class SceneLightSetup(tk.Tk):
         self._dependency_state: DependencyState | None = None
         self._dependency_key: tuple[object, ...] | None = None
         self._options_window: tk.Toplevel | None = None
+        self._developer_guide_window: tk.Toplevel | None = None
         self._options_notebook: ttk.Notebook | None = None
         self._system_tab: ttk.Frame | None = None
         self._advanced_tab: ttk.Frame | None = None
@@ -2070,6 +2071,41 @@ class SceneLightSetup(tk.Tk):
             self.advanced_components_button.grid(
                 row=7, column=0, columnspan=3, sticky="w", pady=(3, 0)
             )
+            guide_card = tk.Frame(
+                advanced_tab,
+                background="#17232e",
+                padx=14,
+                pady=12,
+                highlightbackground="#355064",
+                highlightthickness=1,
+            )
+            guide_card.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+            guide_card.columnconfigure(0, weight=1)
+            tk.Label(
+                guide_card,
+                text="For mod developers",
+                background="#17232e",
+                foreground="#bceaff",
+                font=("Segoe UI Semibold", 12),
+                anchor="w",
+            ).grid(row=0, column=0, sticky="w")
+            tk.Label(
+                guide_card,
+                text="Commands, settings, and ready-to-copy examples.",
+                background="#17232e",
+                foreground="#aabccc",
+                font=("Segoe UI", 9),
+                anchor="w",
+                wraplength=340,
+                justify="left",
+            ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+            self.developer_guide_button = ttk.Button(
+                guide_card,
+                text="Developer guide",
+                command=self._show_developer_guide,
+                style="Secondary.TButton",
+            )
+            self.developer_guide_button.grid(row=0, column=1, rowspan=2, padx=(12, 0))
             activity_tab = ttk.Frame(notebook, style="Card.TFrame", padding=14)
             activity_tab.columnconfigure(0, weight=1)
             activity_tab.rowconfigure(1, weight=1)
@@ -2135,6 +2171,21 @@ class SceneLightSetup(tk.Tk):
         target = tabs.get(tab)
         if target is not None and self._options_notebook is not None:
             self._options_notebook.select(target)
+
+    def _show_developer_guide(self) -> None:
+        # The guide is local text and Tk only; no project, component probe, or
+        # optional Preview installation is needed to browse author commands.
+        if self._developer_guide_window is None or not self._developer_guide_window.winfo_exists():
+            from .developer_guide_ui import DeveloperGuide
+
+            window = DeveloperGuide(self)
+            self._developer_guide_window = window
+            self._apply_window_icon(window)
+            self._fit_to_screen(window, 1000, 690)
+            self._apply_dark_titlebar(window)
+        else:
+            self._developer_guide_window.deiconify()
+            self._developer_guide_window.lift()
 
     def _run_primary_action(self) -> None:
         if self._running or self._project_checking:

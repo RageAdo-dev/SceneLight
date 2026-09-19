@@ -1,5 +1,8 @@
 # Lighting API
 
+The in-app **Settings → Advanced → Developer guide** provides searchable commands,
+lighting settings, and copyable examples. This page is the written reference.
+
 Install through **For mod developers → Install developer API** before using these
 calls. Existing story statements and transforms keep their normal syntax.
 [Quickstart](AUTHOR_QUICKSTART.md).
@@ -164,21 +167,4 @@ layer's UI; keep UI on a separate layer when appropriate.
 Custom code that replaces scene-list internals or ignores its child texture needs
 its own compatibility check.
 
-## Optional effects
-
-The effects API is separate from lighting rules:
-
-```renpy
-$ scenelight_fx.scene("rain", intensity=0.75, wetness=0.82)
-$ scenelight_fx.character("hero", "glitch", intensity=0.65)
-$ scenelight_fx.clear_scene("rain")
-$ scenelight_fx.clear_character("hero", "glitch")
-$ scenelight_fx.clear_all()
-```
-
-Omitting an effect name from `clear_scene()` or `clear_character(tag)` clears all
-effects at that scope. `scenelight_fx.state()` returns a copy of effect state.
-Character effect values override scene values. Both built-in effects default to
-zero intensity; the player effects panel and hotkey are disabled.
-
-[Developer effect packs](EFFECT_PACKS.md) · [Compatibility](BETA_VALIDATION.md)
+[Compatibility](BETA_VALIDATION.md)

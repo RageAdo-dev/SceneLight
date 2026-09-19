@@ -1,5 +1,8 @@
 # Developer effect packs
 
+> Post-launch development reference. Rain, glitch, and custom effect packs are
+> deferred to a later update and are not part of the launch feature guide.
+
 Add custom GPU effects with JSON packs and the `scenelight_fx` API. Packs are
 controlled from your game's scripts; the player effects panel and hotkey are
 disabled. The source package includes example packs.

@@ -87,11 +87,17 @@ def _policy():
                 "media/surface-maps.png",
             ],
             [
+                "EFFECT_PACKS.md",
                 "media/moving-light.gif",
                 "media/waterfall-example.mp4",
                 "media/waterfall-example.webp",
                 "media/forest-example.png",
             ],
+        ),
+        (
+            "examples",
+            ["renpy/scenelight_author_example.rpy", "synthetic/make_fixture.py"],
+            ["effect-packs/environmental_atmosphere.json", "effect-packs/horror_signals.json"],
         ),
     ],
 )
@@ -164,6 +170,7 @@ def test_windows_release_uses_filters_for_fresh_and_reused_runtimes():
         in builder
     )
     assert 'windows_payload.py") docs $root $packageRoot' in builder
+    assert 'windows_payload.py") examples' in builder
     assert "from windows_payload import copy_payload, filesystem_path, keep" in bundler
     assert "copy_payload(" in bundler and '"Lib/site-packages"' in bundler
 

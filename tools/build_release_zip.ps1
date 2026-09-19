@@ -126,9 +126,10 @@ if ($Source) {
     # Written guides and small diagrams stay offline; large demos stay online.
     & python (Join-Path $root "tools\windows_payload.py") docs $root $packageRoot
     if ($LASTEXITCODE -ne 0) { throw "Windows documentation packaging failed." }
-    # Ship the example effect packs so mod authors can open them without the
-    # source tree, which stays out of the download.
-    Copy-Item -LiteralPath (Join-Path $root "examples") -Destination $packageRoot -Recurse -Force
+    # Include launch examples; deferred effect packs stay in the source tree.
+    & python (Join-Path $root "tools\windows_payload.py") examples `
+        (Join-Path $root "examples") (Join-Path $packageRoot "examples")
+    if ($LASTEXITCODE -ne 0) { throw "Example packaging failed" }
     $payloadRoot = Join-Path $packageRoot "_scenelight"
     New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
     foreach ($item in @("src", "runtime-installer")) {

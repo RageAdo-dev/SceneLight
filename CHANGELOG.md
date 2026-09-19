@@ -30,6 +30,7 @@
 
 ### Setup and author tools
 
+- Settings → Advanced now includes an offline Developer guide with searchable commands, lighting controls, and copyable Ren'Py examples. Each example explains where to put it, with no project selection or extra download required. Effects remain deferred until after launch.
 - Setup now supplies the correct native icon sizes to Windows, fixing a blurry taskbar icon caused by stretching the smallest image. The approved S artwork and gradient are unchanged.
 - SceneLight now has its own warm-to-cyan S icon in the Windows executable, Setup, Preview, and taskbar instead of an empty icon.
 - Game sprite lighting maps now use full source resolution, matching Preview. Both paths use the same transparent-canvas composition, preventing hidden RGB differences. Updating an older installation rebuilds reduced-resolution maps; analysis concurrency accounts for large sprites without reducing detail.
@@ -50,7 +51,7 @@
 - The release workflow signs both launchers when signing credentials are configured, and fails the build on an invalid signature.
 - Ren'Py 6 games can use the verified 7.7.1 compatibility runtime.
 - Authors can control lighting by project, background, scene, character or image.
-- Rain and glitch effects are available through the author API; the player effects panel is disabled.
+- Rain, glitch, and custom effect packs are reserved for a post-launch update.
 
 ### Documentation
 

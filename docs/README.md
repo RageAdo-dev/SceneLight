@@ -10,7 +10,6 @@
 
 - [Author quickstart](AUTHOR_QUICKSTART.md)
 - [Lighting API](MOD_AUTHOR_API.md)
-- [Developer effect packs](EFFECT_PACKS.md)
 
 ## Technical reference
 
