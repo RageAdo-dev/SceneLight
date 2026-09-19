@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from ..project import SpriteSpec
 from ..sidecar import storage_root
 from .core import (
     FORM_MAP_VERSION,
@@ -47,7 +48,7 @@ from .hardware import (
 
 SCENE_CACHE_VERSION = b"scenelight-gpu-studio-scene-v17-spatial-radiance-basis\0"
 TEMPORAL_CACHE_VERSION = b"scenelight-gpu-studio-temporal-scene-v14-spatial-radiance-basis\0"
-FORM_CACHE_VERSION = f"scenelight-gpu-studio-form-v{FORM_MAP_VERSION}\0".encode()
+FORM_CACHE_VERSION = f"scenelight-gpu-studio-composited-form-v{FORM_MAP_VERSION}\0".encode()
 # Stable namespace for the v8 derived-map schema. It intentionally does not
 # follow later shader-only edits: scene/form analysis remains reusable when a
 # fragment-stage correction changes but the map encoding does not.
@@ -666,8 +667,9 @@ class ArtifactCache:
             return FormArtifacts(root, existing["form"], True, time.perf_counter() - started)
 
         root.mkdir(parents=True, exist_ok=True)
-        with Image.open(source) as image:
-            maps = build_sprite_form_maps(image.convert("RGBA"))
+        # Match installation's transparent-canvas composition. Hidden RGB in
+        # zero-alpha pixels must not leak into the reconstructed surface.
+        maps = build_sprite_form_maps(SpriteSpec(source.stem, (source,)).compose())
         maps.normal_noise.save(root / "normal_noise.png", compress_level=1)
         maps.height_ao_edge.save(root / "height_ao_edge.png", compress_level=1)
         maps.response.save(root / "response.png", compress_level=1)

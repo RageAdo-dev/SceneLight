@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from test_project import make_project
 
 import scenelight.builder as builder_module
@@ -221,15 +221,24 @@ def test_form_worker_limit_uses_live_memory_without_changing_quality() -> None:
     )
 
 
+@pytest.mark.parametrize("hidden_rgb", [False, True])
 def test_large_form_maps_match_preview_at_original_resolution(
     tmp_path: Path,
+    hidden_rgb: bool,
 ) -> None:
     game = tmp_path / "game"
     source = game / "images" / "hero.png"
     output = game / "scenelight_runtime" / "sprite_form"
     output.mkdir(parents=True)
     source.parent.mkdir(parents=True)
-    Image.new("RGBA", (1024, 768), (80, 120, 180, 255)).save(source)
+    original = Image.new("RGBA", (1024, 768), (80, 120, 180, 0 if hidden_rgb else 255))
+    if hidden_rgb:
+        draw = ImageDraw.Draw(original)
+        draw.ellipse((240, 30, 780, 680), fill=(210, 160, 120, 255))
+        draw.rectangle((300, 560, 700, 767), fill=(40, 80, 150, 180))
+    original.save(source)
+    original_bytes = source.read_bytes()
+    spec = SpriteSpec("hero idle", (source,))
     paths = {
         name: output / f"hero_{name}.png" for name in ("normal_noise", "height_ao_edge", "response")
     }
@@ -237,7 +246,7 @@ def test_large_form_maps_match_preview_at_original_resolution(
     _key, entry = builder_module._render_form_entry(
         game,
         "hero idle",
-        SpriteSpec("hero idle", (source,)),
+        spec,
         paths,
         "source-fingerprint",
     )
@@ -245,11 +254,7 @@ def test_large_form_maps_match_preview_at_original_resolution(
     assert entry is not None
     assert entry["source_size"] == [1024, 768]
     assert entry["map_size"] == [1024, 768]
-    with Image.open(source) as source_image:
-        assert (
-            entry["source_sha256"]
-            == hashlib.sha256(source_image.convert("RGBA").tobytes()).hexdigest()
-        )
+    assert entry["source_sha256"] == hashlib.sha256(spec.compose().tobytes()).hexdigest()
     expected_sizes = {
         "normal_noise": (1024, 768),
         "height_ao_edge": (1024, 768),
@@ -265,6 +270,7 @@ def test_large_form_maps_match_preview_at_original_resolution(
                 np.testing.assert_array_equal(np.asarray(generated), np.asarray(preview_map))
     for name, value in preview.metadata.items():
         assert entry[name] == value
+    assert source.read_bytes() == original_bytes
 
 
 def test_full_resolution_forms_reduce_worker_count_for_large_sources() -> None:

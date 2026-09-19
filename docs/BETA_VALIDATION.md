@@ -5,7 +5,7 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The latest tester build passed **759 tests** locally. It includes the sprite-map
+The latest tester build passed **760 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
