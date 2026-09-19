@@ -4,7 +4,7 @@ This is intentionally not advertised as physical 3D ray tracing: a flat PNG
 contains no hidden geometry.  The engine instead reconstructs a soft height
 field, estimates multiple scene lights and an eight-direction environment,
 then evaluates diffuse/specular response, ray-marched self-shadow, ambient
-occlusion, ground bounce, edge spill, contact shadow, and camera matching in
+occlusion, ground bounce, edge spill, and camera matching in
 linear RGB.  Every estimate is recomputed in scene coordinates when the
 character moves.
 """
@@ -1832,41 +1832,6 @@ def relight_sprite(
     return Image.fromarray(np.round(output * 255.0).astype(np.uint8), "RGBA")
 
 
-def _contact_shadow_layer(
-    background_size: tuple[int, int],
-    sprite: Image.Image,
-    placement: Placement,
-    analysis: SceneAnalysis,
-    settings: RelightSettings,
-) -> Image.Image:
-    bg_w, bg_h = background_size
-    layer = np.zeros((bg_h, bg_w), dtype=np.float32)
-    x, y, scaled_w, scaled_h, bbox = _scene_box(background_size, sprite, placement)
-    scale = scaled_h / max(sprite.height, 1)
-    content_left = x + bbox[0] * scale
-    content_right = x + bbox[2] * scale
-    content_bottom = y + bbox[3] * scale
-    width = max(8, int((content_right - content_left) * 0.72))
-    height = max(3, int(bg_h * (0.008 + settings.shadow_softness * 0.018)))
-    light_x = analysis.light_x if settings.manual_light_x is None else settings.manual_light_x
-    away_x = (placement.center_x - light_x) * bg_w * 0.055
-    cx = int((content_left + content_right) * 0.5 + away_x)
-    cy = int(content_bottom - height * 0.2)
-    cv2.ellipse(layer, (cx, cy), (width // 2, height), 0, 0, 360, 1.0, -1)
-    sigma = max(1.0, height * (0.45 + settings.shadow_softness * 1.6))
-    layer = cv2.GaussianBlur(layer, (0, 0), sigmaX=sigma, sigmaY=sigma * 0.62)
-    opacity = settings.shadow_strength * (0.2 + (1.0 - analysis.local_luminance) * 0.2)
-    alpha = np.clip(layer * opacity, 0.0, 0.72)
-    shadow_rgb = np.asarray(analysis.shadow_color, dtype=np.float32) * 0.11
-    rgba = np.dstack(
-        (
-            np.broadcast_to(shadow_rgb, (bg_h, bg_w, 3)),
-            alpha,
-        )
-    )
-    return Image.fromarray(np.round(np.clip(rgba, 0.0, 1.0) * 255).astype(np.uint8), "RGBA")
-
-
 def composite_scene(
     background: Image.Image,
     relit_sprite: Image.Image,
@@ -1874,20 +1839,11 @@ def composite_scene(
     analysis: SceneAnalysis | None = None,
     settings: RelightSettings | None = None,
 ) -> Image.Image:
-    """Place a relit sprite over a background and add a contact shadow."""
+    """Place a relit sprite without painting outside its authored silhouette."""
 
     placement = (placement or Placement()).clamped()
-    settings = (settings or RelightSettings()).normalized()
     background_rgba = _pil_rgba(background)
-    analysis = analysis or analyze_scene(background_rgba, placement)
     result = background_rgba.copy()
-    if settings.shadow_strength > 0:
-        result = Image.alpha_composite(
-            result,
-            _contact_shadow_layer(
-                background_rgba.size, relit_sprite, placement, analysis, settings
-            ),
-        )
     x, y, scaled_w, scaled_h, _ = _scene_box(background_rgba.size, relit_sprite, placement)
     interpolation = (
         Image.Resampling.LANCZOS if scaled_w < relit_sprite.width else Image.Resampling.BICUBIC

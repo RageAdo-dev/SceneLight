@@ -43,6 +43,7 @@ init -50 python:
     SCENELIGHT_LAST_PRESENTED_SCENE = None
     SCENELIGHT_STABLE_SCENE_KEY = None
     SCENELIGHT_STABLE_SCENE = None
+    _SCENELIGHT_MEASURING_EMITTERS = False
     # Ren'Py 6.99 can parse this runtime but predates the model-based shader
     # API entirely. Keep the original executable playable; SceneLight itself
     # is activated by the compatibility launcher installed beside that game.
@@ -72,6 +73,13 @@ init -50 python:
         "shadow_strength": 0.62,
         "individual_light_colors": 0.0,
         "adaptive_light_colors": 1.0,
+        "glow_strength": 0.0,
+        "glow_radius": 1.0,
+        "emission_strength": 0.0,
+        "emission_radius": 0.35,
+        "emission_red": 1.0,
+        "emission_green": 1.0,
+        "emission_blue": 1.0,
     }
     _SCENELIGHT_CONTROL_KEYS = frozenset(
         ("enabled", "strength") + tuple(_SCENELIGHT_CALIBRATION_DEFAULTS.keys())
@@ -1062,7 +1070,76 @@ init -50 python:
             (bounded("ray_shadow_strength"), bounded("ambient_occlusion"), bounded("probe_strength"), bounded("bounce_strength")),
             (bounded("specular_strength"), bounded("rim_strength"), bounded("wrap_strength"), bounded("grain_match")),
             (bounded("shadow_strength"), bounded("individual_light_colors"), bounded("adaptive_light_colors"), 0.0),
+            (bounded("glow_strength"), bounded("glow_radius"), bounded("emission_strength"), bounded("emission_radius")),
+            (bounded("emission_red"), bounded("emission_green"), bounded("emission_blue"), 0.0),
         )
+
+    def _scenelight_emission_controls(scene_key, tag, controls):
+        """Whole-image aliases use the glow rule of the shown image."""
+        try:
+            entries = renpy.game.context().scene_lists.layers.get("master", ())
+        except Exception:
+            return controls
+        for entry in entries:
+            if getattr(entry, "tag", None) != tag:
+                continue
+            name = getattr(entry, "name", ()) or (tag,)
+            name = name if isinstance(name, _SCENELIGHT_STRING_TYPES) else " ".join(name)
+            visible = _scenelight_control_snapshot(scene_key, tag, name)
+            updated = copy.deepcopy(controls)
+            for key in _SCENELIGHT_CALIBRATION_DEFAULTS:
+                if key.startswith(("glow_", "emission_")):
+                    updated["calibration"].pop(key, None)
+                    if key in visible["calibration"]:
+                        updated["calibration"][key] = visible["calibration"][key]
+            if not visible["enabled"]:
+                updated["calibration"].update(glow_strength=0.0, emission_strength=0.0)
+            return updated
+        return controls
+
+    def _scenelight_sprite_emitters(receiver_tag):
+        """Resolve visible emitters from the scene, independent of draw order."""
+        global _SCENELIGHT_MEASURING_EMITTERS
+        if _SCENELIGHT_MEASURING_EMITTERS or not getattr(persistent, "scenelight_enabled", True):
+            return ()
+        try:
+            entries = renpy.game.context().scene_lists.layers.get("master", ())
+        except Exception:
+            return ()
+        scene_key, scene = _scenelight_live_scene_entry()
+        master = max(0.0, float(getattr(persistent, "scenelight_strength", 1.0)))
+        lights = []
+        for entry in entries:
+            tag = getattr(entry, "tag", None)
+            if tag not in SCENELIGHT_CHARACTER_TAGS or tag == receiver_tag:
+                continue
+            name = getattr(entry, "name", ()) or (tag,)
+            name = name if isinstance(name, _SCENELIGHT_STRING_TYPES) else " ".join(name)
+            controls = _scenelight_control_snapshot(scene_key, tag, name)
+            blocks = _scenelight_calibration_blocks(scene or {}, controls.get("calibration", {}))
+            intensity, radius = blocks[5][2:]
+            if not controls["enabled"] or intensity * master <= 0.0 or radius <= 0.0:
+                continue
+            # Ren'Py's bounds API uses render_for_size (not a presented frame).
+            # Bypass SceneLight only during this measurement to prevent recursive
+            # emitter queries or overwriting last-presented transition state.
+            _SCENELIGHT_MEASURING_EMITTERS = True
+            try:
+                bounds = renpy.get_image_bounds(tag, config.screen_width, config.screen_height, "master")
+            finally:
+                _SCENELIGHT_MEASURING_EMITTERS = False
+            if not bounds or bounds[2] <= 0 or bounds[3] <= 0:
+                continue
+            x, y, width, height = bounds
+            lights.append((
+                tag,
+                ((x + width * 0.5) / float(config.screen_width),
+                 (y + height * 0.5) / float(config.screen_height), radius, intensity * master),
+                blocks[6][:3],
+            ))
+        # Stable selection if a scene exceeds the four simultaneous sources.
+        lights.sort(key=lambda light: (-light[1][3], light[0]))
+        return tuple((data, color) for _tag, data, color in lights[:4])
     SCENELIGHT_FORM_CANDIDATES = {}
     for _sc_form_name, _sc_form_entry in SCENELIGHT_FORM_SPRITES.items():
         _sc_form_parts = tuple(_sc_form_name.split())
@@ -1721,6 +1798,16 @@ init -50 python:
             uniform vec4 u_sc_calibration2;
             uniform vec4 u_sc_calibration3;
             uniform vec4 u_sc_calibration4;
+            uniform vec2 u_sc_glow_data;
+            uniform float u_sc_screen_aspect;
+            uniform vec4 u_sc_sprite_light0_data;
+            uniform vec3 u_sc_sprite_light0_color;
+            uniform vec4 u_sc_sprite_light1_data;
+            uniform vec3 u_sc_sprite_light1_color;
+            uniform vec4 u_sc_sprite_light2_data;
+            uniform vec3 u_sc_sprite_light2_color;
+            uniform vec4 u_sc_sprite_light3_data;
+            uniform vec3 u_sc_sprite_light3_color;
             uniform vec4 u_sc_light0_data;
             uniform vec4 u_sc_light0_color;
             uniform vec2 u_sc_light0_extra;
@@ -1782,6 +1869,39 @@ init -50 python:
             );
         """
     _scenelight_shader_fragment_functions = _scenelight_fragment_source("""
+            vec3 scenelight_sprite_light(vec4 light, vec3 color, vec3 normal, float aspect) {
+                if (light.w <= 0.0) return vec3(0.0);
+                vec2 delta = (light.xy - v_sc_screen) * vec2(aspect, 1.0);
+                float distance = length(delta) / max(light.z, 0.001);
+                float falloff = 1.0 - smoothstep(0.0, 1.0, distance);
+                vec3 direction = normalize(vec3(delta, 0.12));
+                float facing = 0.25 + 0.75 * max(dot(normal, direction), 0.0);
+                return max(color, vec3(0.0)) * light.w * falloff * falloff * facing;
+            }
+
+            vec4 scenelight_sprite_halo(sampler2D source_texture, float lod_bias, vec2 uv_center, vec2 canvas_size, vec2 glow) {
+                vec4 sum = vec4(0.0);
+                float weights = 0.0;
+                // Isotropic source-pixel radius, independent of canvas aspect.
+                vec2 radius = 0.04 * glow.y
+                    * min(canvas_size.x, canvas_size.y)
+                    / max(canvas_size, vec2(1.0));
+                for (int i = 0; i < 64; i++) {
+                    float fraction = (float(i) + 0.5) / 64.0;
+                    float angle = float(i) * 2.39996323;
+                    vec2 uv = uv_center + sqrt(fraction) * radius * vec2(cos(angle), sin(angle));
+                    float weight = exp(-4.0 * fraction);
+                    // Clamp-to-edge would extrude edge pixels into the halo.
+                    if (min(uv.x, uv.y) >= 0.0 && max(uv.x, uv.y) <= 1.0) {
+                        sum += texture2D(source_texture, uv, lod_bias) * weight;
+                    }
+                    weights += weight;
+                }
+                vec4 blurred = sum / weights;
+                float opacity = 1.0 - exp(-blurred.a * glow.x * 1.8);
+                vec3 color = clamp(blurred.rgb / max(blurred.a, 0.001) * 1.25, 0.0, 1.0);
+                return vec4(color * opacity, opacity);
+            }
             vec2 scenelight_field_uv(vec2 screen_uv, vec4 tile) {
                 vec2 half_texel = u_sc_atlas_texel * 0.5;
                 return clamp(tile.xy + screen_uv * tile.zw,
@@ -2407,9 +2527,7 @@ init -50 python:
             light_gradient += vec2(0.0, -0.012);
             vec2 light_direction = normalize(light_gradient + vec2(0.00001, -0.00001));
 
-            // Transparent canvas pixels only need the contact-shadow branch.
-            // Keep later shader parts running, and retain the exact original
-            // alpha threshold and shadow calculation below.
+            // Lighting does not invent geometry on the transparent canvas.
             if (alpha > 0.001) {
             vec2 sprite_texel = 1.0 / max(u_sc_sprite_size, vec2(1.0));
             vec3 normal = scenelight_form_normal(v_tex_coord, sprite_texel, tex0, u_lod_bias);
@@ -3233,6 +3351,14 @@ init -50 python:
                 * u_sc_calibration1.y * auto_amount * sc_environment_adaptation;
             lit = lit_gray + (lit - lit_gray) * sat_scale;
 
+            // Authored sprite emitters add light, without changing the scene's
+            // detected sources or manufacturing a shadow on transparent pixels.
+            vec3 sprite_emission = scenelight_sprite_light(u_sc_sprite_light0_data, u_sc_sprite_light0_color, normal, u_sc_screen_aspect)
+                + scenelight_sprite_light(u_sc_sprite_light1_data, u_sc_sprite_light1_color, normal, u_sc_screen_aspect)
+                + scenelight_sprite_light(u_sc_sprite_light2_data, u_sc_sprite_light2_color, normal, u_sc_screen_aspect)
+                + scenelight_sprite_light(u_sc_sprite_light3_data, u_sc_sprite_light3_color, normal, u_sc_screen_aspect);
+            lit += base * sprite_emission * u_sc_strength;
+
             // Match the desktop filmic shoulder exactly. It is applied after
             // contrast and saturation, without re-injecting the source art.
             float generated_luma = dot(lit, vec3(0.2126, 0.7152, 0.0722));
@@ -3312,6 +3438,10 @@ init -50 python:
                 );
             }
 
+                if (u_sc_glow_data.x > 0.0) {
+                    // Emissive art remains luminous even in a dark environment.
+                    lit = max(lit, base * (1.0 + 0.6 * u_sc_glow_data.x));
+                }
                 vec3 output_srgb = scenelight_linear_to_srgb(clamp(lit, 0.0, 1.0));
                 float original_view = step(0.5, u_sc_compare_mode)
                     * (1.0 - step(1.5, u_sc_compare_mode));
@@ -3321,19 +3451,13 @@ init -50 python:
                 float output_alpha = mix(alpha, source.a, original_view);
                 gl_FragColor = vec4(output_srgb * output_alpha, output_alpha);
             } else {
-                // A subtle light-directed contact shadow lives inside the
-                // transparent 960x960 sprite canvas and moves with the model.
-                vec2 shadow_center = vec2(0.5, 0.925) - light_direction * vec2(0.030, 0.012);
-                vec2 shadow_delta = (v_tex_coord - shadow_center) / vec2(0.145, 0.018);
-                float contact = exp(-dot(shadow_delta, shadow_delta) * 2.2);
-                contact *= 0.20 * (u_sc_calibration4.x / 0.62)
-                    * u_sc_strength * smoothstep(0.0, 0.25, emitter_sample.a);
-                float original_view = step(0.5, u_sc_compare_mode)
-                    * (1.0 - step(1.5, u_sc_compare_mode));
-                original_view += step(1.5, u_sc_compare_mode)
-                    * (1.0 - step(0.5, v_tex_coord.x));
-                contact *= 1.0 - original_view;
-                gl_FragColor = vec4(vec3(0.018) * contact, contact);
+                gl_FragColor = vec4(0.0);
+            }
+            if (u_sc_glow_data.x > 0.0 && u_sc_glow_data.y > 0.0) {
+                float show_glow = 1.0 - step(0.5, u_sc_compare_mode)
+                    + step(1.5, u_sc_compare_mode) * step(0.5, v_tex_coord.x);
+                vec4 halo = scenelight_sprite_halo(tex0, u_lod_bias, v_tex_coord, u_sc_sprite_size, u_sc_glow_data) * show_glow;
+                gl_FragColor += halo * (1.0 - gl_FragColor.a);
             }
         """)
 
@@ -3425,6 +3549,8 @@ init -50 python:
             self._sc_last_rendered_effects = None
             self._sc_last_rendered_effect_time = 0.0
             self._sc_last_rendered_controls = None
+            self._sc_last_rendered_emitters = ()
+            self._sc_frozen_emitters = ()
             self.irradiance = _scenelight_texture(SCENELIGHT_ATLAS["irradiance"])
             self.emitter = _scenelight_texture(SCENELIGHT_ATLAS["emitter"])
             self.wrap_atlas = _scenelight_texture(
@@ -3645,6 +3771,7 @@ init -50 python:
                 )
             else:
                 controls = {"enabled": True, "strength": 1.0, "calibration": {}}
+            controls = _scenelight_emission_controls(scene_key, self.image_name[0], controls)
             enabled = bool(getattr(persistent, "scenelight_enabled", True)) and bool(
                 controls["enabled"]
             )
@@ -3687,6 +3814,37 @@ init -50 python:
                 height / screen_height,
             )
 
+        def _sc_emission_coverage(self):
+            """Avoid reapplying emission through a whole-image alias chain."""
+            current = self.child
+            seen = set()
+            receive, glow = False, False
+            display = getattr(renpy, "display", None)
+            aliases = tuple(cls for cls in (
+                getattr(getattr(display, "image", None), "ImageReference", None),
+                getattr(getattr(display, "transform", None), "Transform", None),
+            ) if isinstance(cls, type))
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if isinstance(current, SceneLightSprite):
+                    if current._sc_snapshot_frozen:
+                        scene, enabled = current._sc_frozen_scene, current._sc_frozen_enabled
+                        child_strength = current._sc_frozen_strength
+                        controls = current._sc_frozen_controls or {}
+                    else:
+                        scene, enabled, child_strength, _fx, _time, controls = current._live_lighting_state()
+                    if scene and enabled:
+                        receive = receive or child_strength > 0.0
+                        block = _scenelight_calibration_blocks(scene, controls.get("calibration", {}))[5]
+                        glow = glow or block[0] > 0.0
+                    current = current.child
+                elif isinstance(current, aliases):
+                    children = list(current.visit() or ())
+                    current = children[0] if len(children) == 1 else None
+                else:
+                    break
+            return receive, glow
+
         def _in_current_store(self):
             """Freeze the exact lighting used by Ren'Py's outgoing scene."""
             rv = self._copy()
@@ -3718,6 +3876,7 @@ init -50 python:
             rv._sc_frozen_effects = copy.deepcopy(frozen_effects)
             rv._sc_frozen_effect_time = frozen_effect_time
             rv._sc_frozen_controls = copy.deepcopy(frozen_controls)
+            rv._sc_frozen_emitters = copy.deepcopy(getattr(self, "_sc_last_rendered_emitters", ()))
             rv._sc_frozen_screen_rect = self._scenelight_screen_rect()
             rv._sc_transition_screen_rect = None
             # Rebuild from the frozen children's last-rendered controls. Live
@@ -3728,6 +3887,8 @@ init -50 python:
 
         def render(self, width, height, st, at):
             child_render = renpy.render(self.child, width, height, st, at)
+            if globals().get("_SCENELIGHT_MEASURING_EMITTERS", False):
+                return child_render
             # A dynamic child may have resolved a new nested wrapper during
             # its render. Its own ownership is already stable; refresh this
             # ancestor before binding its uniforms, without flushing caches.
@@ -3812,6 +3973,23 @@ init -50 python:
                 )
             if not enabled and not effects_active:
                 return child_render
+
+            emitters = (
+                getattr(self, "_sc_frozen_emitters", ()) if self._sc_snapshot_frozen
+                else _scenelight_sprite_emitters(self.image_name[0])
+            )
+            if not self._sc_snapshot_frozen:
+                self._sc_last_rendered_emitters = emitters
+                if emitters:
+                    # Moving/animated emitters must update receivers even when
+                    # their own art is static. No extra redraw when disabled.
+                    renpy.redraw(self, 0.0)
+            receive_covered, glow_covered = self._sc_emission_coverage()
+            if glow_covered:
+                # The resolved child already contains luminous art and its
+                # alpha-shaped halo. An alias must not relight that completed
+                # emission texture or turn its halo back into dark geometry.
+                return _scenelight_custom_effect_render(child_render, active_custom_effects)
 
             # This render-to-texture boundary is intentional. Never copy a
             # child's shaders, uniforms, or GL properties onto SceneLight's
@@ -3915,6 +4093,19 @@ init -50 python:
             )
             result.add_uniform("u_sc_debug_contrast", SCENELIGHT_DEBUG_CONTRAST)
             result.add_uniform("u_sc_compare_mode", 0.0)
+            glow_block = _scenelight_calibration_blocks(scene, controls.get("calibration", {}))[5]
+            result.add_uniform("u_sc_glow_data", (
+                glow_block[0] * float(getattr(persistent, "scenelight_strength", 1.0))
+                if enabled and not glow_covered else 0.0,
+                glow_block[1],
+            ))
+            result.add_uniform("u_sc_screen_aspect", float(config.screen_width) / max(float(config.screen_height), 1.0))
+            for index in range(4):
+                data, color = emitters[index] if enabled and not receive_covered and index < len(emitters) else (
+                    (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0)
+                )
+                result.add_uniform("u_sc_sprite_light%d_data" % index, tuple(data))
+                result.add_uniform("u_sc_sprite_light%d_color" % index, tuple(color))
             for calibration_index, calibration_block in enumerate(
                 _scenelight_calibration_blocks(scene, controls.get("calibration", {}))
             ):

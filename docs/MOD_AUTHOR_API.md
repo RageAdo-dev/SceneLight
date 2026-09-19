@@ -10,7 +10,8 @@ calls. Existing story statements and transforms keep their normal syntax.
 ## Character selection and updates
 
 Select character image tags in Setup. A tag covers its poses and expressions;
-UI, props and stickers should remain unchecked. To store the selection with a project:
+UI and stickers should remain unchecked. Select effect tags such as `fire` when
+you intentionally want them to glow or illuminate characters. To store the selection with a project:
 
 ```json
 {
@@ -139,10 +140,50 @@ All lighting scopes accept these settings. Numeric values are clamped to their r
 | `shadow_strength` | 0–2 | Overall shadow contribution |
 | `individual_light_colors` | 0–2 | Stylized separation of source colors |
 | `adaptive_light_colors` | 0–2 | Automatic separation of distinct colored sources |
+| `glow_strength` | 0–2 | Luminous sprite and soft halo in the artwork's colors; default 0 |
+| `glow_radius` | 0–2 | Halo spread; 1 means 4% of the shorter sprite canvas edge |
+| `emission_strength` | 0–2 | Light cast onto other selected sprites; default 0 |
+| `emission_radius` | 0–2 | Light reach in screen heights; default 0.35 |
+| `emission_red`, `emission_green`, `emission_blue` | 0–2 | Emitted light RGB intensity; defaults 1, 1, 1 |
 
 Set `adaptive_light_colors=0.0` to disable automatic source-color separation.
 Accepted setting aliases are `lighting_strength`, `exposure` and
 `separate_light_colors` for `strength`, `exposure_bias` and `individual_light_colors`.
+
+## Independent sprite settings and glow
+
+Every setting above works independently through `character()` or `image()`,
+including strength, exposure, colors, shadows, and glow. Exact-image rules override
+only the fields they specify; other poses and characters keep their own values.
+
+```renpy
+init python:
+    scenelight.character("hero", strength=0.65, rim_strength=0.4)
+    scenelight.image("hero worried", strength=0.9, exposure_bias=-0.15)
+    scenelight.image("fire burning",
+        glow_strength=0.8, glow_radius=1.2,
+        emission_strength=1.0, emission_radius=0.45,
+        emission_red=1.0, emission_green=0.35, emission_blue=0.08)
+```
+
+Use `emission_strength=0` for self glow alone, or `glow_strength=0` to cast light
+without glowing. `glow_radius=0` keeps the luminous sprite without a halo. Leave
+transparent padding around the art to contain the halo; it stays inside the image
+canvas. Neither option creates a floor shadow. Normal surface shading stays active.
+
+Emission follows the visible sprite's screen center and fades to zero at its
+configured radius. Hidden sprites stop emitting. Up to four sources can illuminate
+each receiver; the strongest have priority. This is 2D illumination of selected
+sprites, without wall occlusion or relighting the background. It requires an active
+SceneLight background, just like the other sprite lighting controls. The player's
+master switch disables glow and emitted light as well.
+
+Preview → Calibrate → **Glow & emitted light** adjusts these values. The
+single-sprite Preview displays self glow; use a second selected character in-game
+to see emitted light. Exported profiles preserve both sets of controls. For effects
+such as fire, put the settings on the image or tag so other characters do not glow.
+
+Rain, glitch, and custom effect packs remain deferred until after launch.
 
 ## Shaders and transforms
 

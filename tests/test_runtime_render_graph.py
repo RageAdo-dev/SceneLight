@@ -341,6 +341,8 @@ def test_sprite_lighting_uses_child_dimensions_with_or_without_form_map(has_form
         "_scenelight_fx_snapshot": lambda name: {},
         "_scenelight_resolve_live_scene": lambda value: value,
         "_scenelight_active_custom_effects": lambda effects: [],
+        "_scenelight_sprite_emitters": lambda tag: (),
+        "_scenelight_emission_controls": lambda scene, tag, controls: controls,
         "_scenelight_fx_active": lambda name: False,
         "_scenelight_calibration_blocks": lambda *args: ((1.0, 0.0, 1.0, 1.0),),
     }
@@ -782,6 +784,7 @@ def _exposure_runtime():
         "_scenelight_control_update",
         "_scenelight_control_snapshot",
         "_scenelight_calibration_blocks",
+        "_scenelight_emission_controls",
         "_SceneLightAPI",
     )
     return namespace["SceneLightSprite"], Displayable, redraws

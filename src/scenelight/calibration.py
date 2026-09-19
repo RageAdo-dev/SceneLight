@@ -37,6 +37,13 @@ class Calibration:
     shadow_strength: float = 0.62
     individual_light_colors: float = 0.0
     adaptive_light_colors: float = 1.0
+    glow_strength: float = 0.0
+    glow_radius: float = 1.0
+    emission_strength: float = 0.0
+    emission_radius: float = 0.35
+    emission_red: float = 1.0
+    emission_green: float = 1.0
+    emission_blue: float = 1.0
 
     def normalized(self) -> "Calibration":
         values = asdict(self)
@@ -83,6 +90,13 @@ class Calibration:
                 value.adaptive_light_colors,
                 0.0,
             ),
+            (
+                value.glow_strength,
+                value.glow_radius,
+                value.emission_strength,
+                value.emission_radius,
+            ),
+            (value.emission_red, value.emission_green, value.emission_blue, 0.0),
         )
 
     @classmethod

@@ -533,6 +533,13 @@ def describe_operation_failure(output: str) -> tuple[str, str]:
     """Turn verbose CLI output into a truthful user-facing failure summary."""
 
     lowered = output.lower()
+    if "captureinstanceconflict:" in lowered:
+        return (
+            "The mod allows only one running copy",
+            "Close other copies of this mod or other SceneLight setup sessions, then retry. "
+            "SceneLight has retained completed sprite checkpoints. The activity log contains "
+            "the mod's original diagnostic.",
+        )
     if "no module named 'scenelight'" in lowered or 'no module named "scenelight"' in lowered:
         return (
             "SceneLight setup is incomplete",

@@ -4,6 +4,9 @@
 
 ### Lighting and playback
 
+- Removed the fixed floor-shadow oval previously drawn into transparent sprite pixels. Interior lighting and self-shading remain active.
+- Added independent per-image/tag glow and emitted-light controls. Effect sprites can glow, illuminate nearby selected characters, or do both; defaults remain off. Preview calibration and the Developer guide include the controls. Rain, glitch, and custom effect packs remain deferred.
+
 - Whole-image sprite aliases share automatic exposure instead of repeatedly darkening the same character. Authored grades, per-image controls, highlights and frozen transitions retain their own lighting behavior.
 - Automatic color separation no longer treats every broad patch of foliage or colored wall as an additional lamp. Environmental tint and bounce remain active, compact colored lights retain separation, and explicit artistic color separation is unchanged.
 - Capture now follows pose and expression changes in compiled dialogue, including translated dialogue and temporary speaking attributes. Old capture plans are rebuilt so those states receive matching surface maps.
@@ -29,6 +32,8 @@
 - Live analysis runs in about a quarter less time on an older Radeon laptop GPU, with fewer GPU passes and smaller analysis buffers.
 
 ### Setup and author tools
+
+- Isolated capture workers' temporary directories so mod single-instance guards do not collide through a shared SDK launcher. Blocked workers finish sequentially from checkpoints when a guard still prevents parallel capture. Persistent conflicts now identify the actual cause instead of retrying graphics backends.
 
 - Settings → Advanced now includes an offline Developer guide with searchable commands, lighting controls, and copyable Ren'Py examples. Each example explains where to put it, with no project selection or extra download required. Effects remain deferred until after launch.
 - Setup now supplies the correct native icon sizes to Windows, fixing a blurry taskbar icon caused by stretching the smallest image. The approved S artwork and gradient are unchanged.

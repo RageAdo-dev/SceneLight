@@ -438,6 +438,65 @@ _SETTING_ROWS = (
     ),
 )
 
+_SETTING_ROWS += (
+    (
+        "glow_strength",
+        "Sprite glow",
+        "0–2",
+        "0.8",
+        "Make this sprite luminous and add a soft halo in its own colors. Zero disables glow. Independent of light cast onto other characters.",
+        "glow fire flame emissive halo",
+    ),
+    (
+        "glow_radius",
+        "Halo spread",
+        "0–2",
+        "1.0",
+        "At 1.0, the halo reaches 4% of the shorter sprite canvas edge. Leave transparent padding around the art. Zero keeps the luminous sprite without a halo.",
+        "glow blur radius padding",
+    ),
+    (
+        "emission_strength",
+        "Light cast onto characters",
+        "0–2",
+        "1.0",
+        "Illuminate other selected sprites from this sprite's screen center. Zero disables emitted light without turning off its own glow. Up to four visible sources; strongest sources take priority.",
+        "cast light fire torch nearby emission",
+    ),
+    (
+        "emission_radius",
+        "Emitted light reach",
+        "0–2",
+        "0.35",
+        "Reach measured in screen heights. Light fades smoothly to zero at this distance. Hidden sprites do not emit light. This is a 2D light without wall occlusion.",
+        "radius distance falloff range",
+    ),
+    (
+        "emission_red",
+        "Emitted light · red",
+        "0–2",
+        "1.0",
+        "Red intensity of the light cast onto other sprites. The sprite's own halo follows its artwork colors.",
+        "light color red",
+    ),
+    (
+        "emission_green",
+        "Emitted light · green",
+        "0–2",
+        "0.35",
+        "Green intensity of the light cast onto other sprites.",
+        "light color green",
+    ),
+    (
+        "emission_blue",
+        "Emitted light · blue",
+        "0–2",
+        "0.08",
+        "Blue intensity of the light cast onto other sprites.",
+        "light color blue",
+    ),
+)
+
 _SETTINGS = tuple(
     _topic(
         "setting-" + name,
@@ -455,6 +514,25 @@ _SETTINGS = tuple(
 )
 
 _WORKFLOW = (
+    _topic(
+        "sprite-glow",
+        WORKFLOW,
+        "Glowing fire, symbols, and effect sprites",
+        "Choose self glow, nearby light, or both for each image.",
+        "Include the effect tag in Setup's character selection so it receives SceneLight. Put the rules below in an init python block. Use character() for every expression of a tag, or image() for one exact image.",
+        "The two strengths are independent: glow_strength=0 emits light without a halo; emission_strength=0 glows without lighting neighbors. Zero both restores ordinary lighting. Each character and image keeps its own full lighting settings.",
+        "The single-sprite Preview shows glow; nearby illumination needs a second selected sprite in-game. Leave transparent padding around the effect art for the halo. Emission follows the visible sprite's screen center, not a fixed floor position.",
+        example="""
+            init python:
+                scenelight.character("hero", strength=0.65, rim_strength=0.4)
+                scenelight.image("hero worried", strength=0.9, exposure_bias=-0.15)
+                scenelight.image("fire burning", glow_strength=0.8, glow_radius=1.2,
+                    emission_strength=1.0, emission_radius=0.45,
+                    emission_red=1.0, emission_green=0.35, emission_blue=0.08)
+        """,
+        placement=INIT,
+        keywords="glow flame fire torch effect sprite per sprite independent lighting",
+    ),
     _topic(
         "selection",
         WORKFLOW,

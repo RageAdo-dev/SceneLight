@@ -18,6 +18,7 @@ from . import __version__
 from .builder import RUNTIME_MANIFEST_VERSION, TRANSPORT_GRID_SIZE, build_project
 from .calibration import profile_path
 from .capture import (
+    CaptureInstanceConflict,
     capture_runtime_assets,
     capture_runtime_review,
     capture_source,
@@ -533,6 +534,8 @@ def _scan_runtime_review(
                         native_runtime=native_runtime,
                         renderer=renderer,
                     )
+            except CaptureInstanceConflict:
+                raise
             except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
                 failures.append(f"{label}: {error}")
                 continue
@@ -780,6 +783,8 @@ def _install_managed(
                         native_runtime=native_runtime,
                         renderer=renderer,
                     )
+                except CaptureInstanceConflict:
+                    raise
                 except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
                     preflight_failures.append(f"{label}: {error}")
                     continue
@@ -847,6 +852,8 @@ def _install_managed(
                         renderer=renderer,
                     )
                     break
+                except CaptureInstanceConflict:
+                    raise
                 except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
                     failures.append(f"{label}: {error}")
                     print(

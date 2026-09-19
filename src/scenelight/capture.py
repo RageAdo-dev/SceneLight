@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -20,6 +21,7 @@ import threading
 import time
 import zlib
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
@@ -66,6 +68,18 @@ CAPTURE_IGNORED_NAMES = {
     "scenelight_runtime.rpy",
     "scenelight_runtime.rpyc",
 }
+
+
+class CaptureInstanceConflict(RuntimeError):
+    """The mod rejected another capture instance before rendering could start."""
+
+
+def _is_instance_conflict(diagnostic: str) -> bool:
+    return any(
+        line.strip() == "Another instance is already running, quitting."
+        or re.fullmatch(r"(?:[\w]+\.)*SingleInstanceException(?::.*)?", line.strip())
+        for line in diagnostic.splitlines()
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -980,12 +994,28 @@ def _capture_process_options(*, native_runtime: bool) -> tuple[object | None, in
     return None, 0
 
 
-def _runtime_diagnostic(project_root: Path) -> str:
+def _runtime_log_state(project_root: Path) -> dict[str, tuple[int, int, int]]:
+    state = {}
+    for name in ("traceback.txt", "log.txt"):
+        try:
+            stat = (project_root / name).stat()
+            state[name] = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+        except OSError:
+            pass
+    return state
+
+
+def _runtime_diagnostic(
+    project_root: Path, *, before: dict[str, tuple[int, int, int]] | None = None
+) -> str:
     """Return a concise diagnosis plus the useful tail of Ren'Py's logs."""
 
     sections: list[str] = []
     combined: list[str] = []
+    current = _runtime_log_state(project_root)
     for name in ("traceback.txt", "log.txt"):
+        if before is not None and name in before and current.get(name) == before[name]:
+            continue
         path = project_root / name
         if not path.is_file():
             continue
@@ -1101,6 +1131,40 @@ def _stop_managed_runtime_pids(project_root: Path, pids: set[int]) -> None:
         psutil.wait_procs(alive, timeout=3.0)
 
 
+@contextmanager
+def _capture_process(command, *, cwd, environment, startupinfo, creationflags):
+    """Keep launcher-based temp locks private until this child tree has stopped."""
+    # Mod single-instance guards often key a lock by sys.argv[0], which is the
+    # SAME SDK launcher for different cloned games. Set the child's temp paths
+    # before Python starts and caches tempfile.gettempdir(). Keep the path short
+    # because some guards append the entire launcher path as the lock filename.
+    with tempfile.TemporaryDirectory(prefix="slc-", ignore_cleanup_errors=True) as temporary:
+        child_environment = environment.copy()
+        child_environment.update({name: temporary for name in ("TMP", "TEMP", "TMPDIR")})
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=child_environment,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+        )
+        owned_runtime_pids: set[int] = set()
+        try:
+            yield process, owned_runtime_pids
+        finally:
+            # SDK launchers can exit before their renderer. Its recorded parent
+            # PID is still usable even if supervision failed before the first poll.
+            owned_runtime_pids.update(_descendant_pids({process.pid} | owned_runtime_pids))
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
+            _stop_process_pids(owned_runtime_pids)
+
+
 def _run_capture_request(
     discovery: ProjectDiscovery,
     renpy_executable: Path,
@@ -1140,7 +1204,6 @@ def _run_capture_request(
     preexisting_runtime_pids = (
         set() if isolated_parallel else _managed_runtime_pids(discovery.project_root)
     )
-    owned_runtime_pids: set[int] = set()
     visible_progress = progress_state or _CaptureProgressState()
     previous_forms = [
         (total, current)
@@ -1157,133 +1220,154 @@ def _run_capture_request(
     working_directory = (
         discovery.project_root if native_runtime else renpy_executable.resolve().parent
     )
-    process = subprocess.Popen(
+    logs_before = _runtime_log_state(discovery.project_root)
+    with _capture_process(
         _capture_command(
             renpy_executable,
             discovery.project_root,
             native_runtime=native_runtime,
         ),
         cwd=working_directory,
-        env=environment,
+        environment=environment,
         startupinfo=startupinfo,
         creationflags=creationflags,
-    )
-    deadline = time.monotonic() + timeout_seconds
-    timed_out = False
-    last_runtime_progress: tuple[object, ...] | None = None
-    exit_grace_deadline: float | None = None
-    composite_executor: ProcessPoolExecutor | None = None
-    composite_futures = []
-    seen_composite_jobs: set[Path] = set()
-    seen_composite_destinations: set[Path] = set()
-    planned_form_total: int | None = None
-    reported_work = -1
-    batch_yielded = False
-    checkpoint_baseline = (
-        _durable_form_checkpoint_count(checkpoint_root) if checkpoint_root is not None else 0
-    )
-    latest_form_progress: int | None = None
-    if composite_job_root is not None and materialize_composites:
-        composite_job_root.mkdir(parents=True, exist_ok=True)
-        composite_executor = ProcessPoolExecutor(max_workers=_composite_pipeline_worker_count(1024))
-
-    def submit_composite_jobs() -> None:
-        if composite_job_root is None:
-            return
-        for job_path in composite_job_root.glob("composite_*.json"):
-            if job_path in seen_composite_jobs:
-                continue
-            try:
-                raw_job = json.loads(job_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                # Jobs publish by atomic replace. A transient reader failure is
-                # retried on the next 50 ms supervision pass.
-                continue
-            if not isinstance(raw_job, dict):
-                raise ValueError("Invalid SceneLight composite pipeline job")
-            job = _validated_composite_job(
-                discovery.project_root,
-                raw_job.get("destination"),
-                raw_job.get("manifest"),
+    ) as (process, owned_runtime_pids):
+        deadline = time.monotonic() + timeout_seconds
+        timed_out = False
+        last_runtime_progress: tuple[object, ...] | None = None
+        exit_grace_deadline: float | None = None
+        composite_executor: ProcessPoolExecutor | None = None
+        composite_futures = []
+        seen_composite_jobs: set[Path] = set()
+        seen_composite_destinations: set[Path] = set()
+        planned_form_total: int | None = None
+        reported_work = -1
+        batch_yielded = False
+        checkpoint_baseline = (
+            _durable_form_checkpoint_count(checkpoint_root) if checkpoint_root is not None else 0
+        )
+        latest_form_progress: int | None = None
+        if composite_job_root is not None and materialize_composites:
+            composite_job_root.mkdir(parents=True, exist_ok=True)
+            composite_executor = ProcessPoolExecutor(
+                max_workers=_composite_pipeline_worker_count(1024)
             )
-            seen_composite_jobs.add(job_path)
-            destination = Path(job[0])
-            seen_composite_destinations.add(destination)
-            marker = destination.with_name(destination.name + ".composite-normalized")
-            if composite_executor is not None and (
-                not destination.is_file() or not marker.is_file()
-            ):
-                composite_futures.append(
-                    composite_executor.submit(_materialize_composite_capture_file, job)
+
+        def submit_composite_jobs() -> None:
+            if composite_job_root is None:
+                return
+            for job_path in composite_job_root.glob("composite_*.json"):
+                if job_path in seen_composite_jobs:
+                    continue
+                try:
+                    raw_job = json.loads(job_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    # Jobs publish by atomic replace. A transient reader failure is
+                    # retried on the next 50 ms supervision pass.
+                    continue
+                if not isinstance(raw_job, dict):
+                    raise ValueError("Invalid SceneLight composite pipeline job")
+                job = _validated_composite_job(
+                    discovery.project_root,
+                    raw_job.get("destination"),
+                    raw_job.get("manifest"),
                 )
-
-    while True:
-        if not isolated_parallel:
-            current_runtime_pids = _managed_runtime_pids(discovery.project_root)
-            owned_runtime_pids.update(current_runtime_pids - preexisting_runtime_pids)
-        owned_runtime_pids.update(_descendant_pids({process.pid} | owned_runtime_pids))
-        active_owned_pids = {pid for pid in owned_runtime_pids if psutil.pid_exists(pid)}
-        running = process.poll() is None or bool(active_owned_pids)
-        if progress_path is not None and progress_path.is_file():
-            try:
-                progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                progress_payload = None
-            progress_line = _capture_progress_line(progress_payload)
-            if progress_line is not None:
-                progress_key, line = progress_line
-                if progress_key != last_runtime_progress:
-                    last_runtime_progress = progress_key
-                    # ``timeout_seconds`` is a stall limit, not a cap on the
-                    # size of a healthy capture. Large mods can legitimately
-                    # contain tens of thousands of canonical forms, so a fixed
-                    # wall-clock deadline would kill an active renderer and
-                    # restart the entire pass with another backend.
-                    deadline = max(deadline, time.monotonic() + timeout_seconds)
-                stage = str(progress_payload["stage"])
-                current = int(progress_payload["current"])
-                total = int(progress_payload["total"])
-                if stage == "form":
-                    latest_form_progress = current
-                if stage in {"planned", "checkpoint", "restore", "form"}:
-                    planned_form_total = total
-                watermark_key = (stage, total)
-                prior = visible_progress.watermarks.get(watermark_key, -1)
-                if current > prior and progress_key not in visible_progress.seen:
-                    if progress_callback is not None:
-                        progress_callback(stage, current, total)
-                    if show_progress:
-                        print(line, flush=True)
-                    visible_progress.watermarks[watermark_key] = current
-                    visible_progress.seen.add(progress_key)
-        submit_composite_jobs()
-        if planned_form_total and checkpoint_root is not None:
-            checkpoint_destinations = {
-                Path(str(marker)[: -len(suffix)])
-                for suffix in (".surface-checkpoint", ".surface-normalized")
-                for marker in checkpoint_root.glob("sprite_*.png" + suffix)
-            }
-            durable_work = min(
-                planned_form_total,
-                len(seen_composite_destinations | checkpoint_destinations),
-            )
-            if durable_work > reported_work and (
-                reported_work < 0
-                or durable_work == planned_form_total
-                or durable_work - reported_work >= 10
-            ):
-                if show_progress:
-                    print(
-                        f"SceneLight capture work {durable_work}/{planned_form_total}: "
-                        "saved sprite captures",
-                        flush=True,
+                seen_composite_jobs.add(job_path)
+                destination = Path(job[0])
+                seen_composite_destinations.add(destination)
+                marker = destination.with_name(destination.name + ".composite-normalized")
+                if composite_executor is not None and (
+                    not destination.is_file() or not marker.is_file()
+                ):
+                    composite_futures.append(
+                        composite_executor.submit(_materialize_composite_capture_file, job)
                     )
-                reported_work = durable_work
-        if result_path.is_file():
-            # The hook publishes only by atomic replace, so existence means the
-            # render is complete. SceneLight owns this isolated helper and can
-            # stop it without entering mod-defined quit labels or error screens.
-            if running:
+
+        while True:
+            if not isolated_parallel:
+                current_runtime_pids = _managed_runtime_pids(discovery.project_root)
+                owned_runtime_pids.update(current_runtime_pids - preexisting_runtime_pids)
+            owned_runtime_pids.update(_descendant_pids({process.pid} | owned_runtime_pids))
+            active_owned_pids = {pid for pid in owned_runtime_pids if psutil.pid_exists(pid)}
+            running = process.poll() is None or bool(active_owned_pids)
+            if progress_path is not None and progress_path.is_file():
+                try:
+                    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    progress_payload = None
+                progress_line = _capture_progress_line(progress_payload)
+                if progress_line is not None:
+                    progress_key, line = progress_line
+                    if progress_key != last_runtime_progress:
+                        last_runtime_progress = progress_key
+                        # ``timeout_seconds`` is a stall limit, not a cap on the
+                        # size of a healthy capture. Large mods can legitimately
+                        # contain tens of thousands of canonical forms, so a fixed
+                        # wall-clock deadline would kill an active renderer and
+                        # restart the entire pass with another backend.
+                        deadline = max(deadline, time.monotonic() + timeout_seconds)
+                    stage = str(progress_payload["stage"])
+                    current = int(progress_payload["current"])
+                    total = int(progress_payload["total"])
+                    if stage == "form":
+                        latest_form_progress = current
+                    if stage in {"planned", "checkpoint", "restore", "form"}:
+                        planned_form_total = total
+                    watermark_key = (stage, total)
+                    prior = visible_progress.watermarks.get(watermark_key, -1)
+                    if current > prior and progress_key not in visible_progress.seen:
+                        if progress_callback is not None:
+                            progress_callback(stage, current, total)
+                        if show_progress:
+                            print(line, flush=True)
+                        visible_progress.watermarks[watermark_key] = current
+                        visible_progress.seen.add(progress_key)
+            submit_composite_jobs()
+            if planned_form_total and checkpoint_root is not None:
+                checkpoint_destinations = {
+                    Path(str(marker)[: -len(suffix)])
+                    for suffix in (".surface-checkpoint", ".surface-normalized")
+                    for marker in checkpoint_root.glob("sprite_*.png" + suffix)
+                }
+                durable_work = min(
+                    planned_form_total,
+                    len(seen_composite_destinations | checkpoint_destinations),
+                )
+                if durable_work > reported_work and (
+                    reported_work < 0
+                    or durable_work == planned_form_total
+                    or durable_work - reported_work >= 10
+                ):
+                    if show_progress:
+                        print(
+                            f"SceneLight capture work {durable_work}/{planned_form_total}: "
+                            "saved sprite captures",
+                            flush=True,
+                        )
+                    reported_work = durable_work
+            if result_path.is_file():
+                # The hook publishes only by atomic replace, so existence means the
+                # render is complete. SceneLight owns this isolated helper and can
+                # stop it without entering mod-defined quit labels or error screens.
+                if running:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=10)
+                    _stop_process_pids(owned_runtime_pids)
+                    if not isolated_parallel:
+                        _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
+                break
+            if (
+                checkpoint_root is not None
+                and checkpoint_limit is not None
+                and checkpoint_limit > 0
+                and latest_form_progress is not None
+                and latest_form_progress - checkpoint_baseline >= checkpoint_limit
+            ):
                 if process.poll() is None:
                     process.terminate()
                     try:
@@ -1294,88 +1378,76 @@ def _run_capture_request(
                 _stop_process_pids(owned_runtime_pids)
                 if not isolated_parallel:
                     _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
-            break
-        if (
-            checkpoint_root is not None
-            and checkpoint_limit is not None
-            and checkpoint_limit > 0
-            and latest_form_progress is not None
-            and latest_form_progress - checkpoint_baseline >= checkpoint_limit
-        ):
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=10)
-            _stop_process_pids(owned_runtime_pids)
-            if not isolated_parallel:
-                _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
-            batch_yielded = True
-            break
-        now = time.monotonic()
-        if not running:
-            # Older Windows Ren'Py launchers can report exit just before their
-            # renderer callback's atomic result becomes visible to the parent
-            # process.  A short bounded grace period avoids misreporting that
-            # successful request as an exit-0 failure.
-            if exit_grace_deadline is None:
-                grace_seconds = _capture_exit_grace_seconds(
-                    checkpoint_root,
-                    checkpoint_baseline,
-                )
-                exit_grace_deadline = min(deadline, now + grace_seconds)
-            if now >= exit_grace_deadline:
+                batch_yielded = True
                 break
-        elif now >= deadline:
-            timed_out = True
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=10)
-            _stop_process_pids(owned_runtime_pids)
-            if not isolated_parallel:
-                _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
-            break
-        time.sleep(0.05)
+            now = time.monotonic()
+            if not running:
+                # Older Windows Ren'Py launchers can report exit just before their
+                # renderer callback's atomic result becomes visible to the parent
+                # process.  A short bounded grace period avoids misreporting that
+                # successful request as an exit-0 failure.
+                if exit_grace_deadline is None:
+                    grace_seconds = _capture_exit_grace_seconds(
+                        checkpoint_root,
+                        checkpoint_baseline,
+                    )
+                    exit_grace_deadline = min(deadline, now + grace_seconds)
+                if now >= exit_grace_deadline:
+                    break
+            elif now >= deadline:
+                timed_out = True
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
+                _stop_process_pids(owned_runtime_pids)
+                if not isolated_parallel:
+                    _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
+                break
+            time.sleep(0.05)
 
-    returncode = process.wait()
-    if composite_executor is not None:
-        if result_path.is_file():
-            submit_composite_jobs()
-            pending_count = len(composite_futures)
-            if pending_count:
-                print(
-                    f"composite assembly 0/{pending_count}: finishing layered sprite captures",
-                    flush=True,
-                )
-            for index, future in enumerate(as_completed(composite_futures), 1):
-                future.result()
-                if index == 1 or index % 10 == 0 or index == pending_count:
+        returncode = process.wait()
+        if composite_executor is not None:
+            if result_path.is_file():
+                submit_composite_jobs()
+                pending_count = len(composite_futures)
+                if pending_count:
                     print(
-                        f"composite assembly {index}/{pending_count}: "
-                        "finishing layered sprite captures",
+                        f"composite assembly 0/{pending_count}: finishing layered sprite captures",
                         flush=True,
                     )
-            composite_executor.shutdown(wait=True)
+                for index, future in enumerate(as_completed(composite_futures), 1):
+                    future.result()
+                    if index == 1 or index % 10 == 0 or index == pending_count:
+                        print(
+                            f"composite assembly {index}/{pending_count}: "
+                            "finishing layered sprite captures",
+                            flush=True,
+                        )
+                composite_executor.shutdown(wait=True)
+            else:
+                composite_executor.shutdown(wait=True, cancel_futures=True)
+        if result_path.is_file():
+            return True
+        if batch_yielded:
+            return False
+        detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
+        if _is_instance_conflict(detail):
+            raise CaptureInstanceConflict(
+                "The mod's single-instance protection blocked SceneLight capture. "
+                "Close other copies of this mod or other SceneLight setup sessions and retry. "
+                "Completed sprite checkpoints are retained." + detail
+            )
+        if timed_out and last_runtime_progress is not None:
+            reason = f"made no progress for {timeout_seconds} seconds"
+        elif timed_out:
+            reason = f"timed out after {timeout_seconds} seconds"
         else:
-            composite_executor.shutdown(wait=True, cancel_futures=True)
-    if result_path.is_file():
-        return True
-    if batch_yielded:
-        return False
-    detail = _runtime_diagnostic(discovery.project_root)
-    if timed_out and last_runtime_progress is not None:
-        reason = f"made no progress for {timeout_seconds} seconds"
-    elif timed_out:
-        reason = f"timed out after {timeout_seconds} seconds"
-    else:
-        reason = f"exit {returncode}"
-    raise RuntimeError(f"Ren'Py could not {purpose} ({reason}).{detail}")
+            reason = f"exit {returncode}"
+        raise RuntimeError(f"Ren'Py could not {purpose} ({reason}).{detail}")
 
 
 def _capture_progress_line(
@@ -1878,6 +1950,8 @@ def _run_parallel_capture_workers(
     )
     worker_projects = [worker_group / f"w{index + 1}" for index in range(worker_count)]
     copies_completed = [0]
+    prepared = [False] * worker_count
+    capture_mode = [f"{worker_count} isolated capture workers"]
 
     def report(worker_index: int, stage: str, current: int, total: int) -> None:
         if stage not in {"restore", "form"} or total != totals[worker_index]:
@@ -1892,22 +1966,23 @@ def _run_parallel_capture_workers(
             ):
                 last_reported[0] = aggregate
                 print(
-                    f"SceneLight parallel forms {aggregate}/{total_forms}: "
-                    f"{worker_count} isolated capture workers",
+                    f"SceneLight parallel forms {aggregate}/{total_forms}: {capture_mode[0]}",
                     flush=True,
                 )
 
     def run_worker(worker_index: int) -> dict[str, object]:
         worker_number = worker_index + 1
         worker_project = worker_projects[worker_index]
-        _clone_capture_runtime(discovery.project_root, worker_project)
-        with progress_lock:
-            copies_completed[0] += 1
-            print(
-                f"SceneLight worker copies {copies_completed[0]}/{worker_count}: "
-                "isolated game runtimes ready",
-                flush=True,
-            )
+        if not prepared[worker_index]:
+            _clone_capture_runtime(discovery.project_root, worker_project)
+            prepared[worker_index] = True
+            with progress_lock:
+                copies_completed[0] += 1
+                print(
+                    f"SceneLight worker copies {copies_completed[0]}/{worker_count}: "
+                    "isolated game runtimes ready",
+                    flush=True,
+                )
         worker_discovery = replace(
             discovery,
             project_root=worker_project,
@@ -1974,6 +2049,8 @@ def _run_parallel_capture_workers(
                 )
                 last_error = None
                 break
+            except CaptureInstanceConflict:
+                raise
             except RuntimeError as error:
                 last_error = error
                 if renderer_index + 1 < len(worker_renderers):
@@ -1993,13 +2070,35 @@ def _run_parallel_capture_workers(
 
     results: list[dict[str, object] | None] = [None] * worker_count
     try:
+        conflicts: list[int] = []
+        failures: list[Exception] = []
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures = {
                 executor.submit(run_worker, worker_index): worker_index
                 for worker_index in range(worker_count)
             }
             for future in as_completed(futures):
-                results[futures[future]] = future.result()
+                worker_index = futures[future]
+                try:
+                    results[worker_index] = future.result()
+                except CaptureInstanceConflict:
+                    conflicts.append(worker_index)
+                except Exception as error:
+                    failures.append(error)
+        # All children have settled before retrying a guard that uses a global
+        # mutex instead of temp files. Preserve healthy shards and reuse the
+        # failed shard's exact output directory, plan, and durable checkpoints.
+        if failures:
+            raise failures[0]
+        if conflicts:
+            print(
+                "SceneLight detected the mod's single-instance protection. "
+                "Finishing blocked sprite batches one at a time from saved progress.",
+                flush=True,
+            )
+            capture_mode[0] = "sequential capture (single-instance protection)"
+            for worker_index in sorted(conflicts):
+                results[worker_index] = run_worker(worker_index)
         report(0, "form", totals[0], totals[0])
         return [payload for payload in results if payload is not None]
     finally:
@@ -2270,6 +2369,8 @@ def _run_capture_request_resumable(
                 "(%d total). Starting the next batch." % (resume_index + 1, after - before, after),
                 flush=True,
             )
+        except CaptureInstanceConflict:
+            raise
         except RuntimeError as error:
             after = _durable_form_checkpoint_count(capture_root)
             crashed = "(exit " in str(error)

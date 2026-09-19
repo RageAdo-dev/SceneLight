@@ -43,6 +43,16 @@ _ADVANCED = (
     ("adaptive_light_colors", "Automatic color separation", 0.0, 2.0, 0.01),
 )
 
+_GLOW = (
+    ("glow_strength", "Sprite glow", 0.0, 2.0, 0.05),
+    ("glow_radius", "Halo spread", 0.0, 2.0, 0.05),
+    ("emission_strength", "Light cast onto characters", 0.0, 2.0, 0.05),
+    ("emission_radius", "Light reach (screen heights)", 0.0, 2.0, 0.05),
+    ("emission_red", "Light color · red", 0.0, 2.0, 0.05),
+    ("emission_green", "Light color · green", 0.0, 2.0, 0.05),
+    ("emission_blue", "Light color · blue", 0.0, 2.0, 0.05),
+)
+
 
 class CalibrationDialog(QDialog):
     def __init__(
@@ -62,6 +72,7 @@ class CalibrationDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._page(_BASIC), "Basic")
         tabs.addTab(self._page(_ADVANCED), "Advanced")
+        tabs.addTab(self._page(_GLOW), "Glow & emitted light")
         layout.addWidget(tabs)
 
         buttons = QHBoxLayout()
@@ -92,6 +103,14 @@ class CalibrationDialog(QDialog):
                 )
             if name == "adaptive_light_colors":
                 control.setToolTip("Separates strong lights with different colors and positions.")
+            if name == "glow_radius":
+                control.setToolTip(
+                    "1.0 spreads the halo across 4% of the shorter canvas edge. Leave transparent padding around effect art."
+                )
+            if name.startswith("emission_"):
+                control.setToolTip(
+                    "Exported for in-game lighting of other selected sprites. The single-sprite Preview shows self glow; there is no second character to receive emitted light."
+                )
             control.valueChanged.connect(self._changed)
             self._controls[name] = control
             form.addRow(label, control)

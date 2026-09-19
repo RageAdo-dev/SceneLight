@@ -161,6 +161,7 @@ class SceneLightGPUView(QOpenGLWidget):
         self._character_height = 0.92
         self._strength = 1.0
         self._calibration = Calibration()
+        self._sprite_emitters = ()
         self._compare_mode = 0.0
         self._live_background = False
         self._drag_origin: QPointF | None = None
@@ -182,6 +183,11 @@ class SceneLightGPUView(QOpenGLWidget):
     @property
     def live_analysis_supported(self) -> bool:
         return self._live_analysis_supported
+
+    def set_sprite_emitters(self, emitters) -> None:
+        """Set up to four (x, y, radius, strength), RGB source pairs for rendering."""
+        self._sprite_emitters = tuple(emitters)[:4]
+        self.update()
 
     def set_live_analysis_enabled(self, enabled: bool) -> None:
         self._prepared_fields = None
@@ -831,6 +837,18 @@ class SceneLightGPUView(QOpenGLWidget):
         self._uniform("u_sc_transport_subject_y_max", TRANSPORT_SUBJECT_Y_MAX)
         self._uniform("u_sc_debug_contrast", 1.0)
         self._uniform("u_sc_compare_mode", self._compare_mode)
+        self._uniform(
+            "u_sc_glow_data", (self._calibration.glow_strength, self._calibration.glow_radius)
+        )
+        self._uniform("u_sc_screen_aspect", CANVAS_SIZE[0] / CANVAS_SIZE[1])
+        for index in range(4):
+            data, color = (
+                self._sprite_emitters[index]
+                if index < len(self._sprite_emitters)
+                else ((0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0))
+            )
+            self._uniform(f"u_sc_sprite_light{index}_data", data)
+            self._uniform(f"u_sc_sprite_light{index}_color", color)
         for index, block in enumerate(self._calibration.uniform_blocks()):
             self._uniform(f"u_sc_calibration{index}", block)
         self._uniform("u_sc_live_background", 1.0 if self._live_background else 0.0)
