@@ -108,16 +108,6 @@ class DeveloperGuide(tk.Toplevel):
             font=("Segoe UI", 10),
             anchor="w",
         ).grid(row=2, column=0, sticky="w")
-        tk.Label(
-            header,
-            text="AVAILABLE OFFLINE",
-            bg="#17332f",
-            fg="#91d9be",
-            font=("Segoe UI Semibold", 8),
-            padx=10,
-            pady=6,
-        ).grid(row=0, column=1, sticky="ne", padx=(10, 0))
-
         search_row = tk.Frame(self, bg=BG)
         search_row.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 10))
         search_row.columnconfigure(0, weight=1)
