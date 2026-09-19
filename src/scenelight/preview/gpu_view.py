@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,7 @@ from .core import (
     TRANSPORT_PLANES,
     TRANSPORT_SUBJECT_Y_MAX,
 )
+from .library import Actor
 from .shader_source import (
     BACKGROUND_FRAGMENT,
     BACKGROUND_VERTEX,
@@ -36,6 +38,50 @@ from .shader_source import (
 from .temporal import TemporalSceneBlend, TemporalSceneFrame
 
 CANVAS_SIZE = (1280, 720)
+
+
+@dataclass
+class SceneSprite:
+    actor: Actor
+    rgba: np.ndarray
+    artifacts: FormArtifacts
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        height = self.actor.height
+        width = height * CANVAS_SIZE[1] / CANVAS_SIZE[0] * self.rgba.shape[1] / self.rgba.shape[0]
+        center = self.artifacts.metadata.get("center", (0.5, 0.5))
+        return (
+            self.actor.horizontal - center[0] * width,
+            self.actor.baseline - height,
+            width,
+            height,
+        )
+
+
+def scene_emitters(sprites: list[SceneSprite], receiver_id: str):
+    sources = []
+    for sprite in sprites:
+        actor = sprite.actor
+        light = actor.calibration
+        if (
+            not actor.visible
+            or actor.id == receiver_id
+            or light.emission_strength <= 0
+            or light.emission_radius <= 0
+        ):
+            continue
+        x, y, width, height = sprite.bounds()
+        sources.append(
+            (
+                actor.id,
+                (x + width * 0.5, y + height * 0.5, light.emission_radius, light.emission_strength),
+                (light.emission_red, light.emission_green, light.emission_blue),
+            )
+        )
+    sources.sort(key=lambda source: (-source[1][3], source[0]))
+    return tuple((data, color) for _id, data, color in sources[:4])
+
+
 REQUIRED_SHADER_FUNCTIONS = (
     "glCreateShader",
     "glShaderSource",
@@ -120,6 +166,7 @@ class SceneLightGPUView(QOpenGLWidget):
     rendererError = Signal(str)
     liveAnalysisFailed = Signal(str)
     liveAnalysisFinished = Signal(float)
+    spriteSelected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -127,6 +174,9 @@ class SceneLightGPUView(QOpenGLWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMouseTracking(True)
         self._program = 0
+        self._scene_sprites: list[SceneSprite] | None = None
+        self._scene_active_id: str | None = None
+        self._scene_texture_cache = OrderedDict()
         self._background_program = 0
         self._transport_blend_program = 0
         self._transport_fbo = 0
@@ -187,6 +237,13 @@ class SceneLightGPUView(QOpenGLWidget):
     def set_sprite_emitters(self, emitters) -> None:
         """Set up to four (x, y, radius, strength), RGB source pairs for rendering."""
         self._sprite_emitters = tuple(emitters)[:4]
+        self.update()
+
+    def set_scene_sprites(
+        self, sprites: list[SceneSprite] | None, active_id: str | None = None
+    ) -> None:
+        self._scene_sprites = sprites
+        self._scene_active_id = active_id
         self.update()
 
     def set_live_analysis_enabled(self, enabled: bool) -> None:
@@ -348,7 +405,7 @@ class SceneLightGPUView(QOpenGLWidget):
         self.update()
 
     def set_strength(self, strength: float) -> None:
-        self._strength = min(max(float(strength), 0.0), 1.5)
+        self._strength = min(max(float(strength), 0.0), 2.0)
         self.update()
 
     def set_calibration(self, calibration: Calibration) -> None:
@@ -457,11 +514,14 @@ class SceneLightGPUView(QOpenGLWidget):
         }
         for cached in self._form_texture_cache.values():
             texture_ids.update(texture for texture, _size in cached.values())
+        for cached in self._scene_texture_cache.values():
+            texture_ids.update(texture for texture, _size in cached.values())
         if texture_ids:
             GL.glDeleteTextures(list(texture_ids))
         self._textures.clear()
         self._texture_sizes.clear()
         self._form_texture_cache.clear()
+        self._scene_texture_cache.clear()
         self._borrowed_textures.clear()
         self._using_live_analysis = False
         self._analyzed_generation = -1
@@ -750,6 +810,69 @@ class SceneLightGPUView(QOpenGLWidget):
             self._bind_texture(self._background_program, "background_texture", 0, "background")
             GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
 
+        if self._scene_sprites is None:
+            self._draw_sprite()
+        else:
+            self._draw_scene_sprites()
+
+    def _draw_scene_sprites(self) -> None:
+        fields = (
+            "_form_artifacts",
+            "_sprite_source_size",
+            "_horizontal",
+            "_baseline",
+            "_character_height",
+            "_strength",
+            "_calibration",
+            "_sprite_emitters",
+        )
+        saved = {name: getattr(self, name) for name in fields}
+        textures, sizes = dict(self._textures), dict(self._texture_sizes)
+        try:
+            for sprite in self._scene_sprites:
+                actor = sprite.actor
+                if not actor.visible:
+                    continue
+                key = sprite.artifacts.root.resolve()
+                cached = self._scene_texture_cache.get(key)
+                if cached is None:
+                    arrays = self._form_arrays(sprite.artifacts)
+                    cached = {name: self._upload_array(array) for name, array in arrays.items()}
+                    cached["source"] = self._upload_array(sprite.rgba, premultiply=True)
+                    self._scene_texture_cache[key] = cached
+                self._scene_texture_cache.move_to_end(key)
+                for name, (texture, size) in cached.items():
+                    self._textures[name], self._texture_sizes[name] = texture, size
+                self._form_artifacts = sprite.artifacts
+                self._sprite_source_size = (sprite.rgba.shape[1], sprite.rgba.shape[0])
+                self._horizontal, self._baseline = actor.horizontal, actor.baseline
+                self._character_height = actor.height
+                self._strength, self._calibration = actor.strength, actor.calibration
+                self._sprite_emitters = scene_emitters(self._scene_sprites, actor.id)
+                self._draw_sprite()
+            active = {
+                sprite.artifacts.root.resolve()
+                for sprite in self._scene_sprites
+                if sprite.actor.visible
+            }
+
+            def texture_bytes(cached):
+                return sum(size[0] * size[1] * 4 for _texture, size in cached.values())
+
+            used_bytes = sum(texture_bytes(cached) for cached in self._scene_texture_cache.values())
+            for key in list(self._scene_texture_cache):
+                if len(self._scene_texture_cache) <= 32 and used_bytes <= 128 * 1024 * 1024:
+                    break
+                if key not in active:
+                    cached = self._scene_texture_cache.pop(key)
+                    used_bytes -= texture_bytes(cached)
+                    GL.glDeleteTextures([texture for texture, _size in cached.values()])
+        finally:
+            for name, value in saved.items():
+                setattr(self, name, value)
+            self._textures, self._texture_sizes = textures, sizes
+
+    def _draw_sprite(self) -> None:
         required = {
             "source",
             "irradiance",
@@ -1033,6 +1156,28 @@ class SceneLightGPUView(QOpenGLWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
+            if self._scene_sprites:
+                vx, vy, vw, vh = self._viewport_qt
+                point = (
+                    (event.position().x() - vx) / max(vw, 1),
+                    (event.position().y() - vy) / max(vh, 1),
+                )
+                for sprite in reversed(self._scene_sprites):
+                    x, y, width, height = sprite.bounds()
+                    if not sprite.actor.visible or not (
+                        x <= point[0] < x + width and y <= point[1] < y + height
+                    ):
+                        continue
+                    px = min(
+                        sprite.rgba.shape[1] - 1, int((point[0] - x) / width * sprite.rgba.shape[1])
+                    )
+                    py = min(
+                        sprite.rgba.shape[0] - 1,
+                        int((point[1] - y) / height * sprite.rgba.shape[0]),
+                    )
+                    if sprite.rgba[py, px, 3] > 8:
+                        self.spriteSelected.emit(sprite.actor.id)
+                        break
             self._drag_origin = event.position()
             self.setFocus()
             event.accept()

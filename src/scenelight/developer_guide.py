@@ -553,7 +553,7 @@ _WORKFLOW = (
         "Choose self glow, nearby light, or both for each image.",
         "Include the effect tag in Setup's character selection so it receives SceneLight. Put the rules below in an init python block. Use character() for every expression of a tag, or image() for one exact image.",
         "The two strengths are independent: glow_strength=0 emits light without a halo; emission_strength=0 glows without lighting neighbors. Zero both restores ordinary lighting. Each character and image keeps its own full lighting settings.",
-        "The single-sprite Preview shows glow. Use Custom glow color and Choose color to tint the sprite and halo, with Sprite glow above zero. Cast-light RGB controls affect a second selected sprite in-game. Leave transparent padding around the effect art for the halo.",
+        "Preview supports multiple characters with individual settings. Use the Artwork-to-color slider to blend a tint, with Sprite glow above zero. Add another character to see cast light. Export sprite rules writes the selected values for exact Ren'Py image names. Leave transparent padding around effect art for the halo.",
         example="""
             init python:
                 scenelight.character("hero", strength=0.65, rim_strength=0.4)

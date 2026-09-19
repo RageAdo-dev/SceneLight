@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -119,7 +121,7 @@ class CalibrationDialog(QDialog):
                 )
             if name.startswith("emission_"):
                 control.setToolTip(
-                    "Exported for in-game lighting of other selected sprites. The single-sprite Preview shows self glow; there is no second character to receive emitted light."
+                    "This light affects other visible characters in Preview and in-game. Add a second character to see it; it does not recolor this sprite’s own glow."
                 )
             control.valueChanged.connect(self._changed)
             self._controls[name] = control
@@ -140,6 +142,18 @@ class CalibrationDialog(QDialog):
         color_row.addWidget(self._custom_glow)
         color_row.addWidget(self._color_button)
         own_layout.addLayout(color_row)
+        mix_row = QHBoxLayout()
+        mix_row.addWidget(QLabel("Artwork"))
+        self._glow_mix_slider = QSlider(Qt.Horizontal)
+        self._glow_mix_slider.setRange(0, 100)
+        self._glow_mix_slider.setToolTip(
+            "0% preserves artwork colors; 100% replaces them with the chosen glow color. Values between apply a tint."
+        )
+        self._glow_mix_slider.valueChanged.connect(self._glow_mix_changed)
+        mix_row.addWidget(self._glow_mix_slider, 1)
+        self._glow_mix_value = QLabel("0% color")
+        mix_row.addWidget(self._glow_mix_value)
+        own_layout.addLayout(mix_row)
         self._glow_hint = QLabel()
         self._glow_hint.setObjectName("subtitle")
         self._glow_hint.setWordWrap(True)
@@ -149,7 +163,7 @@ class CalibrationDialog(QDialog):
         cast = QGroupBox("Light cast onto other characters")
         cast_layout = QVBoxLayout(cast)
         note = QLabel(
-            "These colors affect nearby characters in-game. They do not change this sprite’s glow."
+            "These colors affect other characters. Add a second character in Preview to see them. They do not change this sprite’s own glow."
         )
         note.setObjectName("subtitle")
         note.setWordWrap(True)
@@ -161,6 +175,13 @@ class CalibrationDialog(QDialog):
 
     def _toggle_glow_color(self, checked: bool) -> None:
         self._glow_color_mix = 1.0 if checked else 0.0
+        self._changed()
+
+    def _glow_mix_changed(self, value: int) -> None:
+        self._glow_color_mix = value / 100.0
+        self._custom_glow.blockSignals(True)
+        self._custom_glow.setChecked(value > 0)
+        self._custom_glow.blockSignals(False)
         self._changed()
 
     def _choose_glow_color(self) -> None:
@@ -175,6 +196,10 @@ class CalibrationDialog(QDialog):
         self._changed()
 
     def _refresh_glow_controls(self) -> None:
+        self._glow_mix_slider.blockSignals(True)
+        self._glow_mix_slider.setValue(round(self._glow_color_mix * 100))
+        self._glow_mix_slider.blockSignals(False)
+        self._glow_mix_value.setText(f"{self._glow_color_mix:.0%} color")
         swatch = QPixmap(20, 20)
         swatch.fill(self._glow_color)
         self._color_button.setIcon(QIcon(swatch))

@@ -26,9 +26,33 @@ def main() -> int:
     app = QApplication.instance() or QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("SceneLight Preview & Calibrator")
     app.setWindowIcon(QIcon(str(ICON_PNG)))
-    window = MainWindow(args.project)
+    try:
+        window = MainWindow(args.project)
+    except Exception as error:
+        from .. import diagnostics
+
+        session = diagnostics.current_session()
+        if session is not None:
+            session.exception("preview.startup", error)
+            session.update(status="failed", failure=str(error))
+        raise
+    previous_exception_hook = sys.excepthook
+
+    def record_exception(kind, error, trace):
+        from .. import diagnostics
+
+        session = diagnostics.current_session()
+        if session is not None:
+            session.exception("preview.unhandled", error.with_traceback(trace))
+            session.update(status="error", failure=str(error))
+        previous_exception_hook(kind, error, trace)
+
+    sys.excepthook = record_exception
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        sys.excepthook = previous_exception_hook
 
 
 if __name__ == "__main__":

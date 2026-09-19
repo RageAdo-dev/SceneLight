@@ -30,6 +30,7 @@ import numpy as np
 import psutil
 from PIL import Image
 
+from . import diagnostics
 from .hashing import sha256_file
 from .project import (
     ProjectDiscovery,
@@ -63,6 +64,8 @@ SURFACE_NORMALIZATION_WORKER_BYTES = 128 * MIB
 SURFACE_NORMALIZATION_ABSOLUTE_WORKER_CAP = 16
 CompositeJob = tuple[str, tuple[int, int], tuple[tuple[str, tuple[int, int]], ...]]
 CAPTURE_IGNORED_NAMES = {
+    "scenelight-runtime.jsonl",
+    "scenelight-runtime.jsonl.1",
     "scenelight_capture.rpy",
     "scenelight_capture.rpyc",
     "scenelight_runtime.rpy",
@@ -1220,6 +1223,16 @@ def _run_capture_request(
     working_directory = (
         discovery.project_root if native_runtime else renpy_executable.resolve().parent
     )
+    diagnostics.event(
+        "capture",
+        "Starting isolated capture",
+        purpose=purpose,
+        project=str(discovery.project_root),
+        renderer=renderer,
+        executable=str(renpy_executable),
+        native_runtime=native_runtime,
+        timeout_seconds=timeout_seconds,
+    )
     logs_before = _runtime_log_state(discovery.project_root)
     with _capture_process(
         _capture_command(
@@ -1232,6 +1245,15 @@ def _run_capture_request(
         startupinfo=startupinfo,
         creationflags=creationflags,
     ) as (process, owned_runtime_pids):
+        capture_started = time.perf_counter()
+        diagnostics.event(
+            "capture.process",
+            "Capture process started",
+            engine_pid=process.pid,
+            project=str(discovery.project_root),
+            renderer=renderer,
+            purpose=purpose,
+        )
         deadline = time.monotonic() + timeout_seconds
         timed_out = False
         last_runtime_progress: tuple[object, ...] | None = None
@@ -1431,10 +1453,31 @@ def _run_capture_request(
             else:
                 composite_executor.shutdown(wait=True, cancel_futures=True)
         if result_path.is_file():
+            diagnostics.event(
+                "capture.result",
+                "Capture completed",
+                engine_pid=process.pid,
+                project=str(discovery.project_root),
+                elapsed_seconds=round(time.perf_counter() - capture_started, 3),
+            )
             return True
         if batch_yielded:
             return False
         detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
+        session = diagnostics.current_session()
+        if session is not None:
+            session.event(
+                "capture",
+                "Capture did not complete",
+                "error",
+                purpose=purpose,
+                renderer=renderer,
+                exit_code=returncode,
+                timed_out=timed_out,
+                last_progress=last_runtime_progress,
+                project=str(discovery.project_root),
+            )
+            session.attach_text(discovery.project_root.name + "-engine-failure", detail)
         if _is_instance_conflict(detail):
             raise CaptureInstanceConflict(
                 "The mod's single-instance protection blocked SceneLight capture. "

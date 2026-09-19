@@ -36,6 +36,10 @@ def test_glow_picker_toggle_cancel_and_defaults_preserve_separate_cast_color(mon
         assert dialog._custom_glow.isChecked()
         assert "Custom color" in dialog._glow_hint.text()
         assert changes[-1] == selected
+        dialog._glow_mix_slider.setValue(35)
+        assert dialog.calibration.glow_color_mix == 0.35
+        assert dialog._custom_glow.isChecked()
+        dialog._glow_mix_slider.setValue(100)
         assert (
             CalibrationProfile.from_payload(CalibrationProfile(selected).to_payload()).calibration
             == selected

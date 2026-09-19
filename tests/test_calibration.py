@@ -74,6 +74,13 @@ def test_profile_round_trip_and_scene_inheritance(tmp_path: Path) -> None:
     assert loaded.strength == 0.72
 
 
+def test_exact_sprite_strength_and_partial_tint_survive_profile_round_trip():
+    profile = CalibrationProfile(Calibration(glow_color_mix=0.35), strength=1.85)
+    loaded = CalibrationProfile.from_payload(profile.to_payload())
+    assert loaded.strength == 1.85
+    assert loaded.calibration.glow_color_mix == 0.35
+
+
 def test_profile_rejects_unknown_or_non_numeric_settings() -> None:
     with pytest.raises(ValueError, match="Unknown"):
         Calibration.from_mapping({"character_brightness": 1.0})

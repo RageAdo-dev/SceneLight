@@ -1321,7 +1321,8 @@ def test_manual_character_selection_is_saved_outside_the_game(tmp_path: Path, mo
     assert payload["character_tags"] == ["chibi", "nova"]
 
 
-def test_cancel_during_process_creation_is_not_lost(monkeypatch):
+def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
     event = threading.Event()
 
     def noop(*args, **kwargs):
@@ -1338,8 +1339,9 @@ def test_cancel_during_process_creation_is_not_lost(monkeypatch):
         cancel_operation_button=widget,
         _append_log=noop,
         _events=queue.Queue(),
+        project_var=SimpleNamespace(get=lambda: str(tmp_path / "game")),
     )
-    process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: -1)
+    process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: -1, pid=12345)
 
     def spawn(*args, **kwargs):
         event.set()  # UI cancelled while the OS was creating the child.

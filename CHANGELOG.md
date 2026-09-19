@@ -33,6 +33,10 @@
 
 ### Setup and author tools
 
+- Added persistent support sessions with searchable stage/error views, separate retained console output, capture-worker context, runtime sprite-binding evidence, and exportable support ZIPs. Reports include a readable HTML browser and omit artwork/saves; common secrets and personal home paths are redacted.
+- Preview now supports saved asset libraries, editable still-image layer recipes, scene save/load, and up to 16 independently configured characters. Composition and animation exports include visible characters, and emitted lights affect neighboring characters in Preview.
+- Added an artwork-to-custom-color tint slider, an exact lighting-strength field, and per-image Ren'Py rule export for the selected character or the whole scene.
+
 - Preview calibration tabs now use readable dark backgrounds, bright labels, and distinct selected, hover, and keyboard-focus states.
 - Preview separates sprite glow from cast-light settings. A custom glow color picker changes the visible sprite and halo; an explicit hint explains when glow is off. Profiles and per-image author rules retain independent glow and cast-light colors.
 

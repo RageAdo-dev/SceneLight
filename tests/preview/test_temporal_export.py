@@ -56,6 +56,23 @@ def test_incomplete_gif_preserves_existing_export(tmp_path):
     assert not list(tmp_path.glob("*.partial"))
 
 
+def test_multiple_sprite_timeline_keeps_every_authored_frame_change():
+    background = SimpleNamespace(kind="static")
+    first = SimpleNamespace(kind="animated-image", duration_ms=300, cumulative_ms=(120, 300))
+    second = SimpleNamespace(kind="animated-image", duration_ms=200, cumulative_ms=(50, 200))
+    times, durations = composite_gif_timeline(background, first, second)
+    assert sum(durations) == 600
+    assert set(times) == {0, 50, 120, 200, 250, 300, 400, 420, 450}
+
+
+def test_combined_sub_tick_boundaries_are_valid_for_gif_export():
+    first = SimpleNamespace(kind="animated-image", duration_ms=60, cumulative_ms=(17, 60))
+    second = SimpleNamespace(kind="animated-image", duration_ms=60, cumulative_ms=(24, 60))
+    times, durations = composite_gif_timeline(SimpleNamespace(kind="static"), first, second)
+    assert times == (0, 20, 30)
+    assert durations == (20, 10, 30)
+
+
 def test_transport_interpolates_every_encoded_channel() -> None:
     left = np.zeros((2, 4, 4), dtype=np.uint8)
     right = np.full((2, 4, 4), 200, dtype=np.uint8)

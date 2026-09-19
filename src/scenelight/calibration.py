@@ -181,7 +181,7 @@ class CalibrationProfile:
         raw_strength = payload.get("strength", 1.0)
         if isinstance(raw_strength, bool) or not isinstance(raw_strength, (int, float)):
             raise ValueError("SceneLight profile strength must be a number")
-        strength = max(0.0, min(float(raw_strength), 1.5))
+        strength = max(0.0, min(float(raw_strength), 2.0))
         raw_scenes = payload.get("scene_calibration", {})
         if not isinstance(raw_scenes, dict):
             raise ValueError("scene_calibration must be a JSON object")
@@ -194,7 +194,7 @@ class CalibrationProfile:
         return cls(calibration=calibration, scenes=scenes, strength=strength)
 
     def normalized_strength(self) -> float:
-        return max(0.0, min(float(self.strength), 1.5))
+        return max(0.0, min(float(self.strength), 2.0))
 
 
 def profile_path(project_root: Path) -> Path:

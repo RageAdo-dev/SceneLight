@@ -29,6 +29,7 @@ init -50 python:
     import copy
     import json
     import os
+    import time as _sc_diagnostic_time
     from collections import OrderedDict as _SceneLightOrderedDict
     try:
         from collections.abc import Mapping as _SceneLightMapping
@@ -43,6 +44,35 @@ init -50 python:
     SCENELIGHT_LAST_PRESENTED_SCENE = None
     SCENELIGHT_STABLE_SCENE_KEY = None
     SCENELIGHT_STABLE_SCENE = None
+    _SCENELIGHT_DIAGNOSTIC_FAILURE = False
+    _SCENELIGHT_DIAGNOSTIC_STARTED = False
+
+    def _scenelight_record_diagnostic(stage, details):
+        """Record state changes only; no pixels, dialogue, or per-frame logging."""
+        global _SCENELIGHT_DIAGNOSTIC_FAILURE, _SCENELIGHT_DIAGNOSTIC_STARTED
+        if _SCENELIGHT_DIAGNOSTIC_FAILURE:
+            return
+        try:
+            path = os.path.join(config.basedir, "scenelight-runtime.jsonl")
+            if os.path.isfile(path) and os.path.getsize(path) > 2 * 1024 * 1024:
+                previous = path + ".1"
+                if os.path.exists(previous):
+                    os.remove(previous)
+                os.rename(path, previous)
+            with open(path, "a") as stream:
+                if not _SCENELIGHT_DIAGNOSTIC_STARTED:
+                    _SCENELIGHT_DIAGNOSTIC_STARTED = True
+                    stream.write(json.dumps({"stage": "runtime.start", "time": _sc_diagnostic_time.time(),
+                        "renpy": getattr(renpy, "version_string", "unknown"),
+                        "renderer": renpy.get_renderer_info(),
+                        "manifest_version": SCENELIGHT_MANIFEST.get("version"),
+                        "form_version": SCENELIGHT_FORM_MANIFEST.get("version"),
+                        "profile_strength": SCENELIGHT_PROFILE_STRENGTH}, default=str) + "\n")
+                stream.write(json.dumps({"time": _sc_diagnostic_time.time(), "stage": stage,
+                                         "renpy": getattr(renpy, "version_string", "unknown"),
+                                         "details": details}, ensure_ascii=True) + "\n")
+        except Exception:
+            _SCENELIGHT_DIAGNOSTIC_FAILURE = True
     _SCENELIGHT_MEASURING_EMITTERS = False
     # Ren'Py 6.99 can parse this runtime but predates the model-based shader
     # API entirely. Keep the original executable playable; SceneLight itself
@@ -865,7 +895,7 @@ init -50 python:
     SCENELIGHT_REFERENCE_ART_MID = float(SCENELIGHT_MANIFEST["reference_art_mid"])
     try:
         SCENELIGHT_PROFILE_STRENGTH = max(
-            0.0, min(float(SCENELIGHT_MANIFEST.get("strength", 1.0)), 1.5)
+            0.0, min(float(SCENELIGHT_MANIFEST.get("strength", 1.0)), 2.0)
         )
     except (TypeError, ValueError):
         SCENELIGHT_PROFILE_STRENGTH = 1.0
@@ -4228,6 +4258,23 @@ init -50 python:
                 result.add_uniform("u_sc_form_contrast_mid", SCENELIGHT_REFERENCE_ART_MID)
                 result.add_uniform("u_sc_height_range", (-0.25, 1.25))
                 result.add_uniform("u_sc_noise_range", 4.0)
+            diagnostic_key = (SCENELIGHT_STABLE_SCENE_KEY, self.form_key, self.has_form,
+                              child_render.get_size(), self._sc_exposure_owner,
+                              strength, enabled, repr(controls.get("calibration", {})),
+                              self._sc_snapshot_frozen,
+                              self.form_entry.get("normal_noise") if self.has_form else None)
+            if getattr(self, "_sc_diagnostic_key", None) != diagnostic_key:
+                self._sc_diagnostic_key = diagnostic_key
+                _scenelight_record_diagnostic("sprite.binding", {
+                    "background": SCENELIGHT_STABLE_SCENE_KEY, "image": self.form_key,
+                    "tag": self.image_name[0], "canvas": child_render.get_size(),
+                    "mapped_form": self.has_form,
+                    "form_size": self.form_entry.get("source_size") if self.has_form else None,
+                    "exposure_owner": self._sc_exposure_owner, "strength": strength,
+                    "enabled": enabled, "calibration": controls.get("calibration", {}),
+                    "authored_grade": self.authored_grade_strength,
+                    "frozen_transition": self._sc_snapshot_frozen,
+                })
             return _scenelight_custom_effect_render(
                 result,
                 active_custom_effects,

@@ -1019,6 +1019,30 @@ def _launch_managed(project_root: Path) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from . import diagnostics
+
+    own_session = not os.environ.get("SCENELIGHT_LOG_SESSION")
+    session = (
+        diagnostics.start_session("cli", command=argv or sys.argv[1:])
+        if own_session
+        else diagnostics.current_session()
+    )
+    try:
+        code = _main(argv)
+        if session is not None:
+            session.event("cli", "Operation finished", exit_code=code)
+            if own_session:
+                session.update(status="succeeded" if code == 0 else "failed", exit_code=code)
+        return code
+    except Exception as error:
+        if session is not None:
+            session.exception("cli", error)
+            if own_session:
+                session.update(status="failed", failure=str(error))
+        raise
+
+
+def _main(argv: list[str] | None = None) -> int:
     _configure_utf8_output(sys.stdout)
     _configure_utf8_output(sys.stderr)
     args = _parser().parse_args(argv)

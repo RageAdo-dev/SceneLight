@@ -24,7 +24,7 @@ def export_extension(background_kind: str, sprite_kind: str = "static") -> str:
     return ".png"
 
 
-def composite_gif_timeline(background, sprite) -> tuple[tuple[int, ...], tuple[int, ...]]:
+def composite_gif_timeline(background, *sprites) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Return exact change times for one seamless combined GIF loop.
 
     Each input keeps its authored variable frame durations. When both inputs
@@ -32,12 +32,16 @@ def composite_gif_timeline(background, sprite) -> tuple[tuple[int, ...], tuple[i
     animation is cut in the middle of a cycle.
     """
 
-    animated = [clip for clip in (background, sprite) if clip.kind == "animated-image"]
+    animated = [clip for clip in (background, *sprites) if clip.kind == "animated-image"]
     if not animated:
         return (0,), (1000,)
     loop_ms = animated[0].duration_ms
     for clip in animated[1:]:
         loop_ms = lcm(loop_ms, clip.duration_ms)
+    if loop_ms > 600_000:
+        raise ValueError(
+            "The combined animation loop exceeds 10 minutes. Use clips with compatible loop durations."
+        )
     events = {0, loop_ms}
     for clip in animated:
         cycle_start = 0
@@ -47,7 +51,10 @@ def composite_gif_timeline(background, sprite) -> tuple[tuple[int, ...], tuple[i
                 if event < loop_ms:
                     events.add(event)
             cycle_start += clip.duration_ms
-    ordered = sorted(events)
+    # GIF has 10 ms resolution. Combining independently timed APNG/WebP
+    # sprites can create sub-10 ms gaps even when each input is valid. Merge
+    # boundaries into the next representable tick, never show a frame early.
+    ordered = sorted({((int(event) + 9) // 10) * 10 for event in events})
     timestamps = tuple(ordered[:-1])
     durations = tuple(right - left for left, right in pairwise(ordered))
     return timestamps, durations

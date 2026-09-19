@@ -180,15 +180,20 @@ sprites, without wall occlusion or relighting the background. It requires an act
 SceneLight background, just like the other sprite lighting controls. The player's
 master switch disables glow and emitted light as well.
 
-Preview → Calibrate → **Glow & emitted light** adjusts these values. The
-single-sprite Preview displays self glow; use a second selected character in-game
-to see emitted light. Exported profiles preserve both sets of controls. For effects
+Preview → Calibrate → **Glow & emitted light** adjusts these values for the selected
+character. Add a second character in Preview to see emitted light. Exported profiles
+preserve both sets of controls. For effects
 such as fire, put the settings on the image or tag so other characters do not glow.
 
 To change the color you see in Preview, increase **Sprite glow** above zero, then
 use **Choose color** in the Sprite glow group. The picker enables **Custom glow
 color** automatically. Uncheck it to restore artwork colors. The separate
 **Cast-light color** controls affect light cast onto other characters only.
+Use the **Artwork → color** slider to blend between artwork colors and a full custom
+color. An intermediate value such as 35% applies a partial tint.
+
+Preview also offers exact per-character strength and **Export sprite rules**.
+See the [workspace guide](PREVIEW_WORKSPACE.md) for saved assets and layered sprites.
 
 For example, this makes a sprite and its halo glow blue without lighting neighbors:
 

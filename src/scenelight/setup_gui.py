@@ -18,12 +18,13 @@ import sys
 import threading
 import time
 import tkinter as tk
+from collections import deque
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__
+from . import __version__, diagnostics
 from .branding import ICON_PATH, ICON_PNG, set_process_identity
 from .calibration import profile_path
 from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility_root
@@ -1338,6 +1339,7 @@ class SceneLightSetup(tk.Tk):
     def __init__(self, initial_project: str | None = None, *, developer_mode: bool = False) -> None:
         set_process_identity()
         super().__init__()
+        diagnostics.start_session("setup", operation="startup", project=initial_project or "")
         self.developer_mode = developer_mode
         self.title(f"SceneLight {__version__}")
         self.geometry("780x540")
@@ -1412,7 +1414,7 @@ class SceneLightSetup(tk.Tk):
         self.mode_button: ttk.Button | None = None
         self.step_labels: list[tk.Label] = []
         self._icon_images: list[tk.PhotoImage] = []
-        self._log_lines: list[str] = []
+        self._log_lines: deque[str] = deque(maxlen=1500)
         self.log: tk.Text | None = None
         self._destroying = False
 
@@ -2090,27 +2092,10 @@ class SceneLightSetup(tk.Tk):
             activity_tab.rowconfigure(1, weight=1)
             self._activity_tab = activity_tab
             notebook.add(activity_tab, text="Activity")
-            ttk.Label(activity_tab, text="Activity log", style="CardTitle.TLabel").grid(
-                row=0, column=0, sticky="w", pady=(0, 8)
-            )
-            self.log = tk.Text(
-                activity_tab,
-                wrap="word",
-                state="normal",
-                background="#07090c",
-                foreground="#cbd3dc",
-                insertbackground="#ffffff",
-                relief="flat",
-                padx=10,
-                pady=8,
-                font=("Cascadia Mono", 9),
-            )
-            self.log.insert("end", "".join(self._log_lines))
-            self.log.configure(state="disabled")
-            scrollbar = ttk.Scrollbar(activity_tab, orient="vertical", command=self.log.yview)
-            self.log.configure(yscrollcommand=scrollbar.set)
-            self.log.grid(row=1, column=0, sticky="nsew")
-            scrollbar.grid(row=1, column=1, sticky="ns")
+            from .diagnostics_ui import mount_activity
+
+            browser = mount_activity(activity_tab)
+            browser.grid(row=0, column=0, rowspan=2, sticky="nsew")
 
             def closed() -> None:
                 self.log = None
@@ -3313,8 +3298,18 @@ class SceneLightSetup(tk.Tk):
         # laid out so switching games cannot make it appear to have vanished.
         window.after_idle(focus_review)
 
-    def _append_log(self, text: str) -> None:
+    def report_callback_exception(self, kind, error, trace) -> None:
+        session = diagnostics.current_session() or diagnostics.start_session("setup")
+        if session is not None:
+            session.exception("setup.ui", error.with_traceback(trace))
+            session.update(status="error", failure=str(error))
+        super().report_callback_exception(kind, error, trace)
+
+    def _append_log(self, text: str, *, record: bool = True) -> None:
         self._log_lines.append(text)
+        session = diagnostics.current_session()
+        if session is not None and record:
+            session.output(text)
         if self.log is not None:
             self.log.configure(state="normal")
             self.log.insert("end", text)
@@ -3657,6 +3652,10 @@ class SceneLightSetup(tk.Tk):
         self._cancel_requested.clear()
         self._running = True
         self._active_operation = operation
+        previous_session = diagnostics.current_session()
+        if previous_session is not None and previous_session._summary.get("operation") == "startup":
+            previous_session.update(status="ready")
+        diagnostics.start_session("setup", operation=operation, project=self.project_var.get())
         self._component_download = ""
         self._refresh_project_state()
         _title, _subtitle, initial_status = operation_copy(operation)
@@ -3682,6 +3681,9 @@ class SceneLightSetup(tk.Tk):
         def worker() -> None:
             output: list[str] = []
             environment = operation_environment()
+            session = diagnostics.current_session()
+            if session is not None:
+                environment["SCENELIGHT_LOG_SESSION"] = str(session.path)
             flags = (
                 subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
                 if os.name == "nt"
@@ -3716,8 +3718,18 @@ class SceneLightSetup(tk.Tk):
                     assert self._process.stdout is not None
                     for line in self._process.stdout:
                         output.append(line)
-                        self._events.put(("log", line))
+                        if session is not None:
+                            session.output(line)
+                        self._events.put(("log", line, session is not None))
                     return_code = self._process.wait()
+                    diagnostics.event(
+                        operation,
+                        "Command exited",
+                        "error" if return_code else "info",
+                        command=item,
+                        exit_code=return_code,
+                        pid=self._process.pid,
+                    )
                     self._process = None
                     self._events.put(("command-finished", operation, command_index, len(commands)))
                     if operation in {"components", "preview-components"}:
@@ -3727,6 +3739,8 @@ class SceneLightSetup(tk.Tk):
                             return_code = 130
                         break
             except Exception as error:  # Process failures belong in the visible setup log.
+                if session is not None:
+                    session.exception(operation, error)
                 detail = f"{type(error).__name__}: {error}\n"
                 output.append(detail)
                 self._events.put(("log", detail))
@@ -3794,12 +3808,13 @@ class SceneLightSetup(tk.Tk):
         )
 
     def _drain_events(self) -> None:
+        deadline = time.monotonic() + 0.012
         try:
-            while True:
+            while time.monotonic() < deadline:
                 event = self._events.get_nowait()
                 if event[0] == "log":
                     line = str(event[1])
-                    self._append_log(line)
+                    self._append_log(line, record=not (len(event) > 2 and event[2]))
                     if self._active_operation in {"components", "preview-components"}:
                         component_update = parse_component_progress(
                             line,
@@ -3872,7 +3887,7 @@ class SceneLightSetup(tk.Tk):
                     self._finish_cuda_detection(event[2], int(event[1]))
         except queue.Empty:
             pass
-        self.after(100, self._drain_events)
+        self.after(10 if not self._events.empty() else 100, self._drain_events)
 
     def _operation_done(
         self,
@@ -3883,6 +3898,18 @@ class SceneLightSetup(tk.Tk):
         *,
         cancelled: bool = False,
     ) -> None:
+        session = diagnostics.current_session()
+        if session is not None:
+            session.update(
+                status="cancelled" if cancelled else "failed" if return_code else "succeeded",
+                exit_code=return_code,
+                managed_project=payload.get("managed_project")
+                if isinstance(payload, dict)
+                else None,
+                failure=describe_operation_failure(output)[0]
+                if return_code and not cancelled
+                else "",
+            )
         continue_setup = operation == "components" and self._continue_after_components
         if operation == "components":
             self._continue_after_components = False

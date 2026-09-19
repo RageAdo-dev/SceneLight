@@ -22,6 +22,8 @@ from .source_types import VISUAL_SOURCE_SUFFIXES, is_effect_source, source_diges
 STATE_NAME = ".scenelight_sidecar.json"
 
 _EXCLUDED_ROOT_FILES = {
+    "scenelight-runtime.jsonl",
+    "scenelight-runtime.jsonl.1",
     "launch with scenelight.bat",
     "log.txt",
     "traceback.txt",
