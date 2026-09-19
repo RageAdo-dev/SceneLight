@@ -16,6 +16,7 @@ import numpy as np
 import psutil
 from PIL import Image
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..branding import ICON_PNG
 from ..calibration import (
     Calibration,
     CalibrationProfile,
@@ -124,6 +126,7 @@ class MainWindow(QMainWindow):
     def __init__(self, project_root: Path | None = None):
         super().__init__()
         self.setWindowTitle("SceneLight Preview & Calibrator")
+        self.setWindowIcon(QIcon(str(ICON_PNG)))
         self.resize(1600, 940)
         self._project_root = project_root.expanduser().resolve() if project_root else None
         self._profile_path = profile_path(self._project_root) if self._project_root else None

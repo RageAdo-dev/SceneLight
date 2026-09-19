@@ -1,5 +1,7 @@
 #include <windows.h>
 
+1 ICON "src/scenelight/assets/scenelight.ico"
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1, 0, 0, 0
  PRODUCTVERSION 1, 0, 0, 0

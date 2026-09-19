@@ -30,6 +30,7 @@
 
 ### Setup and author tools
 
+- SceneLight now has its own warm-to-cyan S icon in the Windows executable, Setup, Preview, and taskbar instead of an empty icon.
 - Game sprite lighting maps now use full source resolution, matching Preview. Both paths use the same transparent-canvas composition, preventing hidden RGB differences. Updating an older installation rebuilds reduced-resolution maps; analysis concurrency accounts for large sprites without reducing detail.
 - Setup detects actual NVIDIA CUDA devices in the background, checks the selected runtime or compatible CUDA 12 tools, and names the GPU in its recommendation. Optional acceleration can be declined to continue on CPU; prompts show the actual installation directory.
 - The game picker resolves a single game inside nested extraction folders. Multiple matches require an explicit choice, and discovery stays bounded without following linked directories. SDK paths retain their separate behavior.

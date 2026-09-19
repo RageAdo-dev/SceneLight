@@ -24,6 +24,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__
+from .branding import ICON_PATH, ICON_PNG, set_process_identity
 from .calibration import profile_path
 from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility_root
 from .cuda_detection import CudaSupport, detect_cuda_support
@@ -48,7 +49,6 @@ PREVIEW_LAUNCHER = SOURCE_ROOT / "scenelight_preview.pyw"
 REQUIREMENTS = SOURCE_ROOT / "requirements.txt"
 PREVIEW_REQUIREMENTS = SOURCE_ROOT / "requirements-preview.txt"
 OFFLINE_WHEELHOUSE = SOURCE_ROOT / "wheelhouse"
-BLANK_ICON = Path(__file__).resolve().parent / "assets" / "blank.ico"
 DEPENDENCIES = {
     "numpy": "NumPy",
     "cv2": "OpenCV",
@@ -1329,6 +1329,7 @@ class SceneLightSetup(tk.Tk):
     """A compact setup front end for local Ren'Py projects."""
 
     def __init__(self, initial_project: str | None = None, *, developer_mode: bool = False) -> None:
+        set_process_identity()
         super().__init__()
         self.developer_mode = developer_mode
         self.title(f"SceneLight {__version__}")
@@ -1602,8 +1603,14 @@ class SceneLightSetup(tk.Tk):
 
     def _apply_window_icon(self, window: tk.Misc) -> None:
         try:
-            if BLANK_ICON.is_file():
-                window.winfo_toplevel().iconbitmap(default=str(BLANK_ICON))
+            if sys.platform == "win32" and ICON_PATH.is_file():
+                top = window.winfo_toplevel()
+                top.iconbitmap(str(ICON_PATH))
+                top.iconbitmap(default=str(ICON_PATH))
+            elif ICON_PNG.is_file():
+                if not hasattr(self, "_app_icon"):
+                    self._app_icon = tk.PhotoImage(master=self, file=str(ICON_PNG))
+                window.winfo_toplevel().iconphoto(True, self._app_icon)
         except tk.TclError:
             pass
 

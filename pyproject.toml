@@ -60,7 +60,9 @@ where = ["src"]
 scenelight = [
   "runtime/*.rpy",
   "runtime/*.py",
-  "assets/blank.ico",
+  "assets/scenelight.ico",
+  "assets/scenelight.png",
+  "assets/scenelight.svg",
   "assets/scenelight-launcher.exe",
   "assets/scenelight-desktop.exe",
   "assets/scenelight-save-compat.rpy",

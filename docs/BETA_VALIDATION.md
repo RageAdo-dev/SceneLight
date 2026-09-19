@@ -5,7 +5,7 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The latest tester build passed **760 tests** locally. It includes the sprite-map
+The latest tester build passed **761 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
@@ -26,6 +26,10 @@ sprite interior, after subtracting the unlit capture offset. This is a controlle
 comparison, not a claim of exact pixels for all game transforms or GPUs.
 See [resolution benchmarks](performance.md#sprite-map-resolution) for preparation
 time, drawing cost, and storage tradeoffs.
+
+The approved S icon is embedded in both Windows launchers at seven sizes from
+16 to 256 pixels. Native Setup and Qt Preview window icons were read back and
+checked for visible artwork; packaged icon frames match the approved source.
 
 | GPU family | Current evidence |
 | --- | --- |

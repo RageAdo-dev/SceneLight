@@ -1,7 +1,10 @@
 import importlib.util
 from pathlib import Path
 
+from PIL import Image
+
 from scenelight import desktop, setup_gui
+from scenelight.branding import ICON_PATH, ICON_PNG
 
 
 def _launcher_builder():
@@ -62,3 +65,22 @@ def test_ordinary_python_is_not_mistaken_for_the_bundled_runtime(tmp_path, monke
     python.touch()
     monkeypatch.setattr(desktop.sys, "executable", str(python))
     assert desktop.bundled_python() is None
+
+
+def test_application_icon_has_a_visible_mark_at_every_windows_size():
+    expected = {(size, size) for size in (16, 24, 32, 48, 64, 128, 256)}
+    with Image.open(ICON_PATH) as icon:
+        assert icon.ico.sizes() == expected
+        for size in expected:
+            frame = icon.ico.getimage(size).convert("RGBA")
+            assert frame.getchannel("A").getextrema() == (0, 255)
+            # A nontransparent black square is still a broken app icon.
+            visible_mark = sum(
+                1
+                for red, green, blue, alpha in frame.get_flattened_data()
+                if alpha > 128 and max(red, green, blue) > 100
+            )
+            assert visible_mark > size[0] * size[1] * 0.03
+    with Image.open(ICON_PNG) as image:
+        assert image.size == (1024, 1024)
+        assert image.mode == "RGBA"

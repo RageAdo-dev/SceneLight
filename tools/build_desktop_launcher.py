@@ -54,6 +54,8 @@ def resource_text(
     return (
         "#include <windows.h>\n"
         "\n"
+        '1 ICON "src/scenelight/assets/scenelight.ico"\n'
+        "\n"
         "VS_VERSION_INFO VERSIONINFO\n"
         f" FILEVERSION {numeric}\n"
         f" PRODUCTVERSION {numeric}\n"
