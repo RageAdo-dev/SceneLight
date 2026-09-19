@@ -48,7 +48,7 @@ from .engine import (
     prepare_scene,
     scene_target_mid,
 )
-from .form_maps import FORM_ANALYSIS_MAX_DIMENSION, FORM_MAP_VERSION, build_sprite_form_maps
+from .form_maps import FORM_MAP_VERSION, build_sprite_form_maps
 from .hashing import sha256_file
 from .project import ProjectDiscovery, SpriteSpec
 
@@ -89,12 +89,11 @@ def _atlas_layout(
     return columns, math.ceil((scene_count + 1) / columns)
 
 
-# A normal 960x960 form worker retains the shared 128 MiB Lambert matrix and
-# peaks around 180--230 MiB while writing its three maps. This is intentionally
-# a scheduling estimate, not a quality setting: unusually large forms can still
-# trigger the existing pool-retry path, and reducing concurrency never changes
-# a texel.
+# Each worker retains a 128 MiB Lambert matrix plus image-sized working arrays.
+# Source dimensions increase the scheduling estimate for large sprites; fewer
+# concurrent workers preserve full-resolution output on smaller-memory hosts.
 FORM_WORKER_MEMORY_BYTES = 256 * MIB
+FORM_PIXEL_MEMORY_BYTES = 192
 FORM_PARENT_MEMORY_RESERVE_BYTES = 512 * MIB
 FORM_UNKNOWN_MEMORY_WORKERS = 2
 
@@ -1068,6 +1067,7 @@ def _memory_safe_form_workers(
     job_count: int,
     *,
     available_memory_bytes: int | None = None,
+    largest_sprite_pixels: int = 0,
 ) -> int:
     """Cap exact form concurrency by live memory rather than CPU count alone."""
 
@@ -1077,13 +1077,35 @@ def _memory_safe_form_workers(
         if available_memory_bytes is None
         else max(0, int(available_memory_bytes))
     )
+    worker_bytes = max(
+        FORM_WORKER_MEMORY_BYTES,
+        128 * MIB + max(0, int(largest_sprite_pixels)) * FORM_PIXEL_MEMORY_BYTES,
+    )
     if available is None:
-        memory_workers = FORM_UNKNOWN_MEMORY_WORKERS
+        memory_workers = (
+            1 if worker_bytes > FORM_WORKER_MEMORY_BYTES else FORM_UNKNOWN_MEMORY_WORKERS
+        )
     else:
         reserve = min(4 * GIB, max(FORM_PARENT_MEMORY_RESERVE_BYTES, available // 4))
         usable = max(0, available - reserve)
-        memory_workers = max(1, usable // FORM_WORKER_MEMORY_BYTES)
+        memory_workers = max(1, usable // worker_bytes)
     return max(1, min(requested, int(memory_workers)))
+
+
+def _form_pixel_count(spec: SpriteSpec, sizes: dict[Path, tuple[int, int]]) -> int:
+    """Read only image headers when budgeting full-resolution worker memory."""
+
+    if spec.canvas_size is not None:
+        width, height = spec.canvas_size
+    else:
+        source = spec.layers[0]
+        size = sizes.get(source)
+        if size is None:
+            with Image.open(source) as image:
+                size = image.size
+            sizes[source] = size
+        width, height = size
+    return max(1, width) * max(1, height)
 
 
 def _render_form_entry(
@@ -1098,18 +1120,8 @@ def _render_form_entry(
         return key, None
     source_size = sprite.size
     source_sha256 = hashlib.sha256(sprite.tobytes()).hexdigest()
-    analysis_sprite = sprite
-    if max(source_size) > FORM_ANALYSIS_MAX_DIMENSION:
-        scale = FORM_ANALYSIS_MAX_DIMENSION / max(source_size)
-        analysis_sprite = sprite.resize(
-            (
-                max(1, round(sprite.width * scale)),
-                max(1, round(sprite.height * scale)),
-            ),
-            Image.Resampling.LANCZOS,
-        )
     maps = build_sprite_form_maps(
-        analysis_sprite,
+        sprite,
         source_size=source_size,
         source_sha256=source_sha256,
     )
@@ -1306,7 +1318,19 @@ def _build_form_maps(
         )
 
     requested_workers = max(1, min(worker_count, len(pending) or 1))
-    active_workers = _memory_safe_form_workers(requested_workers, len(pending) or 1)
+    source_sizes: dict[Path, tuple[int, int]] = {}
+    largest_sprite_pixels = 0
+    for _key, spec, _paths, _fingerprint in pending:
+        try:
+            largest_sprite_pixels = max(
+                largest_sprite_pixels, _form_pixel_count(spec, source_sizes)
+            )
+        except (OSError, ValueError, IndexError, Image.DecompressionBombError):
+            # The existing worker error path reports unreadable third-party art.
+            continue
+    active_workers = _memory_safe_form_workers(
+        requested_workers, len(pending) or 1, largest_sprite_pixels=largest_sprite_pixels
+    )
     if pending:
         memory_note = (
             f"; memory-safe from {requested_workers} requested"

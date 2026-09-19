@@ -35,6 +35,25 @@ Compute shaders are optional; equivalent raster passes remain available.
 
 ## CPU and graphics requirements
 
+### Sprite-map resolution
+
+On September 18, 2026, two real sprites were compared at a 512-pixel maximum
+dimension and at their original resolution. Median times after worker warmup
+include analysis and lossless PNG encoding; each form was measured six times.
+
+| Sprite size | 512px preparation | Full-resolution preparation | 512px GPU draw | Full-resolution GPU draw |
+| --- | ---: | ---: | ---: | ---: |
+| 550×978 | 0.039 s | 0.142 s | 0.086 ms | 0.087 ms |
+| 960×960 | 0.075 s | 0.261 s | 0.086 ms | 0.089 ms |
+
+GPU draws used an RTX 4090 at 1280×720, with an already analyzed background and
+one moving character. These timings exclude background analysis, presentation,
+and first texture upload; they are not a guarantee for integrated graphics.
+The extra preprocessing occurs once per unique sprite and is cached. The two
+full-resolution map sets used about 3.2–3.4 times the compressed disk space of
+their 512px versions. Full resolution is now used consistently in game and Preview;
+large inputs reduce analysis concurrency to stay within the memory budget.
+
 The existing CPU reference remains unsuitable for per-frame live analysis. On
 the same desktop, complete field generation with the default single-worker
 transport path took about 1.1 seconds after warmup. With eight point workers,

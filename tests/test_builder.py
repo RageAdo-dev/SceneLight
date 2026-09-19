@@ -14,7 +14,7 @@ import scenelight.builder as builder_module
 import scenelight.cuda_backend as cuda_backend
 from scenelight.builder import build_project
 from scenelight.engine import DetectedLight
-from scenelight.form_maps import FORM_ANALYSIS_MAX_DIMENSION
+from scenelight.form_maps import FORM_MAP_VERSION
 from scenelight.project import SpriteSpec, discover_project
 
 
@@ -221,7 +221,7 @@ def test_form_worker_limit_uses_live_memory_without_changing_quality() -> None:
     )
 
 
-def test_large_form_maps_keep_original_identity_at_bounded_transport_resolution(
+def test_large_form_maps_match_preview_at_original_resolution(
     tmp_path: Path,
 ) -> None:
     game = tmp_path / "game"
@@ -244,20 +244,80 @@ def test_large_form_maps_keep_original_identity_at_bounded_transport_resolution(
 
     assert entry is not None
     assert entry["source_size"] == [1024, 768]
-    assert entry["map_size"] == [FORM_ANALYSIS_MAX_DIMENSION, 384]
+    assert entry["map_size"] == [1024, 768]
     with Image.open(source) as source_image:
         assert (
             entry["source_sha256"]
             == hashlib.sha256(source_image.convert("RGBA").tobytes()).hexdigest()
         )
     expected_sizes = {
-        "normal_noise": (FORM_ANALYSIS_MAX_DIMENSION, 384),
-        "height_ao_edge": (FORM_ANALYSIS_MAX_DIMENSION, 384),
+        "normal_noise": (1024, 768),
+        "height_ao_edge": (1024, 768),
         "response": (64, 64),
     }
+    from scenelight.preview.artifacts import ArtifactCache
+
+    preview = ArtifactCache(tmp_path / "preview-cache").form(source)
     for name, expected_size in expected_sizes.items():
         with Image.open(paths[name]) as generated:
             assert generated.size == expected_size
+            with Image.open(preview.image(name)) as preview_map:
+                np.testing.assert_array_equal(np.asarray(generated), np.asarray(preview_map))
+    for name, value in preview.metadata.items():
+        assert entry[name] == value
+
+
+def test_full_resolution_forms_reduce_worker_count_for_large_sources() -> None:
+    available = 4 * builder_module.GIB
+    small = builder_module._memory_safe_form_workers(16, 100, available_memory_bytes=available)
+    large = builder_module._memory_safe_form_workers(
+        16, 100, available_memory_bytes=available, largest_sprite_pixels=2048 * 2048
+    )
+    assert small == 12
+    assert large == 3
+
+
+def test_form_memory_budget_uses_composite_canvas_and_caches_image_headers(tmp_path, monkeypatch):
+    source = tmp_path / "sprite.png"
+    Image.new("RGBA", (800, 1200)).save(source)
+    sizes = {}
+    assert builder_module._form_pixel_count(SpriteSpec("single", (source,)), sizes) == 800 * 1200
+    monkeypatch.setattr(Image, "open", lambda *args: pytest.fail("Header should be cached"))
+    assert builder_module._form_pixel_count(SpriteSpec("alias", (source,)), sizes) == 800 * 1200
+    composed = SpriteSpec("layered", (source,), positions=((0, 0),), canvas_size=(2000, 3000))
+    assert builder_module._form_pixel_count(composed, sizes) == 2000 * 3000
+
+
+def test_previous_512px_maps_are_rebuilt_then_full_resolution_maps_are_reused(
+    tmp_path, monkeypatch
+):
+    project = make_project(tmp_path / "project")
+    source = project / "game/images/nova.png"
+    Image.new("RGBA", (600, 900), (80, 120, 180, 255)).save(source)
+    discovery = discover_project(project)
+    output = project / "game/scenelight_runtime"
+    before = builder_module._build_form_maps(discovery, output, 1)
+    legacy = json.loads(json.dumps(before))
+    legacy["version"] = 8
+    entry = legacy["sprites"]["nova idle"]
+    entry["version"] = 8
+    entry["map_size"] = [341, 512]
+    for name in ("normal_noise", "height_ao_edge"):
+        Image.new("RGB", (341, 512)).save(project / "game" / entry[name])
+    (output / "sprite_form_manifest.json").write_text(json.dumps(legacy))
+
+    rebuilt = builder_module._build_form_maps(discovery, output, 1)
+    assert rebuilt["version"] == FORM_MAP_VERSION == 9
+    assert rebuilt["sprites"]["nova idle"]["map_size"] == [600, 900]
+    for name in ("normal_noise", "height_ao_edge"):
+        with Image.open(project / "game" / entry[name]) as image:
+            assert image.size == (600, 900)
+    monkeypatch.setattr(
+        builder_module,
+        "_render_form_entry",
+        lambda *args: pytest.fail("Current maps should be reused"),
+    )
+    assert builder_module._build_form_maps(discovery, output, 1)["sprites"] == rebuilt["sprites"]
 
 
 def test_broken_form_process_pool_retries_exact_jobs_with_fewer_workers(
@@ -317,7 +377,7 @@ def test_broken_form_process_pool_retries_exact_jobs_with_fewer_workers(
     monkeypatch.setattr(
         builder_module,
         "_memory_safe_form_workers",
-        lambda requested, _jobs: requested,
+        lambda requested, _jobs, **_kwargs: requested,
     )
 
     payload = builder_module._build_form_maps(

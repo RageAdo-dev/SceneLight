@@ -5,7 +5,7 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The latest tester build passed **756 tests** locally. It includes the sprite-map
+The latest tester build passed **759 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
@@ -18,6 +18,14 @@ The RTX 4090 was detected with a working backend and with a fresh runtime missin
 CuPy. Declining the optional download continued on CPU. The reported nested
 Graveyard Girls extraction resolved to its inner game folder without reselection;
 the maximum UI event gap during combined discovery was about 40 ms locally.
+
+Game and Preview now both generate full-resolution sprite maps. A matched-input
+Ren'Py 7.7.1 GL2 comparison using two Graveyard Girls backgrounds measured mean
+differences in the lighting change of 0.004 and 0.021 byte levels on the opaque
+sprite interior, after subtracting the unlit capture offset. This is a controlled
+comparison, not a claim of exact pixels for all game transforms or GPUs.
+See [resolution benchmarks](performance.md#sprite-map-resolution) for preparation
+time, drawing cost, and storage tradeoffs.
 
 | GPU family | Current evidence |
 | --- | --- |

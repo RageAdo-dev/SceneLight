@@ -25,10 +25,9 @@ from .engine import (
     _surface_ambient_occlusion,
 )
 
-# 8 rebuilds the maps that version 7 briefly wrote for the reverted surface
-# change, so installs that saw 7 cannot keep stale normals.
-FORM_MAP_VERSION = 8
-FORM_ANALYSIS_MAX_DIMENSION = 512
+# 9 replaces the installer's 512px maps with source-resolution maps, matching
+# Preview. Old maps must not survive an update through the reusable form cache.
+FORM_MAP_VERSION = 9
 HEIGHT_MIN = -0.25
 HEIGHT_MAX = 1.25
 NOISE_RANGE = 4.0

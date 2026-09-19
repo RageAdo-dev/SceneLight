@@ -66,7 +66,7 @@ def test_release_record_names_every_cache_contract() -> None:
         "runtime_api_version": 1,
         "runtime_manifest_version": 8,
         "transport_algorithm": "14-spatial-radiance-basis",
-        "sprite_form_version": 8,
+        "sprite_form_version": 9,
         "capture_version": 42,
         "capture_plan_version": 3,
         "capture_pixel_version": 2,

@@ -189,7 +189,7 @@ def test_verified_refresh_migrates_versionless_pre_release_manifest(tmp_path: Pa
     assert status.clean
     assert status.installed_version == "1.0.0"
     migrated = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert migrated["release"]["sprite_form_version"] == 8
+    assert migrated["release"]["sprite_form_version"] == 9
 
 
 def test_refresh_preflight_refuses_a_modified_runtime_before_analysis(tmp_path: Path) -> None:

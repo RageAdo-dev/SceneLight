@@ -30,6 +30,7 @@
 
 ### Setup and author tools
 
+- Game sprite lighting maps now use full source resolution, matching Preview. Updating an older installation rebuilds reduced-resolution maps; analysis concurrency accounts for large sprites without reducing detail.
 - Setup detects actual NVIDIA CUDA devices in the background, checks the selected runtime or compatible CUDA 12 tools, and names the GPU in its recommendation. Optional acceleration can be declined to continue on CPU; prompts show the actual installation directory.
 - The game picker resolves a single game inside nested extraction folders. Multiple matches require an explicit choice, and discovery stays bounded without following linked directories. SDK paths retain their separate behavior.
 - Preview treats MPO/JPEG auxiliary images (including HDR gain maps) and TIFF pages as still-image data instead of animation frames. Existing mistaken animation caches are ignored; true GIF, APNG, WebP and other timed formats retain playback.

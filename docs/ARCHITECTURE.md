@@ -65,13 +65,14 @@ separate contracts; changing progress text does not invalidate captured pixels.
 ## Surface maps
 
 `form_maps.py` reconstructs height from the silhouette and painted shading.
-Form-map version 8 expresses slopes in normalized surface coordinates so larger
+Form-map version 9 expresses slopes in normalized surface coordinates so larger
 sprites do not become flatter. Painted shading is read at form scale, so the
 artist's own band and line boundaries do not become creases through a face or a
 sleeve, while broad painted volume still shapes the surface. The original color
-image remains the material input. Installed game maps have a 512-pixel maximum
-dimension; source dimensions and pixel hashes are recorded separately. Preview
-can analyze the original import size. Both use the same reconstruction algorithm.
+image remains the material input. Installed game maps and Preview both use the
+source resolution and the same reconstruction algorithm. Updating an older
+installation regenerates its reduced-resolution maps. Worker concurrency is
+bounded by available memory and sprite dimensions rather than reducing map detail.
 
 The two surface textures and the response texture use these RGB channels:
 
