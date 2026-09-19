@@ -13,7 +13,6 @@ import html
 import importlib.metadata
 import json
 import os
-import platform
 import re
 import sys
 import threading
@@ -40,6 +39,18 @@ def logs_root() -> Path:
 
 def _stamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _platform_description() -> str:
+    # platform.platform() may launch `ver`/other subprocesses on Windows.
+    # Diagnostics must stay cheap and independent of process-launch failures.
+    if hasattr(sys, "getwindowsversion"):
+        version = sys.getwindowsversion()
+        return f"Windows {version.major}.{version.minor}.{version.build} · {'64' if sys.maxsize > 2**32 else '32'}-bit"
+    if hasattr(os, "uname"):
+        value = os.uname()
+        return f"{value.sysname} {value.release} {value.machine}"
+    return sys.platform
 
 
 def _atomic_json(path: Path, payload) -> None:
@@ -76,7 +87,7 @@ class Session:
             "version": __version__,
             "status": "running",
             "python": sys.version,
-            "platform": platform.platform(),
+            "platform": _platform_description(),
             "executable": sys.executable,
         }
         if existing is None:
