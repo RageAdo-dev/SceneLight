@@ -80,6 +80,10 @@ init -50 python:
         "emission_red": 1.0,
         "emission_green": 1.0,
         "emission_blue": 1.0,
+        "glow_red": 1.0,
+        "glow_green": 1.0,
+        "glow_blue": 1.0,
+        "glow_color_mix": 0.0,
     }
     _SCENELIGHT_CONTROL_KEYS = frozenset(
         ("enabled", "strength") + tuple(_SCENELIGHT_CALIBRATION_DEFAULTS.keys())
@@ -200,6 +204,8 @@ init -50 python:
                 value = max(0.0, min(value, 2.0))
             elif name == "exposure_bias":
                 value = max(-4.0, min(value, 4.0))
+            elif name in ("glow_red", "glow_green", "glow_blue", "glow_color_mix"):
+                value = max(0.0, min(value, 1.0))
             else:
                 value = max(0.0, min(value, 2.0))
             normalized[name] = value
@@ -1072,6 +1078,7 @@ init -50 python:
             (bounded("shadow_strength"), bounded("individual_light_colors"), bounded("adaptive_light_colors"), 0.0),
             (bounded("glow_strength"), bounded("glow_radius"), bounded("emission_strength"), bounded("emission_radius")),
             (bounded("emission_red"), bounded("emission_green"), bounded("emission_blue"), 0.0),
+            (bounded("glow_red", 0.0, 1.0), bounded("glow_green", 0.0, 1.0), bounded("glow_blue", 0.0, 1.0), bounded("glow_color_mix", 0.0, 1.0)),
         )
 
     def _scenelight_emission_controls(scene_key, tag, controls):
@@ -1799,6 +1806,7 @@ init -50 python:
             uniform vec4 u_sc_calibration3;
             uniform vec4 u_sc_calibration4;
             uniform vec2 u_sc_glow_data;
+            uniform vec4 u_sc_glow_color;
             uniform float u_sc_screen_aspect;
             uniform vec4 u_sc_sprite_light0_data;
             uniform vec3 u_sc_sprite_light0_color;
@@ -1879,7 +1887,7 @@ init -50 python:
                 return max(color, vec3(0.0)) * light.w * falloff * falloff * facing;
             }
 
-            vec4 scenelight_sprite_halo(sampler2D source_texture, float lod_bias, vec2 uv_center, vec2 canvas_size, vec2 glow) {
+            vec4 scenelight_sprite_halo(sampler2D source_texture, float lod_bias, vec2 uv_center, vec2 canvas_size, vec2 glow, vec4 tint) {
                 vec4 sum = vec4(0.0);
                 float weights = 0.0;
                 // Isotropic source-pixel radius, independent of canvas aspect.
@@ -1900,6 +1908,7 @@ init -50 python:
                 vec4 blurred = sum / weights;
                 float opacity = 1.0 - exp(-blurred.a * glow.x * 1.8);
                 vec3 color = clamp(blurred.rgb / max(blurred.a, 0.001) * 1.25, 0.0, 1.0);
+                color = mix(color, tint.rgb * max(color.r, max(color.g, color.b)), tint.a);
                 return vec4(color * opacity, opacity);
             }
             vec2 scenelight_field_uv(vec2 screen_uv, vec4 tile) {
@@ -3441,6 +3450,9 @@ init -50 python:
                 if (u_sc_glow_data.x > 0.0) {
                     // Emissive art remains luminous even in a dark environment.
                     lit = max(lit, base * (1.0 + 0.6 * u_sc_glow_data.x));
+                    vec3 tinted_emission = scenelight_srgb_to_linear(u_sc_glow_color.rgb)
+                        * dot(base, vec3(0.2126, 0.7152, 0.0722)) * (1.0 + 0.6 * u_sc_glow_data.x);
+                    lit = mix(lit, tinted_emission, u_sc_glow_color.a);
                 }
                 vec3 output_srgb = scenelight_linear_to_srgb(clamp(lit, 0.0, 1.0));
                 float original_view = step(0.5, u_sc_compare_mode)
@@ -3456,7 +3468,7 @@ init -50 python:
             if (u_sc_glow_data.x > 0.0 && u_sc_glow_data.y > 0.0) {
                 float show_glow = 1.0 - step(0.5, u_sc_compare_mode)
                     + step(1.5, u_sc_compare_mode) * step(0.5, v_tex_coord.x);
-                vec4 halo = scenelight_sprite_halo(tex0, u_lod_bias, v_tex_coord, u_sc_sprite_size, u_sc_glow_data) * show_glow;
+                vec4 halo = scenelight_sprite_halo(tex0, u_lod_bias, v_tex_coord, u_sc_sprite_size, u_sc_glow_data, u_sc_glow_color) * show_glow;
                 gl_FragColor += halo * (1.0 - gl_FragColor.a);
             }
         """)
@@ -4099,6 +4111,7 @@ init -50 python:
                 if enabled and not glow_covered else 0.0,
                 glow_block[1],
             ))
+            result.add_uniform("u_sc_glow_color", tuple(_scenelight_calibration_blocks(scene, controls.get("calibration", {}))[7]))
             result.add_uniform("u_sc_screen_aspect", float(config.screen_width) / max(float(config.screen_height), 1.0))
             for index in range(4):
                 data, color = emitters[index] if enabled and not receive_covered and index < len(emitters) else (

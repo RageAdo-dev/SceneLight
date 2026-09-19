@@ -1620,6 +1620,21 @@ class MainWindow(QMainWindow):
             QPushButton { background: #20334a; border: 1px solid #34516f; padding: 9px 13px; }
             QPushButton:hover { background: #294563; }
             QPushButton:pressed { background: #4d82ff; }
+            QTabWidget::pane { background: #0a1018; border: 1px solid #34516f; }
+            QTabBar::tab {
+                background: #172638; color: #dbe8f7;
+                border: 1px solid #34516f; border-bottom: 3px solid #34516f;
+                border-top-left-radius: 4px; border-top-right-radius: 4px;
+                padding: 9px 14px; margin-right: 3px;
+            }
+            QTabBar::tab:hover { background: #25405a; color: #ffffff; }
+            QTabBar::tab:selected {
+                background: #294563; color: #ffffff;
+                border-bottom: 3px solid #74d5f3; font-weight: 600;
+            }
+            QTabBar::tab:focus { border-color: #b4e6ff; }
+            QGroupBox { border: 1px solid #34516f; border-radius: 4px; margin-top: 12px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #ffffff; }
             QFrame#panel { background: #101a27; border: 1px solid #1f3045; }
             QFrame#section { background: #172638; border: 1px solid #22364e; padding: 4px; }
             QLabel#title { color: white; font-size: 25px; font-weight: 700; }

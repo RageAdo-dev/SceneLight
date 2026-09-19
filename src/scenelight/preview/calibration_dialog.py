@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QColorDialog,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -46,11 +51,14 @@ _ADVANCED = (
 _GLOW = (
     ("glow_strength", "Sprite glow", 0.0, 2.0, 0.05),
     ("glow_radius", "Halo spread", 0.0, 2.0, 0.05),
+)
+
+_EMITTED_LIGHT = (
     ("emission_strength", "Light cast onto characters", 0.0, 2.0, 0.05),
     ("emission_radius", "Light reach (screen heights)", 0.0, 2.0, 0.05),
-    ("emission_red", "Light color · red", 0.0, 2.0, 0.05),
-    ("emission_green", "Light color · green", 0.0, 2.0, 0.05),
-    ("emission_blue", "Light color · blue", 0.0, 2.0, 0.05),
+    ("emission_red", "Cast-light color · red", 0.0, 2.0, 0.05),
+    ("emission_green", "Cast-light color · green", 0.0, 2.0, 0.05),
+    ("emission_blue", "Cast-light color · blue", 0.0, 2.0, 0.05),
 )
 
 
@@ -67,12 +75,14 @@ class CalibrationDialog(QDialog):
         self._initial = calibration.normalized()
         self._on_change = on_change
         self._controls: dict[str, QDoubleSpinBox] = {}
+        self._glow_color = QColor("#ffffff")
+        self._glow_color_mix = 0.0
 
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
         tabs.addTab(self._page(_BASIC), "Basic")
         tabs.addTab(self._page(_ADVANCED), "Advanced")
-        tabs.addTab(self._page(_GLOW), "Glow & emitted light")
+        tabs.addTab(self._glow_page(), "Glow && emitted light")
         layout.addWidget(tabs)
 
         buttons = QHBoxLayout()
@@ -116,22 +126,97 @@ class CalibrationDialog(QDialog):
             form.addRow(label, control)
         return page
 
+    def _glow_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        own = QGroupBox("Sprite glow · visible in Preview")
+        own_layout = QVBoxLayout(own)
+        own_layout.addWidget(self._page(_GLOW))
+        color_row = QHBoxLayout()
+        self._custom_glow = QCheckBox("Custom glow color")
+        self._custom_glow.toggled.connect(self._toggle_glow_color)
+        self._color_button = QPushButton("Choose color…")
+        self._color_button.clicked.connect(self._choose_glow_color)
+        color_row.addWidget(self._custom_glow)
+        color_row.addWidget(self._color_button)
+        own_layout.addLayout(color_row)
+        self._glow_hint = QLabel()
+        self._glow_hint.setObjectName("subtitle")
+        self._glow_hint.setWordWrap(True)
+        own_layout.addWidget(self._glow_hint)
+        layout.addWidget(own)
+
+        cast = QGroupBox("Light cast onto other characters")
+        cast_layout = QVBoxLayout(cast)
+        note = QLabel(
+            "These colors affect nearby characters in-game. They do not change this sprite’s glow."
+        )
+        note.setObjectName("subtitle")
+        note.setWordWrap(True)
+        cast_layout.addWidget(note)
+        cast_layout.addWidget(self._page(_EMITTED_LIGHT))
+        layout.addWidget(cast)
+        layout.addStretch(1)
+        return page
+
+    def _toggle_glow_color(self, checked: bool) -> None:
+        self._glow_color_mix = 1.0 if checked else 0.0
+        self._changed()
+
+    def _choose_glow_color(self) -> None:
+        selected = QColorDialog.getColor(self._glow_color, self, "Sprite glow color")
+        if not selected.isValid():
+            return
+        self._glow_color = selected
+        self._glow_color_mix = 1.0
+        self._custom_glow.blockSignals(True)
+        self._custom_glow.setChecked(True)
+        self._custom_glow.blockSignals(False)
+        self._changed()
+
+    def _refresh_glow_controls(self) -> None:
+        swatch = QPixmap(20, 20)
+        swatch.fill(self._glow_color)
+        self._color_button.setIcon(QIcon(swatch))
+        self._color_button.setText("Choose color… " + self._glow_color.name().upper())
+        self._glow_hint.setText(
+            "Glow is off. Increase Sprite glow above 0 to see the color and halo."
+            if self._controls["glow_strength"].value() == 0
+            else "Custom color applies to the glowing sprite and halo."
+            if self._glow_color_mix > 0
+            else "Glow uses the artwork’s colors. Choose a color to customize it."
+        )
+
     @property
     def calibration(self) -> Calibration:
-        return Calibration.from_mapping(
-            {name: control.value() for name, control in self._controls.items()}
+        values = {name: control.value() for name, control in self._controls.items()}
+        values.update(
+            glow_red=self._glow_color.redF(),
+            glow_green=self._glow_color.greenF(),
+            glow_blue=self._glow_color.blueF(),
+            glow_color_mix=self._glow_color_mix,
         )
+        return Calibration.from_mapping(values)
 
     def _set_calibration(self, calibration: Calibration, *, notify: bool = True) -> None:
         values = calibration.as_dict()
+        self._glow_color = QColor.fromRgbF(
+            values["glow_red"], values["glow_green"], values["glow_blue"]
+        )
+        self._glow_color_mix = values["glow_color_mix"]
+        self._custom_glow.blockSignals(True)
+        self._custom_glow.setChecked(self._glow_color_mix > 0)
+        self._custom_glow.blockSignals(False)
         for name, control in self._controls.items():
             control.blockSignals(True)
             control.setValue(values[name])
             control.blockSignals(False)
+        self._refresh_glow_controls()
         if notify:
             self._on_change(self.calibration)
 
     def _changed(self, _value: float | None = None) -> None:
+        self._refresh_glow_controls()
         self._on_change(self.calibration)
 
     def reject(self) -> None:

@@ -440,6 +440,38 @@ _SETTING_ROWS = (
 
 _SETTING_ROWS += (
     (
+        "glow_red",
+        "Custom glow · red",
+        "0–1",
+        "0.1",
+        "Red channel of the sprite and halo color. Set glow_color_mix=1 and glow_strength above zero to see it.",
+        "glow tint color red",
+    ),
+    (
+        "glow_green",
+        "Custom glow · green",
+        "0–1",
+        "0.4",
+        "Green channel of the sprite and halo color. Independent of light cast onto other characters.",
+        "glow tint color green",
+    ),
+    (
+        "glow_blue",
+        "Custom glow · blue",
+        "0–1",
+        "1.0",
+        "Blue channel of the sprite and halo color. Independent of light cast onto other characters.",
+        "glow tint color blue",
+    ),
+    (
+        "glow_color_mix",
+        "Use custom glow color",
+        "0–1",
+        "1.0",
+        "Zero uses artwork colors; one uses glow_red/green/blue for the sprite and halo. Values between blend the two. Requires glow_strength above zero.",
+        "glow custom color tint artwork mix",
+    ),
+    (
         "glow_strength",
         "Sprite glow",
         "0–2",
@@ -521,7 +553,7 @@ _WORKFLOW = (
         "Choose self glow, nearby light, or both for each image.",
         "Include the effect tag in Setup's character selection so it receives SceneLight. Put the rules below in an init python block. Use character() for every expression of a tag, or image() for one exact image.",
         "The two strengths are independent: glow_strength=0 emits light without a halo; emission_strength=0 glows without lighting neighbors. Zero both restores ordinary lighting. Each character and image keeps its own full lighting settings.",
-        "The single-sprite Preview shows glow; nearby illumination needs a second selected sprite in-game. Leave transparent padding around the effect art for the halo. Emission follows the visible sprite's screen center, not a fixed floor position.",
+        "The single-sprite Preview shows glow. Use Custom glow color and Choose color to tint the sprite and halo, with Sprite glow above zero. Cast-light RGB controls affect a second selected sprite in-game. Leave transparent padding around the effect art for the halo.",
         example="""
             init python:
                 scenelight.character("hero", strength=0.65, rim_strength=0.4)

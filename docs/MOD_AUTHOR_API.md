@@ -142,6 +142,8 @@ All lighting scopes accept these settings. Numeric values are clamped to their r
 | `adaptive_light_colors` | 0–2 | Automatic separation of distinct colored sources |
 | `glow_strength` | 0–2 | Luminous sprite and soft halo in the artwork's colors; default 0 |
 | `glow_radius` | 0–2 | Halo spread; 1 means 4% of the shorter sprite canvas edge |
+| `glow_color_mix` | 0–1 | 0 uses artwork colors (default); 1 uses custom glow RGB |
+| `glow_red`, `glow_green`, `glow_blue` | 0–1 | Custom sprite and halo color; defaults 1, 1, 1 |
 | `emission_strength` | 0–2 | Light cast onto other selected sprites; default 0 |
 | `emission_radius` | 0–2 | Light reach in screen heights; default 0.35 |
 | `emission_red`, `emission_green`, `emission_blue` | 0–2 | Emitted light RGB intensity; defaults 1, 1, 1 |
@@ -182,6 +184,21 @@ Preview → Calibrate → **Glow & emitted light** adjusts these values. The
 single-sprite Preview displays self glow; use a second selected character in-game
 to see emitted light. Exported profiles preserve both sets of controls. For effects
 such as fire, put the settings on the image or tag so other characters do not glow.
+
+To change the color you see in Preview, increase **Sprite glow** above zero, then
+use **Choose color** in the Sprite glow group. The picker enables **Custom glow
+color** automatically. Uncheck it to restore artwork colors. The separate
+**Cast-light color** controls affect light cast onto other characters only.
+
+For example, this makes a sprite and its halo glow blue without lighting neighbors:
+
+```renpy
+$ scenelight.image("magic glowing", glow_strength=0.8, glow_color_mix=1.0,
+    glow_red=0.1, glow_green=0.3, glow_blue=1.0, emission_strength=0.0)
+```
+
+Setting `glow_color_mix=0` restores artwork colors. A zero `glow_strength`
+disables self glow regardless of the chosen color.
 
 Rain, glitch, and custom effect packs remain deferred until after launch.
 

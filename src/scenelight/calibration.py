@@ -44,12 +44,18 @@ class Calibration:
     emission_red: float = 1.0
     emission_green: float = 1.0
     emission_blue: float = 1.0
+    glow_red: float = 1.0
+    glow_green: float = 1.0
+    glow_blue: float = 1.0
+    glow_color_mix: float = 0.0
 
     def normalized(self) -> "Calibration":
         values = asdict(self)
         for name in values:
             if name == "exposure_bias":
                 values[name] = max(-4.0, min(float(values[name]), 4.0))
+            elif name in {"glow_red", "glow_green", "glow_blue", "glow_color_mix"}:
+                values[name] = max(0.0, min(float(values[name]), 1.0))
             else:
                 values[name] = max(0.0, min(float(values[name]), 2.0))
         return Calibration(**values)
@@ -97,6 +103,7 @@ class Calibration:
                 value.emission_radius,
             ),
             (value.emission_red, value.emission_green, value.emission_blue, 0.0),
+            (value.glow_red, value.glow_green, value.glow_blue, value.glow_color_mix),
         )
 
     @classmethod

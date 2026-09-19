@@ -33,6 +33,9 @@
 
 ### Setup and author tools
 
+- Preview calibration tabs now use readable dark backgrounds, bright labels, and distinct selected, hover, and keyboard-focus states.
+- Preview separates sprite glow from cast-light settings. A custom glow color picker changes the visible sprite and halo; an explicit hint explains when glow is off. Profiles and per-image author rules retain independent glow and cast-light colors.
+
 - Isolated capture workers' temporary directories so mod single-instance guards do not collide through a shared SDK launcher. Blocked workers finish sequentially from checkpoints when a guard still prevents parallel capture. Persistent conflicts now identify the actual cause instead of retrying graphics backends.
 
 - Settings → Advanced now includes an offline Developer guide with searchable commands, lighting controls, and copyable Ren'Py examples. Each example explains where to put it, with no project selection or extra download required. Effects remain deferred until after launch.

@@ -43,3 +43,49 @@ def test_glow_and_incoming_light_are_independent_and_disabled_pixels_match(rende
         renderer.set_sprite_emitters(())
         renderer.set_compare_mode(0)
         renderer.set_placement(0.65, 1.0, 0.92)
+
+
+def test_custom_glow_recolors_sprite_and_halo_without_affecting_cast_settings(renderer):
+    from dataclasses import replace
+
+    background = np.full((144, 256, 4), 18, dtype=np.uint8)
+    background[..., 3] = 255
+    renderer.set_live_analysis_enabled(True)
+    renderer.set_background_frame(background)
+    renderer.set_placement(0.5, 0.95, 0.8)
+    renderer.set_sprite_emitters(())
+    settings = Calibration(glow_strength=1.0, glow_radius=2.0, glow_color_mix=1.0)
+    try:
+        renderer.set_compare_mode(1)
+        original = renderer.render_rgba((640, 360))
+        empty = np.all(original[..., :3] == 18, axis=-1)
+        renderer.set_compare_mode(0)
+        frames = []
+        for rgb in ((1, 0, 0), (0, 0, 1)):
+            renderer.set_calibration(
+                replace(settings, glow_red=rgb[0], glow_green=rgb[1], glow_blue=rgb[2])
+            )
+            frames.append(renderer.render_rgba((640, 360)))
+        red, blue = frames
+        for mask in (empty, ~empty):
+            assert red[..., 0][mask].astype(int).sum() > blue[..., 0][mask].astype(int).sum() + 1000
+            assert blue[..., 2][mask].astype(int).sum() > red[..., 2][mask].astype(int).sum() + 1000
+        renderer.set_calibration(replace(settings, glow_color_mix=0))
+        artwork = renderer.render_rgba((640, 360))
+        renderer.set_calibration(
+            replace(settings, glow_color_mix=0, glow_red=0, glow_green=0, glow_blue=1)
+        )
+        np.testing.assert_array_equal(artwork, renderer.render_rgba((640, 360)))
+        # Cast-light RGB alone never changes the source's own glow.
+        renderer.set_calibration(
+            replace(settings, glow_color_mix=0, emission_red=0, emission_blue=2)
+        )
+        np.testing.assert_array_equal(artwork, renderer.render_rgba((640, 360)))
+        renderer.set_calibration(Calibration())
+        off = renderer.render_rgba((640, 360))
+        renderer.set_calibration(replace(settings, glow_strength=0, glow_red=0, glow_blue=1))
+        np.testing.assert_array_equal(off, renderer.render_rgba((640, 360)))
+    finally:
+        renderer.set_calibration(Calibration())
+        renderer.set_compare_mode(0)
+        renderer.set_placement(0.65, 1.0, 0.92)

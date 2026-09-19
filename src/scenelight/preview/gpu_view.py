@@ -840,6 +840,7 @@ class SceneLightGPUView(QOpenGLWidget):
         self._uniform(
             "u_sc_glow_data", (self._calibration.glow_strength, self._calibration.glow_radius)
         )
+        self._uniform("u_sc_glow_color", self._calibration.uniform_blocks()[7])
         self._uniform("u_sc_screen_aspect", CANVAS_SIZE[0] / CANVAS_SIZE[1])
         for index in range(4):
             data, color = (
