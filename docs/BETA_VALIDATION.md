@@ -5,7 +5,7 @@ every game, and a successful installation is not a complete playthrough.
 
 ## Current local candidate
 
-The latest tester build passed **761 tests** locally. It includes the sprite-map
+The latest tester build passed **762 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
@@ -28,8 +28,11 @@ See [resolution benchmarks](performance.md#sprite-map-resolution) for preparatio
 time, drawing cost, and storage tradeoffs.
 
 The approved S icon is embedded in both Windows launchers at seven sizes from
-16 to 256 pixels. Native Setup and Qt Preview window icons were read back and
-checked for visible artwork; packaged icon frames match the approved source.
+16 to 256 pixels. Setup's ICO now uses bitmap frames: Tk previously misread the
+PNG-backed frames and enlarged the smallest image, blurring the taskbar icon.
+Native Setup and dialog icons are checked against Windows' direct icon loading
+for matching dimensions and identical pixels. Qt Preview retains the original
+artwork; packaged icon frames match the approved source.
 
 | GPU family | Current evidence |
 | --- | --- |
