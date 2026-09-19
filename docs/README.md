@@ -3,7 +3,7 @@
 ## Using SceneLight
 
 - [Installation, Preview, updates and removal](INSTALL.md)
-- [Preview library, multiple characters, layered sprites, and bug reports](PREVIEW_WORKSPACE.md)
+- [Preview controls, glow, exports, and bug reports](PREVIEW_WORKSPACE.md)
 - [How the lighting and surface maps work](HOW_IT_WORKS.md)
 - [Compatibility and hardware results](BETA_VALIDATION.md)
 

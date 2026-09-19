@@ -4,6 +4,8 @@
 
 ### Lighting and playback
 
+- Restored the simple single-sprite Preview controls. Removed the extra library/scene toolbar and character list, preserved the right-side placement and lighting controls, and fixed drag coordinates being rounded back onto a percentage grid. Per-target controls remain in the mod API.
+- Sprite glow and color-rule glow strength now support 0–10 in Preview, profiles, and the mod API. Other lighting and halo ranges remain unchanged.
 - Added independent color-selective glow rules per sprite. Match nearby artwork shades with range and softness controls, adjust each rule's strength and halo spread, and retain the rules in saved scenes, library presets, profiles, and author exports.
 - Init-authored lighting rules now seed new games correctly and recover from older untouched empty save states. Save/load keeps intentional runtime overrides and resets.
 - Character exclusions remain effective during gameplay, including when a mod registers the same tag during initialization.
@@ -40,8 +42,7 @@
 - Character selection can be reopened and refreshed for installed projects. Automatic inclusion of newly detected characters defaults on, with persistent exclusions; disabling it keeps a fixed selection. Asset changes are prepared by Scan/Update in both player and developer workflows.
 
 - Added persistent support sessions with searchable stage/error views, separate retained console output, capture-worker context, runtime sprite-binding evidence, and exportable support ZIPs. Reports include a readable HTML browser and omit artwork/saves; common secrets and personal home paths are redacted.
-- Preview now supports saved asset libraries, editable still-image layer recipes, scene save/load, and up to 16 independently configured characters. Composition and animation exports include visible characters, and emitted lights affect neighboring characters in Preview.
-- Added an artwork-to-custom-color tint slider, an exact lighting-strength field, and per-image Ren'Py rule export for the selected character or the whole scene.
+- Added an artwork-to-custom-color tint slider. Preview retains lighting profiles and config exports; per-image lighting, glow, and emitted light are available through the mod API.
 
 - Preview calibration tabs now use readable dark backgrounds, bright labels, and distinct selected, hover, and keyboard-focus states.
 - Preview separates sprite glow from cast-light settings. A custom glow color picker changes the visible sprite and halo; an explicit hint explains when glow is off. Profiles and per-image author rules retain independent glow and cast-light colors.

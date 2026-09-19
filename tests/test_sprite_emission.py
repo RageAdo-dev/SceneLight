@@ -6,7 +6,27 @@ import pytest
 from test_developer_guide import _runtime_api
 from test_runtime_render_graph import _exposure_runtime, _load_runtime_definitions
 
-from scenelight.calibration import Calibration
+from scenelight.calibration import Calibration, CalibrationProfile, ColorGlowRule
+
+
+@pytest.mark.parametrize("strength, expected", [(-1, 0), (2, 2), (7.5, 7.5), (10, 10), (12, 10)])
+def test_glow_range_survives_profiles_author_rules_and_runtime_uniforms(strength, expected):
+    calibration = Calibration(
+        glow_strength=strength, glow_rules=(ColorGlowRule(strength=strength),)
+    ).normalized()
+    assert calibration.glow_strength == expected
+    assert calibration.glow_rules[0].strength == expected
+    profile = CalibrationProfile.from_payload(CalibrationProfile(calibration).to_payload())
+    assert profile.calibration == calibration
+    ns = _emission_runtime()
+    api = ns["scenelight"]
+    api.image("hero fire", glow_strength=strength, glow_rules=[{"strength": strength}])
+    values = ns["_scenelight_control_snapshot"]("room", "hero", "hero fire")["calibration"]
+    assert values["glow_strength"] == values["glow_rules"][0]["strength"] == expected
+    assert ns["_scenelight_calibration_blocks"]({}, values)[5][0] == expected
+    assert calibration.uniform_blocks()[5][0] == expected
+    assert ns["_scenelight_control_snapshot"]("room", "hero", "hero normal")["calibration"] == {}
+    assert ns["_scenelight_control_snapshot"]("room", "friend", "friend fire")["calibration"] == {}
 
 
 def _emission_runtime():

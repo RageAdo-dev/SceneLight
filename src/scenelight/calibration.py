@@ -76,7 +76,8 @@ class ColorGlowRule:
             raise ValueError("Glow rule color must contain three RGB numbers")
         values["color"] = tuple(bounded(channel, 1.0) for channel in color)
         for name in ("strength", "radius", "tolerance", "softness"):
-            values[name] = bounded(values[name], 2.0 if name in {"strength", "radius"} else 1.0)
+            maximum = 10.0 if name == "strength" else 2.0 if name == "radius" else 1.0
+            values[name] = bounded(values[name], maximum)
         return cls(**values)
 
 
@@ -125,6 +126,8 @@ class Calibration:
                 values[name] = tuple(ColorGlowRule.from_mapping(rule) for rule in values[name])
             elif name == "exposure_bias":
                 values[name] = max(-4.0, min(float(values[name]), 4.0))
+            elif name == "glow_strength":
+                values[name] = max(0.0, min(float(values[name]), 10.0))
             elif name in {"glow_red", "glow_green", "glow_blue", "glow_color_mix"}:
                 values[name] = max(0.0, min(float(values[name]), 1.0))
             else:

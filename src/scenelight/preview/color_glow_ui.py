@@ -83,7 +83,7 @@ class ColorGlowEditor(QWidget):
             (
                 "strength",
                 "Glow strength",
-                2.0,
+                10.0,
                 "Brightness of this color's glow. Zero turns this rule off.",
             ),
             (
@@ -145,8 +145,8 @@ class ColorGlowEditor(QWidget):
         self.hint.setText(
             "Add a color to start. No color rules means the existing lighting stays unchanged."
             if not valid
-            else "Matching uses the original artwork, before lighting. Rules stay with this character "
-            "in saved scenes, library presets, and exported sprite rules. More active rules take more rendering time."
+            else "Matching uses the original artwork, before lighting. Save profile or Export config "
+            "keeps these rules. Use the mod API for per-sprite settings. More active rules take more rendering time."
         )
         if not valid:
             return

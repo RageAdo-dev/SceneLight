@@ -52,7 +52,7 @@ _ADVANCED = (
 )
 
 _GLOW = (
-    ("glow_strength", "Sprite glow", 0.0, 2.0, 0.05),
+    ("glow_strength", "Sprite glow", 0.0, 10.0, 0.05),
     ("glow_radius", "Halo spread", 0.0, 2.0, 0.05),
 )
 
@@ -83,6 +83,7 @@ class CalibrationDialog(QDialog):
 
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
+        tabs.setUsesScrollButtons(False)
         tabs.addTab(self._page(_BASIC), "Basic")
         tabs.addTab(self._page(_ADVANCED), "Advanced")
         tabs.addTab(self._glow_page(), "Glow && emitted light")
@@ -125,7 +126,7 @@ class CalibrationDialog(QDialog):
                 )
             if name.startswith("emission_"):
                 control.setToolTip(
-                    "This light affects other visible characters in Preview and in-game. Add a second character to see it; it does not recolor this sprite’s own glow."
+                    "This light affects other visible characters in-game. Preview shows one sprite, so check cast light in your mod. It does not recolor this sprite’s own glow."
                 )
             control.valueChanged.connect(self._changed)
             self._controls[name] = control
@@ -167,7 +168,7 @@ class CalibrationDialog(QDialog):
         cast = QGroupBox("Light cast onto other characters")
         cast_layout = QVBoxLayout(cast)
         note = QLabel(
-            "These colors affect other characters. Add a second character in Preview to see them. They do not change this sprite’s own glow."
+            "These settings affect other characters in-game. Preview shows one sprite; check cast light in your mod. They do not change this sprite’s own glow."
         )
         note.setObjectName("subtitle")
         note.setWordWrap(True)

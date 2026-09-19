@@ -21,7 +21,8 @@ def test_glow_picker_toggle_cancel_and_defaults_preserve_separate_cast_color(mon
     dialog = CalibrationDialog(initial, changes.append)
     try:
         assert "Glow is off" in dialog._glow_hint.text()
-        dialog._controls["glow_strength"].setValue(1.0)
+        dialog._controls["glow_strength"].setValue(10.0)
+        assert dialog.calibration.glow_strength == 10
         monkeypatch.setattr(QColorDialog, "getColor", lambda *args: QColor("#2040ff"))
         dialog._choose_glow_color()
         selected = dialog.calibration

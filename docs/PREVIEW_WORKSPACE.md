@@ -1,80 +1,53 @@
-# Preview workspace
+# Preview
 
-## Characters and lighting
+Use **Open background** and **Open sprite / animation** to preview one sprite.
+Opening another sprite replaces the current one and retains the lighting settings.
+Drag to position it, use the mouse wheel to scale it, or use the right-side
+Horizontal, Baseline, and Character height controls. Dragging keeps precise
+coordinates even though the percentage labels are rounded for display.
 
-Use **Add character** to keep multiple sprites in the same scene. Select a character
-in the list, or click its visible artwork, before changing placement or lighting.
-The selected character's strength, calibration, glow, and emitted light are independent
-of the others. **Exact lighting strength** accepts a number from 0 to 2.
+Choose a Lighting preset, adjust Lighting strength, and open **Calibrate** for
+the Basic, Advanced, Glow & emitted light, and Color glow tabs. **Original** and
+**Split comparison** let you compare against the unchanged artwork.
 
-**Duplicate**, **Remove**, **Back**, **Front**, and the visibility checkbox control
-the composition. Up to 16 characters can be present. A glowing character can cast
-light onto other visible characters; up to four emitting sources affect each receiver,
-using the same source selection and falloff as the game renderer.
+## Glow
 
-Open **Calibrate → Glow & emitted light** and choose a custom color. The
-**Artwork → color** slider blends from the original colors (0%) to the chosen color
-(100%). Intermediate values tint the glowing sprite and halo. Sprite glow must be
-above zero. Cast-light color remains separate and controls illumination of neighbors.
+**Sprite glow** ranges from 0 to 10. The **Artwork → color** slider blends from
+artwork colors to a custom glow color. Halo spread controls the reach; leave
+transparent padding around the sprite so its halo has room.
 
-Use **Calibrate → Color glow** when only particular colors in the selected artwork
-should glow. Add a color rule, choose its color, and adjust **Color range** to match
-nearby shades. **Soft edges** feathers the selection; **Glow strength** and **Halo
-spread** control the result. Duplicate or add rules for more colors, or disable a
-rule without deleting it. Matching uses the original artwork, not a tint created by
-scene lighting. Rules affect their character only and are saved with scenes,
-library entries, profiles, and exported sprite rules. More active rules take more
-rendering time. Existing whole-sprite glow and emitted light are independent.
+**Color glow** adds any number of rules for selected colors in the artwork.
+Choose a color, widen Color range to include nearby shades, and adjust Soft edges,
+Glow strength (0–10), and Halo spread. Each rule can be enabled, duplicated, or
+removed. Matching uses the original artwork before lighting and tint. More active
+rules require more rendering time.
 
-To use a character's values in a mod, enter its Ren'Py image name, such as `hero happy`,
-then choose **Export sprite rules**. Export the selected character or all characters.
-Put the resulting `.rpy` file under `game/` after installing the SceneLight developer
-API, and include those tags in SceneLight's character selection. The exported rules
-use `scenelight.image(...)`; other expressions retain their own settings.
+Cast-light controls remain available for configuration. They illuminate other
+characters in-game; check their result in the mod because Preview shows one sprite.
 
-**Export defaults** retains the existing project-wide configuration workflow. Use
-sprite rules when only a particular sprite should change.
+## Profiles, exports, and the mod API
 
-## Saved assets and layered sprites
+**Save profile** preserves calibration, color glow rules, and lighting strength.
+**Export config** writes project-wide lighting values while retaining existing
+asset-discovery settings. **Export PNG / GIF / video** exports the preview, including
+animated sprites and backgrounds.
 
-**Asset library** stores reusable backgrounds, sprites, and sprite lighting presets.
-Use **Save sprite** or **Save background** for the currently loaded asset, or import
-files through the library. Assets are copied into SceneLight's private local library
-so moving the original file does not break the saved entry.
+Per-character and per-image settings remain in the [mod API](MOD_AUTHOR_API.md).
+Use an exact image rule when only that sprite should change:
 
-For sprites made of separate body, clothing, eyes, or expression images, choose
-**Build layered sprite**:
+```renpy
+init python:
+    scenelight.image("fire burning", strength=0.7, glow_strength=6.0,
+        glow_rules=[{"color": [1.0, 0.1, 0.02], "strength": 8.0,
+                     "tolerance": 0.2, "softness": 0.1, "radius": 1.0}])
+```
 
-1. Add the pieces. Rows draw from back to front.
-2. Use X/Y offsets in source pixels, opacity, and visibility to align the pieces.
-3. Leave the canvas on Auto, or set both width and height. Transparent pieces that
-   already share a canvas usually work at X=0, Y=0.
-4. Check the preview and save. The assembled pixels receive one surface analysis.
-
-The saved recipe retains the pieces, offsets, order, and canvas. Select it and use
-**Edit layers** to save a revised variant. This editor handles still-image pieces;
-add GIF/APNG/WebP animations directly as characters. It does not interpret a mod's
-Ren'Py `layeredimage` conditions or automatically guess where cropped pieces belong.
-
-Removing a library entry removes its listing; shared media is retained so saved scenes
-and other recipes remain usable.
-
-## Scenes and exports
-
-**Save scene** stores the background, ordered characters, individual lighting, image
-names, and placements. Its media is retained in the local library. **Open scene**
-restores the composition. Scene JSON references local media; it is not a portable
-asset bundle for another computer.
-
-PNG, GIF, and video exports include every visible character. Animated sprites retain
-their own frame timings. GIF exports combine their change times into a complete loop;
-combined loops longer than ten minutes are rejected rather than producing an
-unexpectedly huge export. GIF timing is rounded to its 10 ms resolution, merging
-closer frame boundaries. Video exports follow the background video's duration.
+The searchable **Settings → Advanced → Developer guide** includes the commands,
+ranges, scope precedence, tint, emitted light, and selective color glow examples.
 
 ## Bug reports
 
-Open **Logs & report** in Preview or **Settings → Activity** in Setup. Select the
+Open **Settings → Activity** in Setup, then select the Preview session. Select the
 session, search messages, or filter to errors/warnings. Choose **raw console** for
 retained command output. Sessions remain available after restarting the app.
 

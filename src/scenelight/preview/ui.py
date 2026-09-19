@@ -62,7 +62,6 @@ from .gpu_view import SceneLightGPUView
 from .media import MediaClip, MediaFrame, environment_wrap
 from .playback import VideoPlayback
 from .temporal import TemporalSceneFrame, interpolated_scene, scene_blend
-from .workspace import SceneWorkspace
 
 
 def _active_light_count(metadata: dict[str, object]) -> int:
@@ -125,7 +124,7 @@ class _WorkerSignals(QObject):
     failed = Signal(str, str)
 
 
-class MainWindow(SceneWorkspace, QMainWindow):
+class MainWindow(QMainWindow):
     def __init__(self, project_root: Path | None = None):
         super().__init__()
         self._support_session = diagnostics.start_session(
@@ -148,7 +147,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
             self._calibration_profile = CalibrationProfile()
         self._calibration = self._calibration_profile.calibration
         self._cache = ArtifactCache()
-        self._init_workspace()
         # Keep first-use background analysis independent from animated-sprite
         # form warm-up. A long GIF must never queue ahead of exact scene work.
         self._scene_executor = ThreadPoolExecutor(
@@ -217,7 +215,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
         self._view.set_calibration(self._calibration)
         self._view.set_strength(self._calibration_profile.normalized_strength())
         self._view.placementChanged.connect(self._sync_placement)
-        self._view.spriteSelected.connect(self._select_actor)
         self._view.frameTimeChanged.connect(self._on_frame_time)
         self._view.rendererReady.connect(self._on_renderer_ready)
         self._view.liveAnalysisFailed.connect(self._on_live_analysis_failed)
@@ -233,9 +230,15 @@ class MainWindow(SceneWorkspace, QMainWindow):
         self._gpu_label = QLabel("Creating OpenGL 3.3 renderer…")
         self._frame_label = QLabel("GPU frame: —")
 
-        self._horizontal_slider = self._slider(-25, 125, 50, self._placement_from_controls)
-        self._baseline_slider = self._slider(20, 140, 104, self._placement_from_controls)
-        self._height_slider = self._slider(10, 135, 92, self._placement_from_controls)
+        self._horizontal_slider = self._slider(
+            -25, 125, 50, lambda: self._placement_from_controls("horizontal")
+        )
+        self._baseline_slider = self._slider(
+            20, 140, 104, lambda: self._placement_from_controls("baseline")
+        )
+        self._height_slider = self._slider(
+            10, 135, 92, lambda: self._placement_from_controls("height")
+        )
         profile_strength = self._calibration_profile.normalized_strength()
         self._strength_slider = self._slider(
             0, 200, round(profile_strength * 100.0), self._strength_changed
@@ -258,15 +261,15 @@ class MainWindow(SceneWorkspace, QMainWindow):
         toolbar = QHBoxLayout()
         open_background = QPushButton("Open background  Ctrl+O")
         open_background.clicked.connect(self.open_background)
-        open_sprite = QPushButton("Add character…")
+        open_sprite = QPushButton("Open sprite / animation")
         open_sprite.clicked.connect(self.open_sprite)
         export = QPushButton("Export PNG / GIF / video")
         export.clicked.connect(self.export)
         calibrate = QPushButton("Calibrate")
         calibrate.clicked.connect(self._open_calibration)
-        save_calibration = QPushButton("Save defaults")
+        save_calibration = QPushButton("Save profile")
         save_calibration.clicked.connect(self._save_calibration_profile)
-        export_config = QPushButton("Export defaults")
+        export_config = QPushButton("Export config")
         export_config.clicked.connect(self._export_calibration_config)
         compare = QComboBox()
         compare.addItems(("Relit", "Original", "Split comparison"))
@@ -281,7 +284,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
         toolbar.addStretch(1)
         toolbar.addWidget(export)
         outer.addLayout(toolbar)
-        self._workspace_toolbar(outer)
         body = QHBoxLayout()
         body.setSpacing(12)
         body.addWidget(self._view, 1)
@@ -297,8 +299,7 @@ class MainWindow(SceneWorkspace, QMainWindow):
         panel_layout.addWidget(subtitle)
         panel_layout.addSpacing(12)
         panel_layout.addWidget(self._section("Background", self._background_label))
-        self._workspace_panel(panel_layout)
-        panel_layout.addWidget(self._section("Selected sprite", self._sprite_label))
+        panel_layout.addWidget(self._section("Sprite", self._sprite_label))
         panel_layout.addWidget(self._section("Automatic analysis", self._analysis_label))
 
         form = QFormLayout()
@@ -345,8 +346,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
             self._lighting_look.blockSignals(True)
             self._lighting_look.setCurrentIndex(0)
             self._lighting_look.blockSignals(False)
-        if hasattr(self, "_actors"):
-            self._store_selected_actor()
 
     def _lighting_look_changed(self, index: int) -> None:
         if index <= 0:
@@ -363,14 +362,9 @@ class MainWindow(SceneWorkspace, QMainWindow):
         self.statusBar().showMessage(
             f"{self._lighting_look.currentText()} lighting applied to the live preview"
         )
-        if hasattr(self, "_actors"):
-            self._store_selected_actor()
 
     def _open_calibration(self) -> None:
         dialog = CalibrationDialog(self._calibration, self._set_calibration, self)
-        actor = self._selected_actor()
-        if actor:
-            dialog.setWindowTitle(f"Lighting · {actor.name}")
         if dialog.exec():
             self._set_calibration(dialog.calibration)
             self.statusBar().showMessage(
@@ -1031,12 +1025,52 @@ class MainWindow(SceneWorkspace, QMainWindow):
         )
         if not selected:
             return
+        self._load_sprite(Path(selected))
+
+    def _load_sprite(self, path: Path) -> None:
+        diagnostics.event("preview.sprite", "Opening sprite", path=str(path))
         try:
-            self._add_actor(Path(selected))
-        except Exception as error:
-            self._on_failed("Add character", str(error))
+            media = MediaClip(path, self._cache.root / "media")
+        except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
+            self._on_failed("Sprite media", str(error))
+            return
+        if media.kind == "video":
+            media.close()
+            self._on_failed(
+                "Sprite media",
+                "Video sprites need an alpha channel; use animated GIF, APNG, or WebP.",
+            )
+            return
+        if self._sprite_media is not None:
+            self._sprite_media.close()
+        self._sprite_media = media
+        self._sprite_animation_epoch = time.perf_counter()
+        self._sprite_animation_ready = not media.animated
+        first_frame = media.frame_at(0.0)
+        self._view.clear_sprite()
+        self._view.set_sprite_frame(first_frame.rgba)
+        self._form_generation += 1
+        generation = self._form_generation
+        self._sprite_path = path
+        self._form_artifacts_by_frame.clear()
+        self._form_frame_indices = {
+            frame_path.resolve(): index for index, frame_path in enumerate(media.frame_paths)
+        }
+        self._queued_form_generation = -1
+        media_text = (
+            f"animated image · {media.frame_count} frames" if media.animated else "still image"
+        )
+        self._sprite_label.setText(f"{path.name}\n{media_text}")
+        self.statusBar().showMessage(f"Preparing surface maps for {path.name}…")
+        form_path = media.reference_path
+        future = self._form_executor.submit(self._cache.form, form_path)
+        future.add_done_callback(
+            lambda completed: self._form_finished(generation, form_path, completed)
+        )
 
     def _form_finished(self, generation: int, path: Path, future) -> None:
+        if generation != self._form_generation:
+            return
         try:
             artifacts = future.result()
         except Exception as error:  # noqa: BLE001 - worker failures must reach the GUI.
@@ -1050,9 +1084,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
     def _on_form_ready(
         self, generation: int, path: Path, artifacts: FormArtifacts, metadata: dict
     ) -> None:
-        if hasattr(self, "_actors"):
-            self._actor_form_ready(generation, path, artifacts, metadata)
-            return
         if generation != self._form_generation:
             return
         media = self._sprite_media
@@ -1123,9 +1154,7 @@ class MainWindow(SceneWorkspace, QMainWindow):
                     else environment_wrap(frame.rgba),
                 )
                 self._apply_temporal_scene(frame.index)
-        if hasattr(self, "_actors"):
-            self._update_scene_frames()
-        elif (
+        if (
             self._sprite_animation_ready
             and self._sprite_media is not None
             and self._sprite_media.animated
@@ -1173,14 +1202,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
                 delays.append(max(1, math.ceil(remaining)))
             else:
                 delays.append(max(1, math.ceil(1000.0 / max(media.fps, 1.0))))
-        for actor_id, media in getattr(self, "_actor_media", {}).items():
-            if not media.animated or len(self._actor_forms.get(actor_id, {})) != media.frame_count:
-                continue
-            elapsed = max(0.0, (now - self._actor_epochs[actor_id]) * 1000)
-            index = media.index_at(elapsed)
-            delays.append(
-                max(1, math.ceil(media.cumulative_ms[index] - elapsed % media.duration_ms))
-            )
         if delays:
             timer.start(min(delays))
         else:
@@ -1237,7 +1258,8 @@ class MainWindow(SceneWorkspace, QMainWindow):
                 message,
                 "error",
                 traceback=traceback.format_exc(),
-                actors=[a.payload() for a in getattr(self, "_actors", [])],
+                sprite=str(self._sprite_path or ""),
+                calibration=self._calibration.as_dict(),
                 background=str(self._background_path or ""),
             )
         self.statusBar().showMessage(f"{operation} failed")
@@ -1273,16 +1295,21 @@ class MainWindow(SceneWorkspace, QMainWindow):
             lambda completed: self._scene_finished(generation, media.reference_path, completed)
         )
 
-    def _placement_from_controls(self) -> None:
-        horizontal = self._horizontal_slider.value() / 100.0
-        baseline = self._baseline_slider.value() / 100.0
-        height = self._height_slider.value() / 100.0
-        self._horizontal_value.setText(f"{horizontal:.0%}")
-        self._baseline_value.setText(f"{baseline:.0%}")
-        self._height_value.setText(f"{height:.0%}")
+    def _placement_from_controls(self, axis: str) -> None:
+        # The slider labels show whole percentages, but dragging retains the
+        # renderer's precise coordinates. Moving one slider must not round the
+        # other two axes back onto that display grid.
+        horizontal = self._view._horizontal
+        baseline = self._view._baseline
+        height = self._view._character_height
+        if axis == "horizontal":
+            horizontal = self._horizontal_slider.value() / 100.0
+        elif axis == "baseline":
+            baseline = self._baseline_slider.value() / 100.0
+        elif axis == "height":
+            height = self._height_slider.value() / 100.0
         self._view.set_placement(horizontal, baseline, height)
-        if hasattr(self, "_actors"):
-            self._store_selected_actor()
+        self._sync_placement(horizontal, baseline, height)
 
     def _strength_changed(self) -> None:
         strength = self._strength_slider.value() / 100.0
@@ -1292,8 +1319,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
             self._lighting_look.blockSignals(True)
             self._lighting_look.setCurrentIndex(0)
             self._lighting_look.blockSignals(False)
-        if hasattr(self, "_actors"):
-            self._store_selected_actor()
 
     def _sync_placement(self, horizontal: float, baseline: float, height: float) -> None:
         for slider, value in (
@@ -1307,8 +1332,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
         self._horizontal_value.setText(f"{horizontal:.0%}")
         self._baseline_value.setText(f"{baseline:.0%}")
         self._height_value.setText(f"{height:.0%}")
-        if hasattr(self, "_actors"):
-            self._store_selected_actor()
 
     def _on_renderer_ready(self, renderer: str) -> None:
         diagnostics.event(
@@ -1350,21 +1373,14 @@ class MainWindow(SceneWorkspace, QMainWindow):
         if not accepted:
             return
         size = sizes[resolution]
-        all_sprites = list(getattr(self, "_actor_media", {}).values()) or [sprite_media]
-        if hasattr(self, "_actors") and any(
-            len(self._actor_forms[a.id]) != self._actor_media[a.id].frame_count
-            for a in self._actors
-        ):
+        if len(self._form_artifacts_by_frame) != sprite_media.frame_count:
             QMessageBox.information(
                 self,
-                "Preparing sprites",
-                "Wait for all character surface frames to finish before exporting.",
+                "Preparing sprite",
+                "Wait for the sprite surface frames to finish before exporting.",
             )
             return
-        extension = export_extension(
-            media.kind,
-            "animated-image" if any(m.animated for m in all_sprites) else sprite_media.kind,
-        )
+        extension = export_extension(media.kind, sprite_media.kind)
         suggested = self._background_path.with_name(
             f"{self._background_path.stem}_{self._sprite_path.stem}_gpu_relit{extension}"
         )
@@ -1407,7 +1423,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
                 "form_version": next(iter(self._form_artifacts_by_frame.values())).metadata[
                     "version"
                 ],
-                "actors": [a.payload() for a in getattr(self, "_actors", [])],
             }
             destination.with_suffix(destination.suffix + ".json").write_text(
                 json.dumps(record, indent=2) + "\n", encoding="utf-8"
@@ -1492,9 +1507,7 @@ class MainWindow(SceneWorkspace, QMainWindow):
                     for _index in range(background.frame_count)
                 )
             else:
-                timeline_ms, timeline_durations = composite_gif_timeline(
-                    background, *list(getattr(self, "_actor_media", {}).values()) or [sprite]
-                )
+                timeline_ms, timeline_durations = composite_gif_timeline(background, sprite)
             total_work = len(missing_anchors) + len(missing_forms) + len(timeline_ms)
             progress.setRange(0, max(total_work, 1))
             progress.setLabelText("Preparing animation lighting…")
@@ -1604,8 +1617,6 @@ class MainWindow(SceneWorkspace, QMainWindow):
                         sprite_frame.rgba,
                         form_by_frame[sprite_frame.index],
                     )
-                    if hasattr(self, "_actors"):
-                        self._update_scene_frames(timestamp_ms)
                     write_frame(self._view.render_rgba(size))
                     completed += 1
                     progress.setValue(completed)
@@ -1659,12 +1670,11 @@ class MainWindow(SceneWorkspace, QMainWindow):
             self._background_media.close()
         if self._sprite_media is not None:
             self._sprite_media.close()
-        for media in getattr(self, "_actor_media", {}).values():
-            if media is not self._sprite_media:
-                media.close()
         if getattr(self, "_support_session", None) is not None:
             self._support_session.update(
-                status="closed", actors=[a.payload() for a in self._actors]
+                status="closed",
+                sprite=str(self._sprite_path or ""),
+                calibration=self._calibration.as_dict(),
             )
         self._temporal_executor.shutdown(wait=True, cancel_futures=True)
         self._video_decode_executor.shutdown(wait=True, cancel_futures=True)

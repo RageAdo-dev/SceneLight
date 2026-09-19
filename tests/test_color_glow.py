@@ -17,11 +17,11 @@ from scenelight.calibration import (
 
 def test_rules_normalize_round_trip_inherit_and_do_not_share_mutable_state():
     rule = ColorGlowRule(
-        name=" Gem ", color=(2, -1, 0.5), strength=3, radius=-1, tolerance=2, softness=0.2
+        name=" Gem ", color=(2, -1, 0.5), strength=13, radius=-1, tolerance=2, softness=0.2
     )
     value = Calibration(glow_rules=(rule,)).normalized()
     assert value.glow_rules[0] == replace(
-        rule, name="Gem", color=(1, 0, 0.5), strength=2, radius=0, tolerance=1
+        rule, name="Gem", color=(1, 0, 0.5), strength=10, radius=0, tolerance=1
     )
     payload = json.loads(json.dumps(CalibrationProfile(value).to_payload()))
     assert CalibrationProfile.from_payload(payload).calibration == value

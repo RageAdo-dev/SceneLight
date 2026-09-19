@@ -474,7 +474,7 @@ _SETTING_ROWS += (
     (
         "glow_strength",
         "Sprite glow",
-        "0–2",
+        "0–10",
         "0.8",
         "Make this sprite luminous and add a soft halo in its own colors. Zero disables glow. Independent of light cast onto other characters.",
         "glow fire flame emissive halo",
@@ -552,8 +552,8 @@ _SETTINGS += (
         "Glow only selected colors",
         "glow_rules",
         "Add independent color glow rules to one character or exact image. Matching uses the original artwork, not the scene's lighting color. Nearby shades match smoothly; transparent pixels cannot become sources.",
-        "Each rule has a name, enabled switch, RGB color (0–1 per channel), strength (0–2), radius (0–2), tolerance (0–1), and softness (0–1). Tolerance widens the color range; softness feathers its edge. Zero radius keeps the glow inside the artwork.",
-        "Preview → select a character → Calibrate → Color glow offers Add, Duplicate, Remove, and live sliders. Save the scene/library preset or Export sprite rules. Rules add together; more active rules take more rendering time.",
+        "Each rule has a name, enabled switch, RGB color (0–1 per channel), strength (0–10), radius (0–2), tolerance (0–1), and softness (0–1). Tolerance widens the color range; softness feathers its edge. Zero radius keeps the glow inside the artwork.",
+        "Preview → Calibrate → Color glow offers Add, Duplicate, Remove, and live sliders for the loaded sprite. Save profile or Export config retains these settings; use the API for per-character or per-image targets. Rules add together; more active rules take more rendering time.",
         "Use glow_rules=[] to clear the rules for that target. This replaces the inherited list; other lighting controls and other sprites stay independent. Whole-sprite glow and light cast onto neighbors are separate controls.",
         example="""
             init python:
@@ -577,7 +577,7 @@ _WORKFLOW = (
         "Choose self glow, nearby light, or both for each image.",
         "Include the effect tag in Setup's character selection so it receives SceneLight. Put the rules below in an init python block. Use character() for every expression of a tag, or image() for one exact image.",
         "The two strengths are independent: glow_strength=0 emits light without a halo; emission_strength=0 glows without lighting neighbors. Zero both restores ordinary lighting. Each character and image keeps its own full lighting settings.",
-        "Preview supports multiple characters with individual settings. Use the Artwork-to-color slider to blend a tint, with Sprite glow above zero. Add another character to see cast light. Export sprite rules writes the selected values for exact Ren'Py image names. Leave transparent padding around effect art for the halo.",
+        "Preview shows one sprite. Use the Artwork-to-color slider to blend a tint, with Sprite glow above zero (up to 10). Check cast light onto other characters in the mod. Use character() or image() to set independent per-target lighting. Leave transparent padding around effect art for the halo.",
         example="""
             init python:
                 scenelight.character("hero", strength=0.65, rim_strength=0.4)

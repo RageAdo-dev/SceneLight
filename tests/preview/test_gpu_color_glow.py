@@ -158,3 +158,21 @@ def test_small_color_detail_has_smooth_halo_without_displaced_copies(color_sprit
     assert np.all(np.diff(line) <= 1), line
     assert np.count_nonzero(added[150:210, 285:355]) > 100
     assert added[:130].max() == 0 and added[230:].max() == 0
+
+
+@pytest.mark.parametrize("selective", [False, True])
+def test_gpu_glow_keeps_increasing_above_two_up_to_ten(color_sprite, selective):
+    renderer, _cache = color_sprite
+    frames = []
+    for strength in (2, 6, 10):
+        calibration = (
+            Calibration(glow_rules=(ColorGlowRule(strength=strength, radius=0),))
+            if selective
+            else Calibration(glow_strength=strength, glow_radius=0)
+        )
+        renderer.set_calibration(calibration)
+        frames.append(renderer.render_rgba((640, 360)))
+    for before, after in zip(frames, frames[1:]):
+        assert (_patch(after, 40, 140) - _patch(before, 40, 140)).mean() > 2
+    if selective:
+        np.testing.assert_array_equal(_patch(frames[0], 120, 45), _patch(frames[-1], 120, 45))

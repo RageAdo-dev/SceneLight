@@ -248,7 +248,8 @@ init -50 python:
                 raise ValueError("Glow rule color must contain three RGB numbers")
             rule["color"] = tuple(bounded(channel, 1.0) for channel in rule["color"])
             for name in ("strength", "radius", "tolerance", "softness"):
-                rule[name] = bounded(rule[name], 2.0 if name in ("strength", "radius") else 1.0)
+                maximum = 10.0 if name == "strength" else 2.0 if name == "radius" else 1.0
+                rule[name] = bounded(rule[name], maximum)
             rules.append(rule)
         return rules
 
@@ -291,6 +292,8 @@ init -50 python:
                 value = max(0.0, min(value, 2.0))
             elif name == "exposure_bias":
                 value = max(-4.0, min(value, 4.0))
+            elif name == "glow_strength":
+                value = max(0.0, min(value, 10.0))
             elif name in ("glow_red", "glow_green", "glow_blue", "glow_color_mix"):
                 value = max(0.0, min(value, 1.0))
             else:
@@ -1165,7 +1168,7 @@ init -50 python:
             (bounded("ray_shadow_strength"), bounded("ambient_occlusion"), bounded("probe_strength"), bounded("bounce_strength")),
             (bounded("specular_strength"), bounded("rim_strength"), bounded("wrap_strength"), bounded("grain_match")),
             (bounded("shadow_strength"), bounded("individual_light_colors"), bounded("adaptive_light_colors"), 0.0),
-            (bounded("glow_strength"), bounded("glow_radius"), bounded("emission_strength"), bounded("emission_radius")),
+            (bounded("glow_strength", 0.0, 10.0), bounded("glow_radius"), bounded("emission_strength"), bounded("emission_radius")),
             (bounded("emission_red"), bounded("emission_green"), bounded("emission_blue"), 0.0),
             (bounded("glow_red", 0.0, 1.0), bounded("glow_green", 0.0, 1.0), bounded("glow_blue", 0.0, 1.0), bounded("glow_color_mix", 0.0, 1.0)),
         )

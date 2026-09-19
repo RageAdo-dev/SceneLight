@@ -26,13 +26,13 @@ def test_color_rules_edit_independently_and_cancel_restores_all_settings(monkeyp
         assert not editor.remove_button.isEnabled()
         editor.add_button.click()
         editor.sliders["tolerance"].setValue(28)
-        editor.values["strength"].setValue(1.25)
+        editor.sliders["strength"].setValue(1000)
         editor.values["radius"].setValue(0.5)
         editor.values["softness"].setValue(0.2)
         editor.enabled.setChecked(False)
         first = dialog.calibration.glow_rules[0]
         assert first.tolerance == 0.28
-        assert first.strength == 1.25 and first.radius == 0.5
+        assert first.strength == 10.0 and first.radius == 0.5
         assert first.softness == 0.2 and not first.enabled
         editor.copy_button.click()
         editor.enabled.setChecked(True)

@@ -143,7 +143,7 @@ All lighting scopes accept these settings. Numeric values are clamped to their r
 | `shadow_strength` | 0–2 | Overall shadow contribution |
 | `individual_light_colors` | 0–2 | Stylized separation of source colors |
 | `adaptive_light_colors` | 0–2 | Automatic separation of distinct colored sources |
-| `glow_strength` | 0–2 | Luminous sprite and soft halo in the artwork's colors; default 0 |
+| `glow_strength` | 0–10 | Luminous sprite and soft halo in the artwork's colors; default 0 |
 | `glow_radius` | 0–2 | Halo spread; 1 means 4% of the shorter sprite canvas edge |
 | `glow_color_mix` | 0–1 | 0 uses artwork colors (default); 1 uses custom glow RGB |
 | `glow_red`, `glow_green`, `glow_blue` | 0–1 | Custom sprite and halo color; defaults 1, 1, 1 |
@@ -183,8 +183,8 @@ sprites, without wall occlusion or relighting the background. It requires an act
 SceneLight background, just like the other sprite lighting controls. The player's
 master switch disables glow and emitted light as well.
 
-Preview → Calibrate → **Glow & emitted light** adjusts these values for the selected
-character. Add a second character in Preview to see emitted light. Exported profiles
+Preview → Calibrate → **Glow & emitted light** adjusts these values for the loaded
+sprite. Check emitted light onto other characters in the mod. Exported profiles
 preserve both sets of controls. For effects
 such as fire, put the settings on the image or tag so other characters do not glow.
 
@@ -195,8 +195,9 @@ color** automatically. Uncheck it to restore artwork colors. The separate
 Use the **Artwork → color** slider to blend between artwork colors and a full custom
 color. An intermediate value such as 35% applies a partial tint.
 
-Preview also offers exact per-character strength and **Export sprite rules**.
-See the [workspace guide](PREVIEW_WORKSPACE.md) for saved assets and layered sprites.
+Preview uses one Lighting strength control for the loaded sprite. Set independent
+per-character or per-image strengths with `scenelight.character(...)` or `scenelight.image(...)`.
+See the [Preview guide](PREVIEW_WORKSPACE.md) for the controls and profile/config exports.
 
 For example, this makes a sprite and its halo glow blue without lighting neighbors:
 
@@ -212,7 +213,7 @@ Rain, glitch, and custom effect packs remain deferred until after launch.
 
 ### Glow selected colors on a sprite
 
-Use **Calibrate → Color glow** on the selected Preview character. Add as many color
+Use **Calibrate → Color glow** on the loaded Preview sprite. Add as many color
 rules as needed, choose an artwork color, and adjust **Color range** to include similar
 shades. **Soft edges** feathers the match, **Glow strength** controls brightness, and
 **Halo spread** controls its reach. Each rule can be disabled, duplicated, or removed.
@@ -233,11 +234,11 @@ the selected color regions. The rules affect only their target; they do not make
 every red object in the scene glow. They work on the composed result of layered
 sprites. Existing whole-sprite glow/tint and emitted light remain separate.
 
-Rule ranges: RGB channels, tolerance, and softness are 0–1; strength and radius
-are 0–2. `enabled=False` keeps a rule saved but inactive. `radius=0` suppresses the
+Rule ranges: RGB channels, tolerance, and softness are 0–1; strength is 0–10
+and radius is 0–2. `enabled=False` keeps a rule saved but inactive. `radius=0` suppresses the
 halo while brightening the matching artwork. `glow_rules=[]` clears the list at
-that scope. A more specific list replaces the inherited list. Scene files, library
-presets, profiles, and **Export sprite rules** preserve these values.
+that scope. A more specific list replaces the inherited list. **Save profile** and **Export config** preserve these values. In a mod, use
+`scenelight.character(...)` or `scenelight.image(...)` for independent targets.
 
 ## Shaders and transforms
 
