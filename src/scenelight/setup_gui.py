@@ -1982,8 +1982,15 @@ class SceneLightSetup(tk.Tk):
             self._advanced_tab = advanced_tab
             notebook.add(advanced_tab, text="Advanced")
             ttk.Label(advanced_tab, text="Analysis & compatibility", style="CardTitle.TLabel").grid(
-                row=0, column=0, columnspan=3, sticky="w", pady=(0, 6)
+                row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
             )
+            self.developer_guide_button = ttk.Button(
+                advanced_tab,
+                text="Developer guide",
+                command=self._show_developer_guide,
+                style="Secondary.TButton",
+            )
+            self.developer_guide_button.grid(row=0, column=2, sticky="e", pady=(0, 6))
             self.cuda_check = ttk.Checkbutton(
                 advanced_tab,
                 text="Use the detected NVIDIA GPU to speed up first-time analysis",
@@ -2071,41 +2078,6 @@ class SceneLightSetup(tk.Tk):
             self.advanced_components_button.grid(
                 row=7, column=0, columnspan=3, sticky="w", pady=(3, 0)
             )
-            guide_card = tk.Frame(
-                advanced_tab,
-                background="#17232e",
-                padx=14,
-                pady=12,
-                highlightbackground="#355064",
-                highlightthickness=1,
-            )
-            guide_card.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-            guide_card.columnconfigure(0, weight=1)
-            tk.Label(
-                guide_card,
-                text="For mod developers",
-                background="#17232e",
-                foreground="#bceaff",
-                font=("Segoe UI Semibold", 12),
-                anchor="w",
-            ).grid(row=0, column=0, sticky="w")
-            tk.Label(
-                guide_card,
-                text="Commands, settings, and ready-to-copy examples.",
-                background="#17232e",
-                foreground="#aabccc",
-                font=("Segoe UI", 9),
-                anchor="w",
-                wraplength=340,
-                justify="left",
-            ).grid(row=1, column=0, sticky="w", pady=(3, 0))
-            self.developer_guide_button = ttk.Button(
-                guide_card,
-                text="Developer guide",
-                command=self._show_developer_guide,
-                style="Secondary.TButton",
-            )
-            self.developer_guide_button.grid(row=0, column=1, rowspan=2, padx=(12, 0))
             activity_tab = ttk.Frame(notebook, style="Card.TFrame", padding=14)
             activity_tab.columnconfigure(0, weight=1)
             activity_tab.rowconfigure(1, weight=1)
