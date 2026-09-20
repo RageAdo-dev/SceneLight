@@ -65,6 +65,13 @@ The capture plan keeps stable batch membership if available worker concurrency
 changes on restart. Successful batches are published atomically and validated
 before reuse, including surface-normalization markers and composite dependencies.
 Clean memory-saving batches do not consume the bounded crash-retry allowance.
+Every planned form must have either captured pixels or an explicit per-asset
+failure. Missing/unsupported images and unreadable capture inputs are retained as
+skips, including whole skipped batches; they do not invalidate healthy work.
+The content signature changes when missing artwork is supplied, so an old skip
+cannot hide a repaired asset. Unknown worker omissions and output-write failures
+remain blocking errors. Skip details are recorded as Activity warnings and as
+text evidence in its support export.
 An unresolved error pauses capture with usable checkpoints retained; retry the
 same project to continue. Changed source content invalidates obsolete captures.
 

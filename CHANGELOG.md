@@ -4,6 +4,9 @@
 
 ### Lighting and playback
 
+- Missing, unsupported, or unreadable sprite assets now skip individually during capture, including parallel batches, while valid assets continue through installation. Completed skips are reusable on retry and repaired source assets are rediscovered on update.
+- Activity and support exports now include skipped asset names and reasons, with captured/skipped totals. Developer install/update also show the skip count. Unreported worker omissions and failures writing output remain visible errors.
+
 - Smoothed colored-light handovers, including lights close to a character. Preserved the forward light direction and removed an over-sharpening blend; Preview and gameplay share the correction.
 - Interrupted capture retains completed worker batches even when available memory changes the worker count. Clean memory-saving restarts no longer consume the crash retry budget; unresolved errors remain visible and progress stays available for retry.
 

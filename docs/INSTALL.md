@@ -121,3 +121,13 @@ keep a small compatibility script so their saves still load.
 Windows with compatible graphics. Live analysis requires OpenGL 3.3 or OpenGL
 ES 3.0 with supported floating-point rendering. A dedicated GPU is not required.
 [Compatibility and hardware details](BETA_VALIDATION.md).
+
+### Missing or incompatible assets
+
+If a mod references missing artwork or an individual image cannot be prepared,
+SceneLight skips that asset and continues with the usable backgrounds and sprites.
+Setup shows the skipped sprite count. Open **Settings > Activity** to search the
+asset names and reasons; **Export support report** includes those details.
+After the mod supplies or repairs the artwork, run Scan/Update again to include it.
+A renderer that cannot start or an output folder that cannot be written still
+requires attention; those failures do not get labeled as missing artwork.

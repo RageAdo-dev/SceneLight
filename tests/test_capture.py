@@ -1478,10 +1478,16 @@ def test_large_surface_batches_use_disposable_workers(tmp_path: Path, monkeypatc
         def __exit__(self, *_args) -> None:
             return None
 
-        def map(self, function, values):
-            queued = list(values)
-            observed["paths"] = queued
-            return [function(path) for path in queued]
+        def submit(self, function, path):
+            from concurrent.futures import Future
+
+            observed.setdefault("paths", []).append(path)
+            future = Future()
+            try:
+                future.set_result(function(path))
+            except Exception as error:
+                future.set_exception(error)
+            return future
 
     monkeypatch.setattr(capture_module, "ProcessPoolExecutor", ImmediateExecutor)
     monkeypatch.setattr(capture_module.os, "cpu_count", lambda: 4)

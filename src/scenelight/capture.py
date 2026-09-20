@@ -73,6 +73,10 @@ CAPTURE_IGNORED_NAMES = {
 }
 
 
+class _SurfaceCaptureInputError(ValueError):
+    """One captured image cannot be decoded; other assets can still proceed."""
+
+
 class CaptureInstanceConflict(RuntimeError):
     """The mod rejected another capture instance before rendering could start."""
 
@@ -545,6 +549,29 @@ def _pygame_alpha_blit(
     ).astype(np.uint8)
 
 
+def _skip_surface_capture(payload: dict, relative: str, error: Exception) -> None:
+    """Remove an unreadable input and all aliases, preserving their diagnostic reasons."""
+    dropped = set()
+    for group, kind in (("scenes", "scene"), ("sprites", "sprite")):
+        values = payload.get(group, {})
+        for name, path in list(values.items()):
+            if str(path).replace("\\", "/") != relative:
+                continue
+            del values[name]
+            dropped.add(name)
+            payload.setdefault("errors", []).append(f"{kind} {name}: {error}")
+            if kind == "scene":
+                payload.get("scene_sequences", {}).pop(name, None)
+                payload.get("scene_frame_sources", {}).pop(name, None)
+    payload["resolved_requests"] = [
+        name for name in payload.get("resolved_requests", []) if name not in dropped
+    ]
+    for tag, path in list(payload.get("character_candidates", {}).items()):
+        if str(path).replace("\\", "/") == relative:
+            payload["character_candidates"][tag] = None
+    print(f"[warning] skipped {len(dropped)} unreadable asset(s): {error}", flush=True)
+
+
 def _normalize_surface_captures(
     project_root: Path,
     payload: dict[str, object],
@@ -602,7 +629,10 @@ def _normalize_surface_captures(
     print(f"surface normalization 0/{total}: preparing captured sprite pixels", flush=True)
     if total <= 8:
         for index, path in enumerate(captures_to_normalize, 1):
-            _normalize_surface_capture_file(path)
+            try:
+                _normalize_surface_capture_file(path)
+            except _SurfaceCaptureInputError as error:
+                _skip_surface_capture(payload, path.relative_to(resolved_root).as_posix(), error)
             print(
                 f"surface normalization {index}/{total}: {path.name}",
                 flush=True,
@@ -610,10 +640,16 @@ def _normalize_surface_captures(
     else:
         worker_count = _surface_normalization_worker_count(total)
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            for index, _ in enumerate(
-                executor.map(_normalize_surface_capture_file, captures_to_normalize),
-                1,
-            ):
+            futures = {
+                executor.submit(_normalize_surface_capture_file, path): path
+                for path in captures_to_normalize
+            }
+            for index, future in enumerate(as_completed(futures), 1):
+                try:
+                    future.result()
+                except _SurfaceCaptureInputError as error:
+                    relative = futures[future].relative_to(resolved_root).as_posix()
+                    _skip_surface_capture(payload, relative, error)
                 if index == 1 or index % 10 == 0 or index == total:
                     print(
                         f"surface normalization {index}/{total}: preparing sprite pixels",
@@ -771,27 +807,32 @@ def _normalize_surface_capture_file(path: Path) -> None:
     normalized_marker = path.with_name(path.name + ".surface-normalized")
     resumable_dynamic_surface = checkpoint_marker.is_file()
 
-    with path.open("rb") as stream:
-        magic = stream.read(16)
-        if magic == b"SCENELIGHT_RGBA1":
-            header = stream.read(12)
-            if len(header) != 12:
-                raise ValueError("Invalid SceneLight RGBA checkpoint header")
-            width, height, reported_length = struct.unpack("<III", header)
-            if width < 1 or height < 1 or width > 16384 or height > 16384:
-                raise ValueError("Invalid SceneLight RGBA checkpoint dimensions")
-            expected_length = width * height * 4
-            if reported_length != expected_length:
-                raise ValueError("Invalid SceneLight RGBA checkpoint length")
-            decoder = zlib.decompressobj()
-            raw = decoder.decompress(stream.read(), expected_length + 1)
-            if len(raw) != expected_length or decoder.unconsumed_tail or not decoder.eof:
-                raise ValueError("Invalid SceneLight RGBA checkpoint payload")
-            source = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 4).astype(np.uint16)
-        else:
-            stream.seek(0)
-            with Image.open(stream) as image:
-                source = np.asarray(image.convert("RGBA"), dtype=np.uint16)
+    try:
+        with path.open("rb") as stream:
+            magic = stream.read(16)
+            if magic == b"SCENELIGHT_RGBA1":
+                header = stream.read(12)
+                if len(header) != 12:
+                    raise ValueError("Invalid SceneLight RGBA checkpoint header")
+                width, height, reported_length = struct.unpack("<III", header)
+                if width < 1 or height < 1 or width > 16384 or height > 16384:
+                    raise ValueError("Invalid SceneLight RGBA checkpoint dimensions")
+                expected_length = width * height * 4
+                if reported_length != expected_length:
+                    raise ValueError("Invalid SceneLight RGBA checkpoint length")
+                decoder = zlib.decompressobj()
+                raw = decoder.decompress(stream.read(), expected_length + 1)
+                if len(raw) != expected_length or decoder.unconsumed_tail or not decoder.eof:
+                    raise ValueError("Invalid SceneLight RGBA checkpoint payload")
+                source = (
+                    np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 4).astype(np.uint16)
+                )
+            else:
+                stream.seek(0)
+                with Image.open(stream) as image:
+                    source = np.asarray(image.convert("RGBA"), dtype=np.uint16)
+    except (OSError, ValueError, zlib.error) as error:
+        raise _SurfaceCaptureInputError(f"{type(error).__name__}: {error}") from error
     alpha = source[..., 3:4]
     normalized = ((source * alpha) >> 8).astype(np.uint8)
     temporary = _capture_temporary_path(path, "surface")
@@ -951,6 +992,63 @@ def _decode_result(
     )
 
 
+def _asset_capture_errors(errors: object, kind: str) -> dict[str, str]:
+    """Read explicit per-asset failures from both current and saved worker results."""
+    if not isinstance(errors, list):
+        return {}
+    failures = {}
+    prefix = kind + " "
+    for error in errors:
+        if not isinstance(error, str) or not error.startswith(prefix):
+            continue
+        label, separator, reason = error.partition(": ")
+        name = " ".join(label[len(prefix) :].lower().split())
+        if separator and name and reason.strip():
+            failures[name] = reason.strip()
+    return failures
+
+
+def _record_capture_outcome(payload: dict, project_root: Path, label: str) -> None:
+    """Keep skips searchable in Activity and downloadable without collecting artwork."""
+    session = diagnostics.current_session()
+    if session is None:
+        return
+    skipped = [
+        {"kind": kind, "name": name, "error": reason}
+        for kind in ("scene", "sprite")
+        for name, reason in sorted(_asset_capture_errors(payload.get("errors"), kind).items())
+        if name not in payload.get("scenes" if kind == "scene" else "sprites", {})
+    ]
+    summary = {
+        "project": str(project_root),
+        "capture": label,
+        "plan_only": bool(payload.get("plan_only")),
+        "captured_backgrounds": len(payload.get("scenes", {})),
+        "captured_sprites": len(payload.get("sprites", {})),
+        "skipped_assets": len(skipped),
+    }
+    session.event(
+        "capture.summary",
+        f"{label}: {summary['captured_sprites']} sprite forms captured; "
+        f"{len(skipped)} assets skipped",
+        "warning" if skipped else "info",
+        **summary,
+    )
+    if skipped:
+        for item in skipped:
+            session.event(
+                "capture.asset_skipped",
+                f"Skipped {item['kind']} {item['name']}: {item['error']}",
+                "warning",
+                capture=label,
+                **item,
+            )
+        session.attach_text(
+            label + "-asset-results",
+            json.dumps({**summary, "skipped": skipped}, indent=2, ensure_ascii=False),
+        )
+
+
 def _validate_result(discovery: ProjectDiscovery, result: CaptureResult) -> CaptureResult:
     """Reject a broken resolver instead of silently installing weak fallbacks."""
 
@@ -974,7 +1072,10 @@ def _validate_result(discovery: ProjectDiscovery, result: CaptureResult) -> Capt
     if not requested:
         return result
     resolved = {" ".join(name.lower().split()) for name in result.resolved_requests}
-    missing = sorted(requested - resolved)
+    # A recorded missing/unsupported asset is an intentional skip, not evidence
+    # that the resolver itself failed. Keep the guard for unexplained omissions.
+    skipped = set(_asset_capture_errors(result.errors, "sprite"))
+    missing = sorted(requested - resolved - skipped)
     if len(missing) > max(1, len(requested) // 4):
         examples = ", ".join(missing[:8])
         raise RuntimeError(
@@ -1456,7 +1557,7 @@ def _run_capture_request(
         if result_path.is_file():
             diagnostics.event(
                 "capture.result",
-                "Capture completed",
+                "Capture process returned a result; asset validation follows",
                 engine_pid=process.pid,
                 project=str(discovery.project_root),
                 elapsed_seconds=round(time.perf_counter() - capture_started, 3),
@@ -1912,10 +2013,13 @@ def _merge_parallel_capture_payloads(
 
     expected_forms = {form for forms in request_forms.values() for form in forms}
     missing_forms = expected_forms - set(sprites)
-    if missing_forms:
+    failed_forms = _asset_capture_errors(errors, "sprite")
+    unexplained = missing_forms - set(failed_forms)
+    if unexplained:
         raise RuntimeError(
-            "SceneLight capture workers did not return %d planned sprite forms."
-            % len(missing_forms)
+            "SceneLight capture workers did not return %d planned sprite forms "
+            "and reported no asset error for them. Examples: %s"
+            % (len(unexplained), ", ".join(sorted(unexplained)[:8]))
         )
 
     used_paths = set(sprites.values())
@@ -1932,6 +2036,11 @@ def _merge_parallel_capture_payloads(
     )
     merged["errors"] = errors
     merged["plan_only"] = False
+    merged["capture_summary"] = {
+        "planned_sprites": len(expected_forms),
+        "captured_sprites": len(expected_forms & set(sprites)),
+        "skipped_sprites": len(missing_forms),
+    }
 
     raw_candidates = master.get("character_candidates", {})
     candidates = dict(raw_candidates) if isinstance(raw_candidates, dict) else {}
@@ -1996,8 +2105,11 @@ def _saved_worker_result(project_root: Path, path: Path, forms: list[str]) -> di
             or not isinstance(payload, dict)
             or payload.get("version") != CAPTURE_VERSION
             or payload.get("plan_only")
-            or set(payload.get("sprites", {})) != set(forms)
         ):
+            return None
+        captured = set(payload.get("sprites", {}))
+        failures = set(_asset_capture_errors(payload.get("errors"), "sprite"))
+        if not captured.issubset(forms) or set(forms) - captured - failures:
             return None
         _relativize_capture_payload(project_root, payload)
         if not _paths_exist(project_root, payload):
@@ -2119,6 +2231,9 @@ def _run_parallel_capture_workers(
         _saved_worker_result(discovery.project_root, path, chunks[index])
         for index, path in enumerate(completed_paths)
     ]
+    for index, payload in enumerate(results):
+        if payload is not None:
+            _record_capture_outcome(payload, discovery.project_root, f"Saved worker {index + 1}")
 
     totals = [len(chunk) for chunk in chunks]
     completed = [
@@ -2146,7 +2261,10 @@ def _run_parallel_capture_workers(
     worker_projects = [worker_group / f"w{index + 1}" for index in range(worker_count)]
     copies_completed = [0]
     prepared = [False] * worker_count
-    capture_mode = [f"{concurrency} active worker(s), {worker_count} saved batches"]
+    capture_mode = [
+        f"{concurrency} active worker(s), {worker_count} saved batches; "
+        "processed includes skipped forms"
+    ]
 
     def report(worker_index: int, stage: str, current: int, total: int) -> None:
         if stage not in {"restore", "form"} or total != totals[worker_index]:
@@ -2262,6 +2380,7 @@ def _run_parallel_capture_workers(
             completed[worker_index] = totals[worker_index]
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         _relativize_capture_payload(discovery.project_root, payload)
+        _record_capture_outcome(payload, discovery.project_root, f"Worker {worker_number}")
         # Direct source-image captures do not need the helper's dynamic-form
         # checkpoint marker. Mark their raw state before publishing the batch,
         # so restart can distinguish raw pixels from interrupted normalization.
@@ -2370,6 +2489,7 @@ def capture_runtime_assets(
             and result_payload.get("version") == CAPTURE_VERSION
             and _paths_exist(discovery.project_root, result_payload)
         ):
+            _record_capture_outcome(result_payload, discovery.project_root, "Saved capture")
             return _validate_result(
                 discovery,
                 _decode_result(discovery, result_payload, cached=True),
@@ -2449,6 +2569,7 @@ def capture_runtime_assets(
         result_payload = json.loads(result_path.read_text(encoding="utf-8"))
     if result_payload.get("version") != CAPTURE_VERSION:
         raise ValueError("Ren'Py wrote an incompatible SceneLight capture result")
+    _record_capture_outcome(result_payload, discovery.project_root, "Capture inventory")
     if result_payload.get("plan_only"):
         planned_forms, request_forms = resumed_plan or _load_runtime_capture_plan(
             capture_root / "capture_plan.json", signature
@@ -2478,6 +2599,18 @@ def capture_runtime_assets(
         raise FileNotFoundError("Ren'Py did not write every reported SceneLight capture")
     _deduplicate_normalized_captures(discovery.project_root, result_payload)
     _normalize_surface_captures(discovery.project_root, result_payload)
+    skipped_forms = set(_asset_capture_errors(result_payload.get("errors"), "sprite"))
+    skipped_forms.difference_update(result_payload.get("sprites", {}))
+    print(
+        f"SceneLight capture outcome: {len(result_payload.get('sprites', {}))} sprite forms "
+        f"captured; {len(skipped_forms)} skipped. Skip reasons are in Activity and its support export.",
+        flush=True,
+    )
+    summary = result_payload.get("capture_summary")
+    if isinstance(summary, dict):
+        summary["captured_sprites"] = len(result_payload.get("sprites", {}))
+        summary["skipped_sprites"] = len(skipped_forms)
+    _record_capture_outcome(result_payload, discovery.project_root, "Validated capture")
     _write_capture_result(result_path, result_payload)
     validated_result = _validate_result(
         discovery, _decode_result(discovery, result_payload, cached=False)

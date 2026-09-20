@@ -707,6 +707,13 @@ def extract_last_json(output: str) -> dict[str, object] | None:
     return result
 
 
+def skipped_asset_notice(result: dict[str, object]) -> str:
+    skipped = result.get("skipped_sprites", [])
+    if not isinstance(skipped, list) or not skipped:
+        return ""
+    return f" {len(skipped)} sprite form(s) were skipped; see Activity for the names and reasons."
+
+
 _PROGRESS_PATTERNS = (
     (
         re.compile(r"SceneLight scan files\s+(\d+)/(\d+):\s*(.*)"),
@@ -786,7 +793,7 @@ _PROGRESS_PATTERNS = (
     (
         re.compile(r"SceneLight parallel forms\s+(\d+)/(\d+):\s*(.*)"),
         "resolver-parallel",
-        "Resolving sprite forms in parallel",
+        "Processing sprite forms (captures and skips)",
     ),
     (
         re.compile(r"SceneLight worker copies\s+(\d+)/(\d+):\s*(.*)"),
@@ -4107,6 +4114,7 @@ class SceneLightSetup(tk.Tk):
                     f"Installed {result.get('owned_file_count', 0)} SceneLight file(s) without "
                     "editing story or art files. For older packaged games, the "
                     "normal executable now loads SceneLight and its original is backed up."
+                    + skipped_asset_notice(result)
                 )
             elif operation == "refresh":
                 self._attached = True
@@ -4118,6 +4126,7 @@ class SceneLightSetup(tk.Tk):
                     "changed backgrounds, videos, selected characters, and sprite forms were "
                     "updated; story, art, and saves were not edited."
                     + (f" Cleanup note: {warning}" if warning else "")
+                    + skipped_asset_notice(result)
                 )
             elif operation == "components":
                 importlib.invalidate_caches()
