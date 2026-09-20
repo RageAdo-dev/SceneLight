@@ -37,6 +37,7 @@ from .developer import (
 )
 from .form_maps import FORM_MAP_VERSION
 from .launch_safety import install_native_launcher, snapshot_saves
+from .progress import ProgressStage, copytree_with_progress
 from .project import discover_project
 from .release import release_record
 from .sidecar import (
@@ -675,13 +676,15 @@ def _preserve_analysis_cache(project_root: Path, managed_root: Path) -> Path | N
         else None
     )
     try:
-        shutil.copytree(source, stage, ignore=ignore)
-        if destination.exists():
-            os.replace(destination, backup)
-            moved_existing = True
-        os.replace(stage, destination)
+        copytree_with_progress(source, stage, "cache-save", ignore=ignore)
+        with ProgressStage("cache-commit", item="Publishing the reusable cache"):
+            if destination.exists():
+                os.replace(destination, backup)
+                moved_existing = True
+            os.replace(stage, destination)
         if backup.is_dir():
-            shutil.rmtree(backup)
+            with ProgressStage("cache-cleanup", item="Removing the previous cache"):
+                shutil.rmtree(backup)
     except Exception:
         if stage.is_dir():
             shutil.rmtree(stage, ignore_errors=True)
@@ -888,34 +891,36 @@ def _install_managed(
 
         prepare_project_movies(discovery)
     preserved_cache = _preserve_analysis_cache(project_root, managed_root)
-    _install_runtime_files(discovery.game_root)
-    _remove_capture_bootstrap(discovery.game_root)
-    legacy_live_config = discovery.game_root / "scenelight_live.json"
-    if legacy_live_config.is_file():
-        legacy_live_config.unlink()
-    native_launcher = None
-    if (
-        playback_executable is not None
-        and not playback_native
-        and find_native_executable(managed_root) is not None
-    ):
-        native_launcher = install_native_launcher(managed_root, playback_executable)
-    _write_install_config(
-        managed_root,
-        project_root=project_root,
-        config=config,
-        grid=grid,
-        workers=workers,
-        analyzer=analyzer,
-        renpy_sdk=sdk_executable,
-        playback_executable=playback_executable,
-        playback_native=playback_native,
-        native_launcher=native_launcher,
-        save_backup=save_backup,
-    )
-    _write_launcher(project_root, managed_root, playback_executable)
-    launcher = find_native_executable(managed_root)
-    verification = _verify(project_root)
+    with ProgressStage("runtime-setup", item="Installing runtime support and launcher files"):
+        _install_runtime_files(discovery.game_root)
+        _remove_capture_bootstrap(discovery.game_root)
+        legacy_live_config = discovery.game_root / "scenelight_live.json"
+        if legacy_live_config.is_file():
+            legacy_live_config.unlink()
+        native_launcher = None
+        if (
+            playback_executable is not None
+            and not playback_native
+            and find_native_executable(managed_root) is not None
+        ):
+            native_launcher = install_native_launcher(managed_root, playback_executable)
+        _write_install_config(
+            managed_root,
+            project_root=project_root,
+            config=config,
+            grid=grid,
+            workers=workers,
+            analyzer=analyzer,
+            renpy_sdk=sdk_executable,
+            playback_executable=playback_executable,
+            playback_native=playback_native,
+            native_launcher=native_launcher,
+            save_backup=save_backup,
+        )
+        _write_launcher(project_root, managed_root, playback_executable)
+        launcher = find_native_executable(managed_root)
+    with ProgressStage("install-verify", item="Checking runtime files and generated manifests"):
+        verification = _verify(project_root)
     attach_report = {
         "mode": "hybrid-gpu",
         "runtime_capture": bool(capture),
@@ -1146,7 +1151,8 @@ def _main(argv: list[str] | None = None) -> int:
             "installation": "in-place",
             "source_untouched": False,
         }
-        remove_managed_project(project_root)
+        with ProgressStage("workspace-cleanup", item="Removing the temporary analysis workspace"):
+            remove_managed_project(project_root)
         result["managed_project"] = None
         result["launcher"] = str(
             embedded.get("launcher") or find_native_executable(project_root) or ""
@@ -1161,7 +1167,8 @@ def _main(argv: list[str] | None = None) -> int:
             "installation": "in-place",
             "source_untouched": False,
         }
-        remove_managed_project(project_root)
+        with ProgressStage("workspace-cleanup", item="Removing the temporary analysis workspace"):
+            remove_managed_project(project_root)
         result["managed_project"] = None
         result["launcher"] = str(
             refreshed.get("launcher") or find_native_executable(project_root) or ""

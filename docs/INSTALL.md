@@ -131,3 +131,15 @@ asset names and reasons; **Export support report** includes those details.
 After the mod supplies or repairs the artwork, run Scan/Update again to include it.
 A renderer that cannot start or an output folder that cannot be written still
 requires attention; those failures do not get labeled as missing artwork.
+
+### Progress after sprite maps reach 100%
+
+The percentage applies to the named stage. Setup next shows the saving, copying,
+verification, and cleanup steps before announcing completion. File counts update
+as work completes. Steps without a known count use an activity indicator and an
+elapsed timer. The current filename is shown during copying and verification.
+Background-video preparation shows the current video and its processed frame count.
+Settings > Activity records the same stages and includes them in exported reports.
+An existing installation is not proof that an update has finished. Wait for the
+update-completed message and for the Cancel button to disappear. Cancel stops the
+current operation; it does not finish the installation.

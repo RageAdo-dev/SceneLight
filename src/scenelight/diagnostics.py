@@ -78,6 +78,7 @@ class Session:
         self._owns_summary = existing is None
         self._guard = threading.RLock()
         self._started = time.monotonic()
+        self._last_stage = ""
         self._sequence = 0
         self._summary = {
             "schema": 1,
@@ -177,10 +178,15 @@ class Session:
             else "info"
         )
         progress = re.search(r"\b(\d+)/(\d+):", line)
+        stage = re.match(r"SceneLight stage ([a-z-]+) ", line)
+        stage_changed = stage is not None and stage[1] != self._last_stage
+        self._last_stage = stage[1] if stage is not None else ""
         now = time.monotonic()
         if level != "info" or line.startswith((">", "[")):
             self.event("output", line.rstrip(), level)
-        elif progress and (progress[1] == progress[2] or now - self._last_progress >= 1.0):
+        elif progress and (
+            stage_changed or progress[1] == progress[2] or now - self._last_progress >= 1.0
+        ):
             self._last_progress = now
             self.event("progress", line.rstrip(), current=int(progress[1]), total=int(progress[2]))
 

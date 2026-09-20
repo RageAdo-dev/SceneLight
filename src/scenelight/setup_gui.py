@@ -30,6 +30,7 @@ from .calibration import profile_path
 from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility_root
 from .cuda_detection import CudaSupport, detect_cuda_support
 from .developer import DeveloperStatus, developer_status
+from .progress import STAGE_LABELS
 from .release import (
     ReleaseRelation,
     classify_release,
@@ -856,6 +857,12 @@ _PROGRESS_PATTERNS = (
 def parse_progress(line: str) -> ProgressUpdate | None:
     """Extract any long-running SceneLight phase from streamed CLI output."""
 
+    stage = re.search(r"SceneLight stage ([a-z-]+) (\d+)/(\d+):\s*(.*)", line)
+    if stage is not None:
+        phase, current, total, item = stage.groups()
+        if phase not in STAGE_LABELS or (int(total) and int(current) > int(total)):
+            return None
+        return ProgressUpdate("stage-" + phase, STAGE_LABELS[phase], int(current), int(total), item)
     for pattern, phase, label in _PROGRESS_PATTERNS:
         match = pattern.search(line)
         if match is None:
@@ -1066,6 +1073,12 @@ def format_progress_status(
 ) -> str:
     """Format progress with elapsed time and an estimated time remaining."""
 
+    if progress.total == 0:
+        count = f" — {progress.current:,} files processed" if progress.current else ""
+        parts = [progress.label + count, f"elapsed {format_duration(elapsed_seconds)}"]
+        if progress.item:
+            parts.append(progress.item[:100])
+        return "  •  ".join(parts)
     percent = 100.0 * progress.current / progress.total
     parts = [
         f"{progress.label} — {progress.current:,} of {progress.total:,} ({percent:.1f}%)",
@@ -1078,6 +1091,8 @@ def format_progress_status(
             parts.append(f"about {format_duration(eta)} left")
         else:
             parts.append("estimating time remaining")
+    if progress.phase.startswith("stage-") and progress.item and progress.item != "Complete":
+        parts.append(progress.item[:100])
     return "  •  ".join(parts)
 
 
@@ -1450,6 +1465,9 @@ class SceneLightSetup(tk.Tk):
         self._progress_origin = 0
         self._progress_current = 0
         self._progress_total = 0
+        self._latest_progress = None
+        self._progress_indeterminate = False
+        self._last_elapsed_refresh = 0.0
         self._dependency_state: DependencyState | None = None
         self._dependency_key: tuple[object, ...] | None = None
         self._options_window: tk.Toplevel | None = None
@@ -2598,7 +2616,20 @@ class SceneLightSetup(tk.Tk):
             self.project_path_var.set(str(selection.root))
             self.status_var.set(selection.message)
             self.project_status.configure(foreground="#75d6ad")
-            if inspection is not None and inspection.error is not None:
+            if self._running and self._active_operation in {
+                "install",
+                "attach",
+                "embed",
+                "refresh",
+            }:
+                self.installation_var.set(
+                    "An existing installation was detected. The update is still running; "
+                    "wait for the completion message below."
+                    if existing_install
+                    else "Installation is still running. Wait for the completion message below."
+                )
+                self.installation_status.configure(foreground="#70caf2")
+            elif inspection is not None and inspection.error is not None:
                 self.installation_var.set(
                     "SceneLight found an installation it cannot safely update. "
                     "Open Manage installation for details."
@@ -3733,6 +3764,9 @@ class SceneLightSetup(tk.Tk):
         self._progress_origin = 0
         self._progress_current = 0
         self._progress_total = 0
+        self._latest_progress = None
+        self._progress_indeterminate = False
+        self._last_elapsed_refresh = 0.0
         if operation in {"components", "preview-components"}:
             self.progress.stop()
             self.progress.configure(mode="determinate", maximum=len(commands), value=0)
@@ -3894,23 +3928,32 @@ class SceneLightSetup(tk.Tk):
                         previous_total=self._progress_total,
                     ):
                         now = time.monotonic()
-                        if (
-                            progress.phase != self._progress_phase
-                            or progress.total != self._progress_total
+                        if progress.phase != self._progress_phase or (
+                            progress.total != self._progress_total
+                            and not progress.phase.startswith("stage-")
                         ):
                             self._progress_phase = progress.phase
                             self._progress_started_at = now
                             self._progress_origin = progress.current
                         self._progress_current = progress.current
                         self._progress_total = progress.total
+                        self._latest_progress = progress
                         elapsed = now - self._progress_started_at
                         completed = max(0, progress.current - self._progress_origin)
-                        self.progress.stop()
-                        self.progress.configure(
-                            mode="determinate",
-                            maximum=progress.total,
-                            value=progress.current,
-                        )
+                        if progress.total == 0 and progress.item != "Complete":
+                            if not getattr(self, "_progress_indeterminate", False):
+                                self.progress.stop()
+                                self.progress.configure(mode="indeterminate", maximum=100, value=0)
+                                self.progress.start(20)
+                                self._progress_indeterminate = True
+                        else:
+                            self.progress.stop()
+                            self.progress.configure(
+                                mode="determinate",
+                                maximum=max(1, progress.total),
+                                value=progress.current if progress.total else 1,
+                            )
+                            self._progress_indeterminate = False
                         self.operation_var.set(
                             format_progress_status(
                                 progress,
@@ -3951,7 +3994,29 @@ class SceneLightSetup(tk.Tk):
                     self._finish_cuda_detection(event[2], int(event[1]))
         except queue.Empty:
             pass
+        self._refresh_elapsed_progress()
         self.after(10 if not self._events.empty() else 100, self._drain_events)
+
+    def _refresh_elapsed_progress(self) -> None:
+        progress = getattr(self, "_latest_progress", None)
+        if (
+            self._active_operation is None
+            or progress is None
+            or not progress.phase.startswith("stage-")
+            or progress.item == "Complete"
+        ):
+            return
+        now = time.monotonic()
+        if now - getattr(self, "_last_elapsed_refresh", 0.0) < 0.5:
+            return
+        self._last_elapsed_refresh = now
+        self.operation_var.set(
+            format_progress_status(
+                progress,
+                elapsed_seconds=now - self._progress_started_at,
+                completed_since_start=max(0, progress.current - self._progress_origin),
+            )
+        )
 
     def _operation_done(
         self,

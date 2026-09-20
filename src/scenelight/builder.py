@@ -50,6 +50,7 @@ from .engine import (
 )
 from .form_maps import FORM_MAP_VERSION, build_sprite_form_maps
 from .hashing import sha256_file
+from .progress import ProgressStage
 from .project import ProjectDiscovery, SpriteSpec
 
 TILE_SIZE = (160, 90)
@@ -1414,7 +1415,8 @@ def _build_form_maps(
             for future in futures:
                 future.cancel()
         finally:
-            executor.shutdown(wait=True, cancel_futures=True)
+            with ProgressStage("form-workers", item="Waiting for sprite-map workers to close"):
+                executor.shutdown(wait=True, cancel_futures=True)
 
         if not exhausted_memory:
             break
@@ -1431,8 +1433,9 @@ def _build_form_maps(
             flush=True,
         )
 
-    payload = _form_payload(fallback, entries, skipped)
-    _write_json_atomic(manifest_path, payload)
+    with ProgressStage("form-index", item="Writing the completed sprite-map index"):
+        payload = _form_payload(fallback, entries, skipped)
+        _write_json_atomic(manifest_path, payload)
     return payload
 
 
@@ -1782,7 +1785,8 @@ def build_project(
         "privacy": "Derived maps only. Source images were not copied.",
     }
     report_path = output_root / "install_report.json"
-    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    with ProgressStage("analysis-report", item="Writing the analysis summary"):
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return BuildResult(
         output_root=output_root,
         scene_count=len(scene_manifest),

@@ -26,6 +26,7 @@ from .launch_safety import (
     restore_native_launcher,
     snapshot_saves,
 )
+from .progress import ProgressStage, copytree_with_progress
 from .release import (
     release_content_sha256_from_manifest,
     release_record,
@@ -65,14 +66,20 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _tracked_source_state(project_root: Path) -> dict[str, list[int | str]]:
+def _tracked_source_state(
+    project_root: Path, *, progress: ProgressStage | None = None
+) -> dict[str, list[int | str]]:
     """Track authored bytes, including timestamp-preserving asset replacements."""
 
     state: dict[str, list[int | str]] = {}
     root_config = project_root / "scenelight.json"
     if root_config.is_file():
         stat = root_config.stat()
+        if progress is not None:
+            progress.set_item(root_config.name)
         state[root_config.name] = [stat.st_size, stat.st_mtime_ns, _sha256(root_config)]
+        if progress is not None:
+            progress.advance()
 
     game_root = project_root / "game"
     if not game_root.is_dir():
@@ -103,8 +110,39 @@ def _tracked_source_state(project_root: Path) -> dict[str, list[int | str]]:
                 # compiled-only games/mods trackable when no source twin exists.
                 continue
             stat = path.stat()
+            if progress is not None:
+                progress.set_item(relative.as_posix())
             state[relative.as_posix()] = [stat.st_size, stat.st_mtime_ns, _sha256(path)]
+            if progress is not None:
+                progress.advance()
     return dict(sorted(state.items()))
+
+
+def _installation_source_state(project_root: Path) -> dict[str, list[int | str]]:
+    with ProgressStage("source-index", item="Reading source file fingerprints") as progress:
+        return _tracked_source_state(project_root, progress=progress)
+
+
+def _runtime_file_hashes(project_root: Path, destination_root: Path) -> dict[str, str]:
+    with ProgressStage("runtime-hashes", item="Counting copied files") as progress:
+        paths = []
+        for path in destination_root.rglob("*"):
+            if path.is_file():
+                paths.append(path)
+                progress.set_item(f"Counting copied files: {len(paths):,} found")
+        progress.set_total(len(paths))
+        files = {}
+        for path in paths:
+            relative = path.relative_to(project_root).as_posix()
+            progress.set_item(relative)
+            files[relative] = _sha256(path)
+            progress.advance()
+        return files
+
+
+def _save_install_manifest(path: Path, payload: dict) -> None:
+    with ProgressStage("install-record", item="Writing installation ownership details"):
+        _atomic_json(path, payload)
 
 
 def _changed_source_paths(previous: object, current: dict[str, list[int | str]]) -> tuple[str, ...]:
@@ -424,7 +462,7 @@ def _stage_runtime(
     stage = game_root / f".sl-{uuid.uuid4().hex[:8]}"
     staged_data = stage / "runtime"
     try:
-        shutil.copytree(source_data, staged_data)
+        copytree_with_progress(source_data, staged_data, "runtime-copy")
         shutil.rmtree(staged_data / ORIGINAL_LAUNCHER_DIR.name, ignore_errors=True)
         staged_config = staged_data / LAUNCHER_CONFIG.name
         if staged_config.is_file():
@@ -545,15 +583,11 @@ def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object
                 "runtime": str(installed_launcher["runtime"]),
             }
 
-        files = {
-            path.relative_to(project_root).as_posix(): _sha256(path)
-            for path in destination_root.rglob("*")
-            if path.is_file()
-        }
+        files = _runtime_file_hashes(project_root, destination_root)
         if native_launcher is not None:
             executable_relative = str(native_launcher["executable"])
             files[executable_relative] = _sha256(project_root / executable_relative)
-        _atomic_json(
+        _save_install_manifest(
             manifest_path,
             {
                 "version": 3,
@@ -564,7 +598,7 @@ def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object
                 "files": dict(sorted(files.items())),
                 "native_launcher": native_launcher,
                 "save_backup": save_backup,
-                "source_state": _tracked_source_state(project_root),
+                "source_state": _installation_source_state(project_root),
                 "config": _config_record(project_root, install),
                 "config_sha256": install.get("config_sha256"),
             },
@@ -647,18 +681,17 @@ def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[
 
         # Re-verify after potentially long analysis/staging so a concurrent
         # manual edit can never be overwritten by the refresh swap.
-        preflight_refresh_destination(project_root)
+        with ProgressStage(
+            "install-verify", item="Rechecking ownership before replacing the runtime"
+        ):
+            preflight_refresh_destination(project_root)
         os.replace(destination_root, backup)
         destination_moved = True
         os.replace(staged_data, destination_root)
         replacement_installed = True
         stage.rmdir()
 
-        files = {
-            path.relative_to(project_root).as_posix(): _sha256(path)
-            for path in destination_root.rglob("*")
-            if path.is_file()
-        }
+        files = _runtime_file_hashes(project_root, destination_root)
         if launcher_owned:
             executable_relative = native_launcher.get("executable")
             if not isinstance(executable_relative, str):
@@ -677,14 +710,15 @@ def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[
             "files": dict(sorted(files.items())),
             "native_launcher": native_launcher,
             "save_backup": original_manifest.get("save_backup"),
-            "source_state": _tracked_source_state(project_root),
+            "source_state": _installation_source_state(project_root),
             "config": _config_record(project_root, install),
             "config_sha256": install.get("config_sha256"),
         }
-        _atomic_json(manifest_path, refreshed_manifest)
+        _save_install_manifest(manifest_path, refreshed_manifest)
         manifest_updated = True
         try:
-            shutil.rmtree(backup)
+            with ProgressStage("runtime-cleanup", item="Removing the replaced runtime"):
+                shutil.rmtree(backup)
         except OSError as error:
             # The refreshed install and ownership record are already complete.
             # Do not risk rolling back from a partially removed backup tree.

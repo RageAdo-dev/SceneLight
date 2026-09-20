@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import json
 import zipfile
 from types import SimpleNamespace
@@ -97,12 +98,95 @@ def test_static_install_does_not_launch_movie_preparation(tmp_path, monkeypatch)
     def unexpected(*args, **kwargs):
         raise AssertionError("Static scenes must not launch movie preparation")
 
-    monkeypatch.setattr(prepared.subprocess, "run", unexpected)
+    monkeypatch.setattr(prepared.subprocess, "Popen", unexpected)
     monkeypatch.setattr(prepared.importlib.util, "find_spec", lambda name: None)
     assert (
         prepared.prepare_project_movies(SimpleNamespace(game_root=tmp_path, scene_media={})) == {}
     )
     assert json.loads((tmp_path / "scenelight_runtime/prepared_movies.json").read_text()) == {}
+
+
+@pytest.mark.parametrize("returncode", [0, 3])
+def test_installer_streams_movie_frames_and_preserves_failures(tmp_path, monkeypatch, returncode):
+    from scenelight import prepared
+    from scenelight import progress as progress_module
+    from scenelight.setup_gui import parse_progress
+
+    source = tmp_path / "background.webm"
+    source.write_bytes(b"source remains untouched")
+    root = tmp_path / "scenelight_runtime"
+    root.mkdir()
+    manifest = root / "prepared_movies.json"
+    manifest.write_text('{"previous": true}', encoding="utf-8")
+    lines = []
+    monkeypatch.setattr(prepared, "print", lambda line, **kw: lines.append(line), raising=False)
+    monkeypatch.setattr(
+        progress_module, "print", lambda line, **kw: lines.append(line), raising=False
+    )
+    clock = itertools.count()
+    monkeypatch.setattr(progress_module, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(prepared.importlib.util, "find_spec", lambda name: object())
+
+    class Process:
+        def __init__(self, command, **kwargs):
+            self.returncode = returncode
+            self.stdout = self.output(command[4])
+            assert kwargs["stdout"] == prepared.subprocess.PIPE
+            assert kwargs["stderr"] == prepared.subprocess.STDOUT
+
+        def output(self, destination):
+            yield "video decoder diagnostic\n"
+            yield '["non-progress JSON"]\n'
+            yield '{"done": 1, "total": 2}\n'
+            # The UI must receive this before the next frame or child completion.
+            updates = [parse_progress(line) for line in lines if line.startswith("SceneLight")]
+            assert "frames 1/2" in updates[-1].item
+            assert updates[-1].current == 0
+            if returncode:
+                yield "decoder failed\n"
+                return
+            yield '{"done": 2, "total": 2}\n'
+            writer = Writer(
+                prepared.Path(destination),
+                {
+                    "frame_count": 1,
+                    "engine": prepared.engine_identity(),
+                    "preview": False,
+                    "size": [16, 9],
+                    "source_frame_count": 2,
+                },
+            )
+            try:
+                writer.append(fields(0))
+                writer.finish()
+            finally:
+                writer.close()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def wait(self):
+            return self.returncode
+
+    monkeypatch.setattr(prepared.subprocess, "Popen", Process)
+    discovery = SimpleNamespace(game_root=tmp_path, scene_media={"bg movie": source})
+    if returncode:
+        with pytest.raises(prepared.subprocess.CalledProcessError):
+            prepared.prepare_project_movies(discovery)
+        assert json.loads(manifest.read_text()) == {"previous": True}
+        assert "decoder failed" in lines
+        assert "Stopped: CalledProcessError" in lines[-1]
+        assert not any(line.endswith(": Complete") for line in lines)
+    else:
+        result = prepared.prepare_project_movies(discovery)
+        assert result["background.webm"]["frames"] == 2
+        assert json.loads(manifest.read_text()) == result
+        assert "movie-prepare 1/1: Complete" in lines[-1]
+    assert "video decoder diagnostic" in lines
+    assert source.read_bytes() == b"source remains untouched"
 
 
 def fields(seed):

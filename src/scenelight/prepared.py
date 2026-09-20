@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ctypes
 import hashlib
 import importlib.util
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .progress import ProgressStage
 from .runtime import live_gpu
 from .runtime.prepared import FIELDS, VERSION, Reader
 
@@ -253,36 +255,75 @@ def prepare_project_movies(discovery) -> dict:
     root = discovery.game_root / "scenelight_runtime"
     entries = {}
     engine = engine_identity()
-    for source in sources:
-        relative = source.resolve().relative_to(discovery.game_root.resolve()).as_posix()
-        key = hashlib.sha256((relative + engine).encode("utf-8")).hexdigest()
-        destination = root / "prepared_movies" / (key + ".slframes")
-        print("Preparing full-quality movie lighting: " + relative, flush=True)
-        subprocess.run(
-            [sys.executable, "-m", "scenelight.prepared", str(source), str(destination), "--game"],
-            check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            env=dict(
-                os.environ,
-                PYTHONPATH=str(Path(__file__).resolve().parents[1])
-                + os.pathsep
-                + os.environ.get("PYTHONPATH", ""),
-            ),
-        )
-        reader = Reader(str(destination), {"engine": engine, "preview": False})
-        try:
-            entries[relative] = {
-                "cache": destination.relative_to(discovery.game_root).as_posix(),
-                "size": reader.metadata["size"],
-                "frames": reader.metadata.get("source_frame_count", reader.count),
-            }
-        finally:
-            reader.close()
-    root.mkdir(parents=True, exist_ok=True)
-    destination = root / "prepared_movies.json"
-    temporary = destination.with_suffix(".json.partial")
-    temporary.write_text(json.dumps(entries, indent=2), encoding="utf-8")
-    os.replace(temporary, destination)
+    stage = (
+        ProgressStage("movie-prepare", total=len(sources), item="Starting video preparation")
+        if sources
+        else contextlib.nullcontext()
+    )
+    with stage as progress:
+        for index, source in enumerate(sources, 1):
+            relative = source.resolve().relative_to(discovery.game_root.resolve()).as_posix()
+            key = hashlib.sha256((relative + engine).encode("utf-8")).hexdigest()
+            destination = root / "prepared_movies" / (key + ".slframes")
+            progress.set_item(f"Video {index}/{len(sources)}: {relative}")
+            print("Preparing full-quality movie lighting: " + relative, flush=True)
+            command = [
+                sys.executable,
+                "-m",
+                "scenelight.prepared",
+                str(source),
+                str(destination),
+                "--game",
+            ]
+            # Keep the child's JSON protocol intact for Preview, but translate
+            # its live frame counts into the installer's visible progress stage.
+            with subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                env=dict(
+                    os.environ,
+                    PYTHONPATH=str(Path(__file__).resolve().parents[1])
+                    + os.pathsep
+                    + os.environ.get("PYTHONPATH", ""),
+                ),
+            ) as process:
+                for line in process.stdout:
+                    print(line.rstrip("\r\n"), flush=True)
+                    try:
+                        update = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(update, dict):
+                        continue
+                    done, total = update.get("done"), update.get("total")
+                    if isinstance(done, int) and isinstance(total, int) and 0 <= done <= total:
+                        progress.set_item(
+                            f"Video {index}/{len(sources)} · frames {done:,}/{total:,} · {relative}"
+                        )
+                if process.wait():
+                    raise subprocess.CalledProcessError(process.returncode, command)
+            reader = Reader(str(destination), {"engine": engine, "preview": False})
+            try:
+                entries[relative] = {
+                    "cache": destination.relative_to(discovery.game_root).as_posix(),
+                    "size": reader.metadata["size"],
+                    "frames": reader.metadata.get("source_frame_count", reader.count),
+                }
+            finally:
+                reader.close()
+            progress.advance()
+        if progress is not None:
+            progress.set_item("Saving the prepared-video index")
+        root.mkdir(parents=True, exist_ok=True)
+        destination = root / "prepared_movies.json"
+        temporary = destination.with_suffix(".json.partial")
+        temporary.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        os.replace(temporary, destination)
     return entries
 
 

@@ -157,3 +157,18 @@ packs add validated shader parts; the player effects panel and hotkey are disabl
 See the [lighting API](MOD_AUTHOR_API.md) and [effect-pack reference](EFFECT_PACKS.md).
 
 [Performance](performance.md) · [Validation](BETA_VALIDATION.md) · [Design history](history/README.md)
+
+## Progress for long operations
+
+Every potentially long installation step must announce its stage before starting.
+Use `ProgressStage` for worker shutdown, serialization, copying, hashing, and
+cleanup. Report measured item completion when a total is known. Otherwise show an
+indeterminate activity indicator and elapsed time; never infer completion from a
+heartbeat or leave a prior phase's 100% on screen. The setup UI updates elapsed
+time independently of worker output, and Activity retains each stage transition.
+Heartbeats repeat the last measured count rather than claiming new work occurred.
+
+Progress output is throttled for large inventories. File operations keep their
+existing metadata, ignore rules, verification, and transactional rollback behavior.
+Future stages must be registered in `progress.STAGE_LABELS` and covered by parser,
+slow-operation, and failure-path checks.

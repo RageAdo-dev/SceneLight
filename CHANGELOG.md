@@ -4,6 +4,9 @@
 
 ### Lighting and playback
 
+- Setup now shows finalization stages after sprite maps reach 100%: worker shutdown, index/report writing, background-video preparation, cache copying, runtime copying and verification, and workspace cleanup. Large copies/hashes report file counts; video preparation reports the current video and frame counts. Otherwise the active stage and elapsed time remain visible. Activity records the same live stages, refreshes while visible, follows new entries at the bottom, and preserves the view when reading older entries.
+- An active installation/update no longer displays the previous installation as "installed and ready"; it explicitly asks users to wait for completion.
+
 - Missing, unsupported, or unreadable sprite assets now skip individually during capture, including parallel batches, while valid assets continue through installation. Completed skips are reusable on retry and repaired source assets are rediscovered on update.
 - Activity and support exports now include skipped asset names and reasons, with captured/skipped totals. Developer install/update also show the skip count. Unreported worker omissions and failures writing output remain visible errors.
 

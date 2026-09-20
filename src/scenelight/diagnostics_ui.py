@@ -7,6 +7,19 @@ from pathlib import Path
 from . import diagnostics
 
 
+def _replace_activity_text(text, content: str, *, reset: bool = False) -> None:
+    first, last = text.yview()
+    follow = reset or last >= 0.98
+    text.configure(state="normal")
+    text.delete("1.0", "end")
+    text.insert("end", content)
+    text.configure(state="disabled")
+    if follow:
+        text.see("end")
+    else:
+        text.yview_moveto(first)
+
+
 def mount_activity(parent):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -70,17 +83,16 @@ def mount_activity(parent):
                 f"Session {row['id']} · {row['status']} · {row.get('failure', 'Search below or export a report to share.')}\nShowing the newest 1,500 matching events; exported journals retain more."
             )
             if force or signature != state["signature"]:
+                reset = state["signature"] is None or signature[:3] != state["signature"][:3]
                 state["signature"] = signature
                 records = diagnostics.read_events(row["path"], query=query.get(), level=level.get())
-                text.configure(state="normal")
-                text.delete("1.0", "end")
-                text.insert(
-                    "end",
+                _replace_activity_text(
+                    text,
                     diagnostics.read_console(row["path"], query=query.get())
                     if level.get() == "raw console"
                     else "\n".join(diagnostics.event_text(r) for r in records),
+                    reset=reset,
                 )
-                text.configure(state="disabled")
 
     def export():
         index = chosen.current()
@@ -131,8 +143,9 @@ def mount_activity(parent):
 
     def poll():
         if frame.winfo_exists():
-            refresh()
-            frame.after(2500, poll)
+            if frame.winfo_viewable():
+                refresh()
+            frame.after(1000, poll)
 
     frame.after(10, poll)
     return frame
