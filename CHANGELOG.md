@@ -4,6 +4,9 @@
 
 ### Lighting and playback
 
+- Smoothed colored-light handovers, including lights close to a character. Preserved the forward light direction and removed an over-sharpening blend; Preview and gameplay share the correction.
+- Interrupted capture retains completed worker batches even when available memory changes the worker count. Clean memory-saving restarts no longer consume the crash retry budget; unresolved errors remain visible and progress stays available for retry.
+
 - Restored the simple single-sprite Preview controls. Removed the extra library/scene toolbar and character list, preserved the right-side placement and lighting controls, and fixed drag coordinates being rounded back onto a percentage grid. Per-target controls remain in the mod API.
 - Sprite glow and color-rule glow strength now support 0–10 in Preview, profiles, and the mod API. Other lighting and halo ranges remain unchanged.
 - Added independent color-selective glow rules per sprite. Match nearby artwork shades with range and softness controls, adjust each rule's strength and halo spread, and retain the rules in saved scenes, library presets, profiles, and author exports.

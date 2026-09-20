@@ -108,8 +108,8 @@ def test_adaptive_separation_uses_real_source_positions_and_conservative_evidenc
     assert "max(u_sc_calibration4.y, sc_adaptive_light_colors)" in source
     assert "distance(data_a.xy, data_b.xy)" in source
     assert "length(color_a.rgb - color_b.rgb)" in source
-    assert "vec2 sc_creative_direction2 = normalize(light2.xy)" in source
-    assert "vec2 sc_creative_direction3 = normalize(light3.xy)" in source
+    assert "vec2 sc_creative_direction2 = light2.xy" in source
+    assert "vec2 sc_creative_direction3 = light3.xy" in source
     assert "-0.5 * light2.x" not in source
 
 

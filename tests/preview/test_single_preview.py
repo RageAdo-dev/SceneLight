@@ -134,3 +134,33 @@ def test_drag_keeps_subpercent_coordinates_across_frames_and_slider_changes(sing
     assert view._character_height == 0.85
     window._horizontal_slider.setValue(60)
     assert view._baseline == precise[1]
+
+
+def test_preset_and_strength_changes_render_the_same_as_direct_settings(single_preview, renderer):
+    import numpy as np
+
+    from scenelight.calibration import lighting_mode_preset
+
+    window, paths, _errors = single_preview
+    window._load_sprite(paths[0])
+    _wait_for_sprite(window)
+    for index, name in ((1, "physical"), (3, "separate"), (2, "cinematic"), (1, "physical")):
+        window._lighting_look.setCurrentIndex(index)
+        _strength, calibration = lighting_mode_preset(name)
+        window._strength_slider.setValue(63)
+        assert window._calibration == window._view._calibration == calibration
+        assert window._view._strength == 0.63
+        frame = window._view.render_rgba((640, 360))
+        # An independent GL view starts directly in the requested final state.
+        renderer.set_sprite(paths[0], window._form_artifacts_by_frame[0])
+        renderer.set_placement(
+            window._view._horizontal, window._view._baseline, window._view._character_height
+        )
+        renderer.set_calibration(calibration)
+        renderer.set_strength(0.63)
+        renderer.set_live_analysis_enabled(True)
+        renderer.set_background_frame(window._view._background_frame)
+        reference = renderer.render_rgba((640, 360))
+        np.testing.assert_array_equal(frame, reference)
+    renderer.set_calibration(Calibration())
+    renderer.set_strength(1.0)

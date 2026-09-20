@@ -5,11 +5,8 @@
 # then launch the game.  It renders one frame, saves it, and quits, so it needs
 # no clicking and touches no save data.
 #
-# Why this exists: the separated-light path can only be judged on a real scene
-# through the real renderer.  The Interaction mod's Sayori sprite over its
-# "bg house" background reproduces the case users reported, and a numpy model of
-# the shader does not agree with the engine, so this probe -- not a unit test --
-# is the visual guard for the lamp handover.
+# Visual companion to the automated OpenGL continuity regression. Use a real
+# background and sprite to inspect colored-light handovers on artwork as well.
 #
 # What to look for: the borders between the differently coloured lights should
 # read as gradients across cloth, hair and skin.  A straight-edged panel, or a

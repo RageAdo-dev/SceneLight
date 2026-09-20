@@ -3261,16 +3261,9 @@ init -50 python:
                 // Creative mode gives every detected hue family equal artistic
                 // standing, then separates their directional lobes. Realistic
                 // mode above remains energy-weighted and fully additive.
-                // Each lobe is raised to this exponent and the lobes are then
-                // renormalised against each other, so the exponent sets how
-                // sharply one lamp hands over to the next.  At the old
-                // 2.0 + 3.0 * evidence the handover collapsed to a step: the
-                // border between two lamps was painted onto the artwork as a
-                // region with hard terraced edges across a face, hands or
-                // cardigan.  The regions, the lamp colours and the overall
-                // lighting model are unchanged here; the lower exponent only
-                // lets neighbouring lobes overlap so the border reads as a
-                // gradient instead of a cut.
+                // Smooth positive lobes retain directional color separation.
+                // Normalize them directly below; a low-temperature softmax
+                // exaggerates small differences into hard color boundaries.
                 float sc_creative_power = 1.0
                     + 1.5 * sc_individual_light_colors;
                 float sc_creative_spread = clamp(
@@ -3278,10 +3271,13 @@ init -50 python:
                     0.0,
                     0.84
                 );
-                vec2 sc_creative_direction0 = normalize(light0.xy);
-                vec2 sc_creative_direction1 = normalize(light1.xy);
-                vec2 sc_creative_direction2 = normalize(light2.xy);
-                vec2 sc_creative_direction3 = normalize(light3.xy);
+                // The light vectors are already normalized in 3D. Retain
+                // their forward component: normalizing XY again makes an
+                // overhead/nearby source flip abruptly across its centre.
+                vec2 sc_creative_direction0 = light0.xy;
+                vec2 sc_creative_direction1 = light1.xy;
+                vec2 sc_creative_direction2 = light2.xy;
+                vec2 sc_creative_direction3 = light3.xy;
                 // A flat sprite's reconstructed normals can all lean toward
                 // the viewer.  Creative separation therefore also uses the
                 // pixel's direction across the character silhouette, giving
@@ -3350,34 +3346,8 @@ init -50 python:
                     sc_creative_source_count
                 );
                 sc_creative_influence0 *= 1.0 - sc_multiple_creative_sources;
-                // Blend neighbouring separated lights instead of switching
-                // between them.  The powers above are renormalised against each
-                // other, which makes the handover between two lamps a
-                // winner-take-all partition: wherever two lamps are close in
-                // strength the change collapses into a one-pixel step, and the
-                // step shows up as straight creases across a jaw, sleeve or
-                // skirt.  A softmax over the same powers spreads that handover
-                // into a gradient.  The lamps, their colours, their weights and
-                // the region they cover are unchanged.
-                float sc_creative_peak = max(
-                    max(sc_creative_influence0, sc_creative_influence1),
-                    max(sc_creative_influence2, sc_creative_influence3)
-                );
-                float sc_creative_temperature = max(
-                    0.05 * sc_creative_peak, 0.0005
-                );
-                sc_creative_influence0 = exp(
-                    (sc_creative_influence0 - sc_creative_peak) / sc_creative_temperature
-                );
-                sc_creative_influence1 = exp(
-                    (sc_creative_influence1 - sc_creative_peak) / sc_creative_temperature
-                ) * sc_accepted_source1;
-                sc_creative_influence2 = exp(
-                    (sc_creative_influence2 - sc_creative_peak) / sc_creative_temperature
-                ) * sc_accepted_source2;
-                sc_creative_influence3 = exp(
-                    (sc_creative_influence3 - sc_creative_peak) / sc_creative_temperature
-                ) * sc_accepted_source3;
+                // Direct weighted blending preserves zero contribution from
+                // absent sources and lets neighbouring colored lights overlap.
                 float sc_creative_total = max(
                     sc_creative_influence0 + sc_creative_influence1
                         + sc_creative_influence2 + sc_creative_influence3,

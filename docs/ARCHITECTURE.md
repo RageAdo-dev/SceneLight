@@ -61,6 +61,12 @@ Large captures use isolated workers with separate writable state and bounded
 concurrency. Completed forms are journaled by image tag and normalized attribute
 set so interrupted workers can resume. Plan, pixel and protocol versions are
 separate contracts; changing progress text does not invalidate captured pixels.
+The capture plan keeps stable batch membership if available worker concurrency
+changes on restart. Successful batches are published atomically and validated
+before reuse, including surface-normalization markers and composite dependencies.
+Clean memory-saving batches do not consume the bounded crash-retry allowance.
+An unresolved error pauses capture with usable checkpoints retained; retry the
+same project to continue. Changed source content invalidates obsolete captures.
 
 ## Surface maps
 

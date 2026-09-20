@@ -164,10 +164,13 @@ def test_non_lock_worker_error_is_not_hidden_by_fallback(tmp_path, monkeypatch, 
     monkeypatch.setattr(capture, "_schedule_capture_worker_cleanup", lambda _path: None)
     calls = []
 
-    def fail(item, *_args, **_kwargs):
+    def fail(item, *_args, **kwargs):
         calls.append(item.project_root.name)
         if item.project_root.name == "w1":
-            raise capture.CaptureInstanceConflict("single-instance guard")
+            if calls.count("w1") == 1:
+                raise capture.CaptureInstanceConflict("single-instance guard")
+            kwargs["result_path"].write_text(json.dumps({"sprites": {}}))
+            return
         raise RuntimeError("invalid sprite data")
 
     monkeypatch.setattr(capture, "_run_capture_request_resumable", fail)
@@ -183,8 +186,11 @@ def test_non_lock_worker_error_is_not_hidden_by_fallback(tmp_path, monkeypatch, 
             timeout_seconds=15,
             renderer=None,
         )
-    assert sorted(calls) == ["w1", "w2"]
-    assert "one at a time" not in capsys.readouterr().out
+    assert sorted(calls) == ["w1", "w1", "w2"]
+    assert (cache / "captured/parallel/worker-1-complete.json").is_file()
+    output = capsys.readouterr().out
+    assert "one at a time" in output
+    assert "paused with completed capture batches saved" in output
 
 
 def test_known_lock_stops_resumable_renderer_retry_even_with_new_checkpoint(tmp_path, monkeypatch):

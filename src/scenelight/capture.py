@@ -1964,6 +1964,135 @@ def _capture_worker_renderers(
     return values
 
 
+def _saved_capture_chunks(capture_root: Path, forms: list[str], workers: int) -> list[list[str]]:
+    """Keep checkpoint ownership stable when available RAM/worker count changes."""
+    path = capture_root / "parallel" / "work_plan.json"
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        chunks = saved.get("chunks")
+        if (
+            saved.get("version") == 1
+            and isinstance(chunks, list)
+            and 1 <= len(chunks) <= CAPTURE_FORM_WORKER_CAP
+            and all(isinstance(chunk, list) and chunk for chunk in chunks)
+            and [name for chunk in chunks for name in chunk] == forms
+        ):
+            return chunks
+    except (OSError, ValueError, AttributeError):
+        pass
+    chunks = _partition_capture_forms(forms, min(max(1, workers), len(forms)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_capture_result(path, {"version": 1, "chunks": chunks})
+    return chunks
+
+
+def _saved_worker_result(project_root: Path, path: Path, forms: list[str]) -> dict | None:
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        payload = saved.get("payload")
+        if (
+            saved.get("version") != 1
+            or saved.get("forms") != forms
+            or not isinstance(payload, dict)
+            or payload.get("version") != CAPTURE_VERSION
+            or payload.get("plan_only")
+            or set(payload.get("sprites", {})) != set(forms)
+        ):
+            return None
+        _relativize_capture_payload(project_root, payload)
+        if not _paths_exist(project_root, payload):
+            return None
+        # Normalization may have finished just before the host stopped. Never
+        # reinterpret already-normalized alpha as a raw renderer checkpoint.
+        raw_surfaces = []
+        normalized = set(payload.get("normalized_captures", []))
+        for raw in payload.get("surface_captures", []):
+            image = project_root / raw
+            if image.with_name(image.name + ".surface-normalized").is_file():
+                normalized.add(raw)
+            elif image.with_name(image.name + ".surface-checkpoint").is_file():
+                raw_surfaces.append(raw)
+            else:
+                return None
+        if any(
+            not (project_root / raw).with_name(Path(raw).name + ".surface-normalized").is_file()
+            for raw in normalized
+        ):
+            return None
+        for destination, manifest in payload.get("composite_captures", {}).items():
+            _validated_composite_job(project_root, destination, manifest)
+        payload["surface_captures"] = raw_surfaces
+        payload["normalized_captures"] = sorted(normalized)
+        return payload
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def _saved_worker_progress(project_root: Path, worker_root: Path, forms: list[str]) -> int:
+    """Count only this batch's published outputs, never old unrelated markers."""
+    paths = {}
+    try:
+        with (worker_root / "capture_forms.jsonl").open(encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                    if isinstance(row.get("name"), str) and isinstance(row.get("relative"), str):
+                        paths[row["name"]] = row["relative"]
+                except (ValueError, AttributeError):
+                    continue
+    except OSError:
+        pass
+
+    def composite_destination(row: dict) -> Path:
+        # Parallel helpers journal absolute paths in the managed project.
+        destination = _safe_composite_path(project_root, row.get("destination"))
+        relative = destination.relative_to(project_root.resolve()).as_posix()
+        _validated_composite_job(project_root, relative, row.get("manifest"))
+        return destination
+
+    composite_paths = set()
+    try:
+        with (worker_root / "composite_manifest.jsonl").open(encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                    composite_paths.add(composite_destination(row))
+                except (OSError, ValueError, TypeError, AttributeError):
+                    continue
+    except OSError:
+        pass
+    count = 0
+    root = worker_root.resolve()
+    for name in forms:
+        stem = "_".join(name.lower().split())[:52]
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+        raw = paths.get(name, str(root / f"sprite_{stem}_{digest}.png"))
+        try:
+            path = Path(raw).resolve()
+            if not path.is_relative_to(root):
+                continue
+            markers = (".surface-checkpoint", ".surface-normalized", ".composite-normalized")
+            complete = (
+                path.is_file()
+                and path.stat().st_size > 32
+                and any(path.with_name(path.name + suffix).is_file() for suffix in markers)
+            )
+            job = (
+                root
+                / "composite_jobs"
+                / ("composite_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20] + ".json")
+            )
+            if job.is_file() and path not in composite_paths:
+                row = json.loads(job.read_text(encoding="utf-8"))
+                composite_paths.add(composite_destination(row))
+            if complete or path in composite_paths:
+                count += 1
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+    return count
+
+
 def _run_parallel_capture_workers(
     discovery: ProjectDiscovery,
     renpy_executable: Path,
@@ -1976,29 +2105,48 @@ def _run_parallel_capture_workers(
     timeout_seconds: int,
     renderer: str | None,
 ) -> list[dict[str, object]]:
-    worker_count = _capture_form_worker_count(len(planned_forms))
-    if worker_count <= 1:
-        raise ValueError("Parallel SceneLight capture requires at least two workers")
-    chunks = _partition_capture_forms(planned_forms, worker_count)
+    if not planned_forms:
+        return []
+    concurrency = _capture_form_worker_count(len(planned_forms))
+    chunks = _saved_capture_chunks(capture_root, planned_forms, concurrency)
+    worker_count = len(chunks)
+    concurrency = min(max(1, concurrency), worker_count)
+    completed_paths = [
+        capture_root / "parallel" / f"worker-{index + 1}-complete.json"
+        for index in range(worker_count)
+    ]
+    results = [
+        _saved_worker_result(discovery.project_root, path, chunks[index])
+        for index, path in enumerate(completed_paths)
+    ]
 
     totals = [len(chunk) for chunk in chunks]
-    completed = [0] * worker_count
+    completed = [
+        totals[index]
+        if results[index] is not None
+        else _saved_worker_progress(
+            discovery.project_root, capture_root / "parallel" / f"worker-{index + 1}", chunks[index]
+        )
+        for index in range(worker_count)
+    ]
     total_forms = len(planned_forms)
     progress_lock = threading.Lock()
     last_reported = [-1]
     report_step = max(25, total_forms // 100)
     print(
-        f"SceneLight parallel forms 0/{total_forms}: "
-        f"starting {worker_count} isolated capture workers",
+        f"SceneLight parallel forms {sum(completed)}/{total_forms}: "
+        f"{concurrency} active worker(s); completed captures retained",
         flush=True,
     )
+    if all(payload is not None for payload in results):
+        return results
     worker_group = Path(
         tempfile.mkdtemp(prefix=".slw-", dir=str(discovery.project_root.resolve().parent))
     )
     worker_projects = [worker_group / f"w{index + 1}" for index in range(worker_count)]
     copies_completed = [0]
     prepared = [False] * worker_count
-    capture_mode = [f"{worker_count} isolated capture workers"]
+    capture_mode = [f"{concurrency} active worker(s), {worker_count} saved batches"]
 
     def report(worker_index: int, stage: str, current: int, total: int) -> None:
         if stage not in {"restore", "form"} or total != totals[worker_index]:
@@ -2114,16 +2262,34 @@ def _run_parallel_capture_workers(
             completed[worker_index] = totals[worker_index]
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         _relativize_capture_payload(discovery.project_root, payload)
+        # Direct source-image captures do not need the helper's dynamic-form
+        # checkpoint marker. Mark their raw state before publishing the batch,
+        # so restart can distinguish raw pixels from interrupted normalization.
+        for raw in payload.get("surface_captures", []):
+            image = discovery.project_root / raw
+            marker = image.with_name(image.name + ".surface-checkpoint")
+            normalized_marker = image.with_name(image.name + ".surface-normalized")
+            if not marker.is_file() and not normalized_marker.is_file():
+                temporary = _capture_temporary_path(marker, "marker")
+                try:
+                    temporary.write_text("raw\n", encoding="utf-8")
+                    os.replace(temporary, marker)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        _write_capture_result(
+            completed_paths[worker_index],
+            {"version": 1, "forms": chunks[worker_index], "payload": payload},
+        )
         return payload
 
-    results: list[dict[str, object] | None] = [None] * worker_count
     try:
         conflicts: list[int] = []
         failures: list[Exception] = []
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {
                 executor.submit(run_worker, worker_index): worker_index
                 for worker_index in range(worker_count)
+                if results[worker_index] is None
             }
             for future in as_completed(futures):
                 worker_index = futures[future]
@@ -2136,8 +2302,6 @@ def _run_parallel_capture_workers(
         # All children have settled before retrying a guard that uses a global
         # mutex instead of temp files. Preserve healthy shards and reuse the
         # failed shard's exact output directory, plan, and durable checkpoints.
-        if failures:
-            raise failures[0]
         if conflicts:
             print(
                 "SceneLight detected the mod's single-instance protection. "
@@ -2146,7 +2310,17 @@ def _run_parallel_capture_workers(
             )
             capture_mode[0] = "sequential capture (single-instance protection)"
             for worker_index in sorted(conflicts):
-                results[worker_index] = run_worker(worker_index)
+                try:
+                    results[worker_index] = run_worker(worker_index)
+                except Exception as error:
+                    failures.append(error)
+        if failures:
+            print(
+                "SceneLight paused with completed capture batches saved. "
+                "Retry the same project to resume; the unresolved error is reported below.",
+                flush=True,
+            )
+            raise failures[0]
         report(0, "form", totals[0], totals[0])
         return [payload for payload in results if payload is not None]
     finally:
@@ -2387,7 +2561,9 @@ def _run_capture_request_resumable(
 
     progress_state = _CaptureProgressState()
     low_yield_crashes = 0
-    for resume_index in range(CAPTURE_PROCESS_RESUME_LIMIT + 1):
+    crash_retries = 0
+    completed_batches = 0
+    while True:
         before = _durable_form_checkpoint_count(capture_root)
         try:
             completed = _run_capture_request(
@@ -2414,10 +2590,11 @@ def _run_capture_request_resumable(
             after = _durable_form_checkpoint_count(capture_root)
             if after <= before:
                 raise RuntimeError("Ren'Py ended a capture batch without saving a sprite form.")
+            completed_batches += 1
             progress_path.unlink(missing_ok=True)
             print(
                 "SceneLight memory-safe batch %d complete: %d new sprite forms saved "
-                "(%d total). Starting the next batch." % (resume_index + 1, after - before, after),
+                "(%d total). Starting the next batch." % (completed_batches, after - before, after),
                 flush=True,
             )
         except CaptureInstanceConflict:
@@ -2425,8 +2602,9 @@ def _run_capture_request_resumable(
         except RuntimeError as error:
             after = _durable_form_checkpoint_count(capture_root)
             crashed = "(exit " in str(error)
-            if not crashed or after <= before or resume_index >= CAPTURE_PROCESS_RESUME_LIMIT:
+            if not crashed or after <= before or crash_retries >= CAPTURE_PROCESS_RESUME_LIMIT:
                 raise
+            crash_retries += 1
             saved = after - before
             if saved < CAPTURE_LOW_YIELD_FORM_THRESHOLD:
                 low_yield_crashes += 1

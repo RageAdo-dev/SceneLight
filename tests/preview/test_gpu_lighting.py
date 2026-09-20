@@ -247,3 +247,46 @@ def test_prepared_replay_matches_live_and_preserves_flashes_and_cuts(renderer, t
             assert len(reader.frames) <= 2
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("light_y", [0.05, 0.32, 0.55])
+def test_close_colored_light_crosses_sprite_without_a_color_seam(renderer, light_y):
+    """A small light movement must not flip the hue across a face or sleeve."""
+    from scenelight.calibration import Calibration
+
+    renderer.set_placement(0.5, 1.0, 0.92)
+    renderer.set_strength(1.0)
+    renderer.set_calibration(Calibration(individual_light_colors=2.0))
+    renderer.set_live_analysis_enabled(True)
+    renderer.set_background_frame(_lamps(1.0))
+    renderer.render_rgba((640, 360))
+    renderer.set_live_analysis_enabled(False)
+    renderer._using_live_analysis = True
+    frames = []
+    try:
+        for light_x in np.linspace(0.495, 0.505, 11):
+            renderer._live_scene_metadata = {
+                "transport_preview": True,
+                "light_transport": [
+                    {
+                        "position_radius_intensity": (light_x, light_y, 0.2, 1.0),
+                        "chroma_confidence": (2.0, 0.3, 0.2, 1.0),
+                        "emission_enabled": (1.0, 1.0),
+                    },
+                    {
+                        "position_radius_intensity": (0.65, 0.2, 0.2, 1.0),
+                        "chroma_confidence": (0.2, 0.4, 2.0, 1.0),
+                        "emission_enabled": (1.0, 1.0),
+                    },
+                ],
+            }
+            frames.append(renderer.render_rgba((640, 360))[45:300, 280:360, :3].astype(float))
+        changes = np.abs(np.diff(frames, axis=0))
+        assert changes.max() <= 8, "Tiny light movement created a visible color jump"
+        # The correction must retain colored light, not suppress the lighting.
+        assert np.abs(frames[5][..., 0] - frames[5][..., 2]).mean() > 8
+    finally:
+        renderer._live_scene_metadata = None
+        renderer.set_live_analysis_enabled(True)
+        renderer.set_calibration(Calibration())
+        renderer.set_placement(0.65, 1.0, 0.92)

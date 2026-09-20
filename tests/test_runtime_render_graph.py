@@ -215,53 +215,6 @@ def test_ray_occlusion_requires_height_map_without_flattening_fallback_lighting(
     )
 
 
-def test_creative_light_partition_blends_neighbouring_lamps():
-    """Two neighbouring separated lamps must cross-fade, not switch.
-
-    The creative path raises each detected hue family to a power and renormalises
-    the lobes against each other.  That renormalisation is a winner-take-all
-    partition: wherever two lamps are close in strength the handover collapses
-    to a one-pixel step, and because the lobes are shaped by a direction field
-    that reverses through the sprite's form centre, the step lands on the
-    artwork as a straight-edged region across a face, hands or cardigan.  That
-    is the crease the Interaction mod showed, and lowering the exponent alone
-    only moved it from about two form-map pixels to about five.
-
-    The shader now passes the same influences through a softmax, so the lamps,
-    their colours, their weights and the region each covers are unchanged.
-
-    Source check, not a rendering check.  The handover was verified by rendering
-    the real scene, and a numpy model of it was tried and discarded because it
-    disagrees with the engine: it reports the old winner-take-all partition as
-    the smoother of the two.  Keep the in-engine probe in
-    ``tools/creative_handover_probe.rpy`` as the visual guard.
-    """
-    source = _runtime_source()
-    temperature = re.search(
-        r"float sc_creative_temperature = max\("
-        r"\s*\n\s*([0-9.]+) \* sc_creative_peak, ([0-9.]+)\s*\n\s*\);",
-        source,
-    )
-    assert temperature, "the creative influences are renormalised without a softmax"
-    scale, floor = float(temperature.group(1)), float(temperature.group(2))
-    assert 0.0 < scale <= 0.2 and floor > 0.0, (scale, floor)
-    for index in range(4):
-        assert f"sc_creative_influence{index} = exp(" in source
-
-    assert source.index("sc_creative_temperature") < source.index(
-        "float sc_creative_total = max("
-    ), "the influences are normalised before they are blended"
-
-    exponent = re.search(
-        r"float sc_creative_power = ([0-9.]+)"
-        r"\s*\n\s*\+ ([0-9.]+) \* sc_individual_light_colors;",
-        source,
-    )
-    assert exponent, "sc_creative_power is no longer a linear exponent"
-    base, slope = float(exponent.group(1)), float(exponent.group(2))
-    assert base < 2.0 and slope < 3.0, (base, slope)
-
-
 @pytest.mark.parametrize("has_form", [False, True])
 @pytest.mark.parametrize("viewport", [(1280, 720), (1920, 1080)])
 def test_sprite_lighting_uses_child_dimensions_with_or_without_form_map(has_form, viewport):
