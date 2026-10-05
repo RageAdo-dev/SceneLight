@@ -71,6 +71,8 @@
 
 ### Setup and author tools
 
+- Windows checksum reuse now requires a file-journal sequence and exclusive access. This detects rapid writes with identical timestamps and avoids reused checksums while another handle could coalesce journal records. Unsupported journals and sharing conflicts fall back to byte reads. Earlier timestamp-only verification stamps are invalidated.
+
 - Large installs transfer a private prepared runtime directly when it is on the same volume, avoiding another full copy. Verification reuses checksums only when the filesystem confirms the same file identity and change time; modified files, older records and unsupported filesystems still require byte reads. Verification uses bounded workers, retains a final ownership check, and returns prepared files on failed publication. Source edits made after analysis remain pending for the next update.
 - Removed a duplicate update ownership pass and an extra source scan during finalization. Transfer checks and prepared-file verification stay visible in Activity. Full file reads stay sequential to avoid competing disk seeks on hard drives; cached identity checks use bounded concurrency. Large-file benchmarks measure finalization separately from asset capture and analysis.
 

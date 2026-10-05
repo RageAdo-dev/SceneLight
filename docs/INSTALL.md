@@ -3,7 +3,7 @@
 Back up your game or project folder and saves before installing. It gives you an
 easy way back if setup is interrupted or your game isn’t compatible.
 
-[Download the current tester build](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.27).
+[Download the current tester build](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.28).
 Choose **SceneLight-v1.0.0-Windows.zip**, extract the entire archive, and open
 **SceneLight.exe**. The complete package includes Setup, Preview and the legacy
 compatibility runtime. No administrator access or system Python installation is

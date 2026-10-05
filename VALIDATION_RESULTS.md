@@ -1,16 +1,16 @@
 # Validation results
 
-Current tester package: **beta 27**. Documentation reviewed on 5 October 2026.
+Current tester package: **beta 28**. Documentation reviewed on 5 October 2026.
 
 | Area | Recorded result |
 | --- | --- |
-| Automated suite | 995 tests passed locally |
+| Automated suite | 1,004 tests passed locally |
 | Real game updates | Ren’Py 7.7.1 and 8.5.2, player and developer workflows |
 | Save safety | Prior gameplay checkpoint loaded after adding a sprite/background |
 | Existing data | Maps, settings and saved bytes preserved in the native rehearsals |
 | Package | ZIP integrity passed; all 66 product source files matched the tested code |
 | Bright-scene lighting | Controlled Preview/native comparisons on 12 backgrounds |
-| Large-file finalization | 43,835-file / 2.03 GB benchmark with independent byte verification |
+| Large-file finalization | Earlier beta 27 benchmark; beta 28 timing remains unmeasured at that scale |
 | Static/build checks | Ruff, formatting, dependency audit, Python build and medium/high security scan passed |
 
 [Compatibility, current results and known issues](docs/BETA_VALIDATION.md) ·

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import struct
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -53,10 +54,21 @@ if os.name == "nt":
         wintypes.DWORD,
     ]
     _kernel.GetVolumeInformationByHandleW.restype = wintypes.BOOL
+    _kernel.DeviceIoControl.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    ]
+    _kernel.DeviceIoControl.restype = wintypes.BOOL
     _cacheable_volumes: dict[int, bool] = {}
 
 
-def _open(path: Path):
+def _open(path: Path, *, exclusive: bool = False):
     if os.name != "nt":
         return path.open("rb", buffering=0)
     # Deny concurrent writers while observing the identity or reading bytes.
@@ -68,7 +80,7 @@ def _open(path: Path):
     handle = _kernel.CreateFileW(
         name,
         0x80000000,
-        0x1 | 0x4,
+        0 if exclusive else 0x1 | 0x4,
         None,
         3,
         0x80,
@@ -84,6 +96,38 @@ def _open(path: Path):
         _kernel.CloseHandle(handle)
         raise
     return os.fdopen(descriptor, "rb", buffering=0)
+
+
+def _usn_from_record(data: bytes) -> int | None:
+    """Parse only the documented V2/V3 USN field; unknown records are uncacheable."""
+    if len(data) < 8:
+        return None
+    length, major, _minor = struct.unpack_from("<IHH", data)
+    layout = {2: (60, 24), 3: (76, 40)}.get(major)
+    if layout is None or not layout[0] <= length <= len(data):
+        return None
+    usn = struct.unpack_from("<q", data, layout[1])[0]
+    return usn if usn > 0 else None
+
+
+def _windows_usn(handle) -> int | None:
+    # FSCTL_READ_FILE_USN_DATA: read-only, no journal creation or admin access.
+    # https://learn.microsoft.com/windows/win32/api/winioctl/ni-winioctl-fsctl_read_file_usn_data
+    versions = (wintypes.WORD * 2)(2, 3)
+    output = ctypes.create_string_buffer(4096)
+    returned = wintypes.DWORD()
+    if not _kernel.DeviceIoControl(
+        handle,
+        0x000900EB,
+        ctypes.byref(versions),
+        ctypes.sizeof(versions),
+        output,
+        len(output),
+        ctypes.byref(returned),
+        None,
+    ):
+        return None
+    return _usn_from_record(output.raw[: returned.value])
 
 
 def _identity(stream):
@@ -107,6 +151,11 @@ def _identity(stream):
         change = basic.change
         if not _cacheable_volumes[info.st_dev]:
             return (*ordinary, change), None
+        # Windows timestamps can collide for rapid edits. A journal sequence
+        # distinguishes writes even when their size and timestamps are equal.
+        usn = _windows_usn(handle)
+        identity = (*ordinary, change, usn)
+        return identity, identity if info.st_ino and usn is not None else None
     identity = (*ordinary, change)
     return identity, identity if info.st_ino and change else None
 
@@ -114,24 +163,30 @@ def _identity(stream):
 def _token(identity, digest: str) -> str | None:
     if identity is None:
         return None
-    payload = "sc-file-v1|" + digest + "|" + "|".join(str(value) for value in identity)
+    payload = "sc-file-v2|" + digest + "|" + "|".join(str(value) for value in identity)
     return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
 def verified_digest(path: Path, expected: str | None = None, stamp: str | None = None):
     """Return (SHA-256, verification stamp, reused) for these exact file bytes.
 
-    Windows creation time is insufficient: use the kernel ChangeTime, file ID,
-    volume, size and write time. Restoring a file's mtime cannot hide an edit.
-    POSIX uses its inode change time. Missing stamps force a complete read.
+    Windows reuse requires an exclusive handle and journal sequence as well as
+    file identity/times. Other open handles can coalesce journal write records;
+    sharing conflicts fall back to a full read without issuing a reusable stamp.
+    POSIX uses its inode change time. Missing evidence forces a complete read.
     """
-    if expected and stamp:
-        with _open(path) as stream:
-            _, identity = _identity(stream)
-            if stamp == _token(identity, expected):
-                return expected, stamp, True
-    with _open(path) as stream:
-        before, _ = _identity(stream)
+    cacheable = True
+    try:
+        stream = _open(path, exclusive=os.name == "nt")
+    except OSError as error:
+        if os.name != "nt" or getattr(error, "winerror", None) != 32:
+            raise
+        stream = _open(path)
+        cacheable = False
+    with stream:
+        before, identity = _identity(stream)
+        if cacheable and expected and stamp and stamp == _token(identity, expected):
+            return expected, stamp, True
         digest = hashlib.sha256()
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
@@ -139,7 +194,7 @@ def verified_digest(path: Path, expected: str | None = None, stamp: str | None =
         if before != after:
             raise RuntimeError(f"File changed during verification: {path}")
         value = digest.hexdigest()
-        return value, _token(identity, value), False
+        return value, _token(identity, value) if cacheable else None, False
 
 
 def bounded_file_work(function, items, *, workers: int | None = None):

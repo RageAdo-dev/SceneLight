@@ -3,9 +3,9 @@
 Documentation reviewed on 5 October 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
-## Current tester build — beta 27
+## Current tester build — beta 28
 
-The local suite passed **995 tests**. The extracted Windows package passed four
+The local suite passed **1,004 tests**. The extracted Windows package passed four
 native rehearsals: Ren’Py 7.7.1 and 8.5.2, each in player and developer modes.
 These covered installation, unchanged updates, adding one background/sprite,
 retained map/config/save bytes, and loading a real saved gameplay checkpoint.
@@ -23,11 +23,16 @@ Bright-scene regression coverage compared original and recovered sprites across
 Sixty matched cases were rendered in each of Ren’Py 7 and 8 and compared with
 Preview: the largest mean opaque-sprite difference was 0.359 of 255. These are
 controlled inputs, not universal pixel equivalence for every transform or GPU.
-The installer speed revision leaves that rendering code unchanged.
+The installer revisions leave that rendering code unchanged. Beta 28 adds a
+Windows journal-sequence check: timestamp collisions on GitHub's Windows runners
+exposed a case that the earlier local runs did not. An exclusive read prevents
+reuse while another open handle could coalesce journal records. Unsupported or
+unavailable journal information falls back to reading file bytes.
 
 See the [finalization benchmark](performance.md#installation-and-update-finalization)
-for the measured 173→34 second fresh-install and 242→67 second update finalization.
-Capture and image analysis are additional work.
+for the earlier beta 27 measurements. Beta 28 strengthens verification and has
+not yet repeated that large-file timing experiment. Capture and image analysis
+are additional work.
 
 ### Known issues and coverage limits
 

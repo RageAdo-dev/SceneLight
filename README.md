@@ -6,9 +6,9 @@
 
 Automatic lighting, color and glow for Ren’Py sprites. Preview a scene, tune it in-game, and keep your existing story workflow.
 
-[![CI](https://img.shields.io/badge/CI-Windows_%2B_Linux-233c51?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml) [![Tester build: beta 27](https://img.shields.io/badge/tester_build-beta_27-57c7dc?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.27) [![Ren’Py 7 and 8](https://img.shields.io/badge/Ren%27Py-7_%26_8-233c51?style=flat-square)](docs/BETA_VALIDATION.md) [![License: MIT](https://img.shields.io/badge/code-MIT-233c51?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/badge/CI-Windows_%2B_Linux-233c51?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml) [![Tester build: beta 28](https://img.shields.io/badge/tester_build-beta_28-57c7dc?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.28) [![Ren’Py 7 and 8](https://img.shields.io/badge/Ren%27Py-7_%26_8-233c51?style=flat-square)](docs/BETA_VALIDATION.md) [![License: MIT](https://img.shields.io/badge/code-MIT-233c51?style=flat-square)](LICENSE)
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.27)** · **[Player setup](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)** · **[All documentation](docs/README.md)**
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.28)** · **[Player setup](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)** · **[All documentation](docs/README.md)**
 
 </div>
 
@@ -86,12 +86,15 @@ Compatible code-only and lighting-settings updates retain the existing asset map
 
 The latest installer also avoids another complete runtime copy on the same volume and repeated byte reads for verified, unchanged files.
 
-| Measured finalization workload | Previous installer | Current installer |
-| --- | ---: | ---: |
-| Fresh install | 173 s | **34 s** |
-| Asset update | 242 s | **67 s** |
+| Update | What happens |
+| --- | --- |
+| Compatible code or lighting settings | Keep prepared asset maps; update the relevant files and values. |
+| New artwork | Refresh the inventory and reuse compatible capture/analysis results. |
+| Missing or incompatible preparation | Check and rebuild the affected data. |
 
-*Local benchmark: 43,835 generated files, 2.03 GB, Windows/NTFS on a mechanical SATA drive. These timings exclude capture and image analysis; they do not predict a whole-install speedup on another machine. [Method and limits →](docs/performance.md#installation-and-update-finalization)*
+Windows checksum reuse requires a file-journal sequence and an exclusive read;
+if those are unavailable, verification reads the bytes again. [Performance and
+verification details →](docs/performance.md#installation-and-update-finalization)
 
 After adding assets, run **Scan / Update**. Newly discovered characters follow your saved inclusion policy; SceneLight does not continuously watch the project folder. **Settings → Activity** shows the current stage, retained logs and report exports.
 
@@ -105,7 +108,7 @@ After adding assets, run **Scan / Update**. Newly discovered characters follow y
 
 Windows with compatible graphics; Ren’Py 7 and 8, plus a bundled compatibility runtime for some older games. CUDA is optional preparation acceleration. Live lighting still needs a supported graphics renderer.
 
-The latest local build passed **995 automated tests** and real Ren’Py 7/8 player/developer install, update and save-loading rehearsals. GPU coverage varies by device. An intermittent shimmer reported during longer gameplay remains **under investigation**; this build does not claim to resolve it.
+The latest local build passed **1,004 automated tests** and real Ren’Py 7/8 player/developer install, update and save-loading rehearsals. GPU coverage varies by device. An intermittent shimmer reported during longer gameplay remains **under investigation**; this build does not claim to resolve it.
 
 [Compatibility and known issues](docs/BETA_VALIDATION.md) · [Report a problem](docs/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md)
 

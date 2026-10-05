@@ -1,5 +1,6 @@
 import hashlib
 import os
+import struct
 from pathlib import Path
 
 import pytest
@@ -103,3 +104,70 @@ def test_invalid_cached_stamp_falls_back_to_reading_bytes(tmp_path):
     digest, _, _ = module.verified_digest(path)
     actual, _, reused = module.verified_digest(path, digest, "invalid stamp")
     assert actual == digest and not reused
+
+
+@pytest.mark.parametrize(
+    "major,length,usn,expected",
+    [
+        (2, 64, 53, 53),
+        (3, 80, 54, 54),
+        (4, 80, 54, None),
+        (2, 64, 0, None),
+        (2, 64, -1, None),
+        (2, 4096, 22, None),
+    ],
+)
+def test_journal_record_versions_and_bounds(major, length, usn, expected):
+    data = bytearray(80)
+    struct.pack_into("<IHH", data, 0, length, major, 0)
+    struct.pack_into("<q", data, 40 if major == 3 else 24, usn)
+    assert module._usn_from_record(bytes(data)) == expected
+    assert module._usn_from_record(bytes(data[:7])) is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file journal")
+def test_rapid_changes_with_identical_timestamps_are_not_reused(tmp_path, monkeypatch):
+    real = module._identity
+
+    def identical_times(stream):
+        identity, reusable = real(stream)
+        identity = (*identity[:3], 1, 1, *identity[5:])
+        return identity, identity if reusable is not None else None
+
+    monkeypatch.setattr(module, "_identity", identical_times)
+    path = tmp_path / "rapid.bin"
+    path.write_bytes(b"original")
+    digest, stamp, _ = module.verified_digest(path)
+    for value in (b"modified", b"changed!", b"restored"):
+        path.write_bytes(value)
+        new, next_stamp, reused = module.verified_digest(path, digest, stamp)
+        assert new == hashlib.sha256(value).hexdigest() and not reused
+        digest, stamp = new, next_stamp
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing and journal coalescing")
+def test_open_reader_forces_full_reads_without_reusable_stamps(tmp_path):
+    path = tmp_path / "shared.bin"
+    path.write_bytes(b"original")
+    digest, stamp, _ = module.verified_digest(path)
+    with path.open("rb"):
+        assert module.verified_digest(path, digest, stamp) == (digest, None, False)
+        for value in (b"modified", b"changed!"):
+            path.write_bytes(value)
+            assert module.verified_digest(path, digest, stamp) == (
+                hashlib.sha256(value).hexdigest(),
+                None,
+                False,
+            )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows journal availability")
+def test_unavailable_journal_never_uses_a_timestamp_only_stamp(tmp_path, monkeypatch):
+    path = tmp_path / "no-journal.bin"
+    path.write_bytes(b"original")
+    digest, stamp, _ = module.verified_digest(path)
+    monkeypatch.setattr(module, "_windows_usn", lambda handle: None)
+    assert module.verified_digest(path, digest, stamp) == (digest, None, False)
+    path.write_bytes(b"modified")
+    new, stamp, reused = module.verified_digest(path, digest, stamp)
+    assert new == hashlib.sha256(b"modified").hexdigest() and stamp is None and not reused

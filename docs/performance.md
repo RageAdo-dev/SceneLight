@@ -6,6 +6,10 @@ See [prepared playback](prepared-playback.md) and [older-hardware results](BETA_
 
 ## Installation and update finalization
 
+**Historical beta 27 measurement.** Beta 28 adds stronger Windows change detection
+and has not repeated this large-file timing run. The numbers below must not be
+read as measured beta 28 performance.
+
 Measured on 29 September 2026 using 43,835 generated runtime files (2.03 GB) on
 Windows/NTFS and a WDC WD4005FZBX mechanical SATA drive. The previous installer and
 beta 27 used the same host and file-size distribution. Every final owned file was
@@ -29,8 +33,10 @@ These are local file-work measurements, not a promise of a 10× whole-install ga
 The installer transfers a private prepared runtime on the same volume instead of
 copying it again. Cross-volume or linked trees keep the copy fallback. Verification
 can reuse a checksum when file identity, size, write time and OS change time match.
-On Windows, this uses NTFS/ReFS change time and denies active data writers; it does
-not mistake creation time for change time. Missing stamps, unsupported filesystems
+Beta 28 additionally requires a Windows NTFS/ReFS journal sequence and an exclusive
+handle before reusing a checksum. Timestamps alone can collide for rapid edits;
+other open handles can also coalesce journal records. Missing journal information
+or an exclusive-open conflict forces a full read without a reusable stamp. Missing stamps, unsupported filesystems
 and changed identities require byte reads. Initial full-file hashing is sequential
 to avoid competing seeks on hard drives. Cached checks use bounded concurrency.
 
