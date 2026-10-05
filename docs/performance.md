@@ -4,6 +4,46 @@ SceneLight reuses prepared movie lighting and sprite maps, and avoids repeated
 shader work. These optimizations retain lighting resolution, detail and timing.
 See [prepared playback](prepared-playback.md) and [older-hardware results](BETA_VALIDATION.md#playback-and-hardware).
 
+## Installation and update finalization
+
+Measured on 29 September 2026 using 43,835 generated runtime files (2.03 GB) on
+Windows/NTFS and a WDC WD4005FZBX mechanical SATA drive. The previous installer and
+beta 27 used the same host and file-size distribution. Every final owned file was
+independently SHA-256 audited; validation did not trust the reuse cache.
+
+| Operation | Previous | Beta 27 |
+| --- | ---: | ---: |
+| Fresh-install finalization | 173.23 s | 33.63 s |
+| Asset-update finalization | 241.62 s | 67.39 s |
+| Publish an already prepared fresh runtime | 154.16 s | 9.95 s |
+| Publish an already prepared refreshed runtime | 192.82 s | 33.42 s |
+| Verify unchanged owned files | 19.99 s | 11.80 s |
+
+Fresh finalization includes the prepared-file hash and publication. Refresh also
+includes the initial ownership check, old-runtime cleanup and temporary-runtime
+cleanup. File generation, capture, image analysis and recreation of analyzer output
+were outside the measured intervals. The size distribution was 75% 16 KiB,
+20% 64 KiB, 4% 256 KiB and 1% 1 MiB. Disk cache and machine activity affect results.
+These are local file-work measurements, not a promise of a 10× whole-install gain.
+
+The installer transfers a private prepared runtime on the same volume instead of
+copying it again. Cross-volume or linked trees keep the copy fallback. Verification
+can reuse a checksum when file identity, size, write time and OS change time match.
+On Windows, this uses NTFS/ReFS change time and denies active data writers; it does
+not mistake creation time for change time. Missing stamps, unsupported filesystems
+and changed identities require byte reads. Initial full-file hashing is sequential
+to avoid competing seeks on hard drives. Cached checks use bounded concurrency.
+
+This change preserves the final ownership check, rollback, native-launcher recovery,
+source files and saves. Source artwork still uses byte-based change detection.
+Filesystem-assisted verification is not a fresh byte-for-byte disk-corruption audit;
+the benchmark's independent byte audit was a separate validation step.
+
+The four small native Ren’Py 7/8 player/developer rehearsals also verified unchanged
+updates, one new sprite/background, reuse of old maps, preserved settings and a
+real save restored to its prior gameplay checkpoint. Their sub-second unchanged
+updates are fixture results, not timings for an 18,000-sprite project.
+
 ## Live analysis measurements
 
 On 9 September 2026, an alternating old/new comparison on a Ryzen 7800X3D and

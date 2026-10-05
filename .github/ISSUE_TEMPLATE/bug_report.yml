@@ -6,7 +6,15 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please remove local paths from logs before pasting them here.
+        Export a report from Settings → Activity, or press Shift+F9 in the affected game scene and choose Export report. Review attachments for private information before sharing. Nothing is uploaded automatically.
+  - type: input
+    id: build
+    attributes:
+      label: SceneLight build
+      description: Package/release name, and whether you ran Update SceneLight on the game after downloading it.
+      placeholder: "beta 27, game updated and restarted"
+    validations:
+      required: true
   - type: dropdown
     id: where
     attributes:
@@ -53,5 +61,19 @@ body:
     attributes:
       label: Screenshots or recording
       description: A short recording at the moment the problem appears helps most.
+    validations:
+      required: false
+  - type: textarea
+    id: reports
+    attributes:
+      label: Inspector or Activity report
+      description: Attach the exported ZIP here. For flicker/shimmer, capture it before restarting or reinstalling; include a short video and any shareable transforms used by the affected scene. Do not attach private artwork or saves.
+    validations:
+      required: false
+  - type: textarea
+    id: timing
+    attributes:
+      label: Timing and conditions
+      description: For shimmer, does it continue while standing still, and does turning SceneLight off stop it? For slow updates, include the stage, changed-asset count, storage type and the complete Activity export.
     validations:
       required: false

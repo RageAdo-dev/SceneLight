@@ -73,6 +73,35 @@ The order is defaults → background → scene → character → exact image.
 Use `scenelight.off()` to bypass lighting for a sequence and
 `scenelight.clear_scene()` to restore it. Rules support save/load and rollback.
 
+## Glow and selected colors
+
+```renpy
+init python:
+    scenelight.image("fire burning", glow_strength=4.0, emission_strength=0.5)
+    scenelight.image("hero happy", glow_rules=[
+        {"color": [1.0, 0.1, 0.02], "strength": 2.0,
+         "tolerance": 0.2, "softness": 0.1, "radius": 1.0}
+    ])
+```
+
+Glow strength reaches 10. Color rules match similar shades in the original artwork;
+tolerance and softness control the selection. Emitted light can illuminate other
+selected characters in-game. [All settings and scopes](MOD_AUTHOR_API.md).
+
+## Inspect the result in-game
+
+Press **Shift+F9** with a sprite visible. Select it to inspect effective settings,
+winning rules and overridden values. Try sliders or **Edit**, then export a report
+if you find a discrepancy. Edits are temporary; put permanent choices in your
+project config or script rules. The inspector can be included or removed in
+Setup’s **Settings → Advanced** before distributing your game.
+[Inspector guide](MOD_AUTHOR_API.md#inspect-an-actual-game-scene).
+
+Preview exports open a review page before writing. Choose the intended project,
+review the exact values, save, run **Update SceneLight**, and restart the game.
+Per-scene/per-image rules and player settings may override exported defaults;
+**All sources** makes those differences visible.
+
 ## Transforms and shaders
 
 An outer `show hero at CustomShader` transform receives the lit sprite. A shader

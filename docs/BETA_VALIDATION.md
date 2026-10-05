@@ -1,9 +1,48 @@
 # Compatibility and validation
 
-Coverage updated on 18 September 2026. Automatic discovery does not recognize
+Documentation reviewed on 5 October 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
-## Current local candidate
+## Current tester build — beta 27
+
+The local suite passed **995 tests**. The extracted Windows package passed four
+native rehearsals: Ren’Py 7.7.1 and 8.5.2, each in player and developer modes.
+These covered installation, unchanged updates, adding one background/sprite,
+retained map/config/save bytes, and loading a real saved gameplay checkpoint.
+All 66 packaged Python/Ren’Py source files matched the tested tree. Formatting,
+lint, dependency audit, Python build and the medium/high security scan passed.
+
+The current build includes the optional Shift+F9 inspector with sliders and exact
+edits, a visible six-category Preview adjustment panel, reviewed profile/config
+exports, selective background-light color adjustment, and runtime/settings-only
+updates. Glow supports 0–10 and per-image color rules. Weather and custom effect
+packs remain deferred from the release UI.
+
+Bright-scene regression coverage compared original and recovered sprites across
+12 backgrounds, including neutral white, snow, interiors and dark colored lights.
+Sixty matched cases were rendered in each of Ren’Py 7 and 8 and compared with
+Preview: the largest mean opaque-sprite difference was 0.359 of 255. These are
+controlled inputs, not universal pixel equivalence for every transform or GPU.
+The installer speed revision leaves that rendering code unchanged.
+
+See the [finalization benchmark](performance.md#installation-and-update-finalization)
+for the measured 173→34 second fresh-install and 242→67 second update finalization.
+Capture and image analysis are additional work.
+
+### Known issues and coverage limits
+
+- An intermittent shimmer affecting multiple characters after longer gameplay is
+  under investigation. This build does **not** claim to fix that report. A recording
+  and an inspector export from the affected state are the most useful evidence.
+- Current physical GPU validation is on NVIDIA RTX 4090. Earlier AMD coverage is
+  recorded below; this candidate still needs fresh AMD and Intel tester passes.
+- Packaged-interpreter and native tests are not a fresh Windows VM validation.
+- A successful installation is not a complete playthrough of a large mod.
+- Newly added assets need Scan/Update; there is no continuous folder watcher.
+
+[Report a reproducible issue](TROUBLESHOOTING.md).
+
+## Earlier local candidate — 18 September 2026
 
 The latest tester build passed **768 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
@@ -78,8 +117,8 @@ to any sprite with painted shading; it was measured against the approved surface
 where faceting in the inferred normals drops by about half while a small painted
 highlight still reaches the surface at 81% of its previous strength.
 
-All six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml)
-pass on the current `main`. The linked download is built from `main`, and its
+The earlier candidate’s six [Windows/Linux CI jobs](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml)
+passed on its tested commit. Its download was built from that commit, and its
 checksum is published beside it. Hosted runners skip the graphics-dependent tests,
 which the local runs cover.
 

@@ -3,25 +3,17 @@
 Back up your game or project folder and saves before installing. It gives you an
 easy way back if setup is interrupted or your game isn’t compatible.
 
-[Open Windows downloads](https://github.com/RageAdo-dev/SceneLight/releases).
-Choose the small **Windows-online.zip** for online setup, or **Windows.zip** for
-the complete offline app. Extract the entire ZIP, then open **SceneLight.exe**.
+[Download the current tester build](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.27).
+Choose **SceneLight-v1.0.0-Windows.zip**, extract the entire archive, and open
+**SceneLight.exe**. The complete package includes Setup, Preview and the legacy
+compatibility runtime. No administrator access or system Python installation is
+needed. Optional CUDA preparation acceleration may still need a download.
 
-The online installer displays the download size, downloads the same tested payload
-as the offline ZIP, and checks its pinned SHA-256 before installing. It keeps the
-app and runtime under `%LOCALAPPDATA%\SceneLight\installed` and reuses them on later
-launches. No administrator access or system Python installation is needed. Close
-the download window to cancel; reopen the installer to retry a failed download.
-
-The offline ZIP runs directly from its extracted folder. Setup, Preview and the
-legacy compatibility runtime are included; optional CUDA acceleration may still
-need a download. Choosing online setup changes when the main payload is downloaded,
-not the total size of its required components.
-
-Private beta releases use the complete Windows ZIP. Download it while signed in
-to an account with repository access, or receive it directly from the maintainer.
-The current small online installer does not authenticate to private GitHub assets;
-publish it only when its matching payload is publicly downloadable.
+Private beta downloads require an account with repository access, or a copy from
+the maintainer. The small online installer does not authenticate to private GitHub
+assets, so it is not the download to use for this tester release. For a public
+release it downloads the same complete payload and verifies its pinned SHA-256;
+it changes when the payload is downloaded, not its total required size.
 
 For release builders: build the complete ZIP first, then run
 `python tools/build_online_installer.py dist/SceneLight-v1.0.0-Windows.zip --release-tag <tag>`.
@@ -33,9 +25,7 @@ builds and includes both variants automatically.
 ## Install without the Windows app
 
 The packaged app is a convenience, not a requirement. If you already have
-Python 3.10 or newer, install SceneLight as a package and Windows never shows a
-download warning, because the launcher is created on your own machine instead of
-being downloaded as an executable:
+Python 3.10 or newer, install from the repository:
 
 ```text
 pip install git+https://github.com/RageAdo-dev/SceneLight
@@ -46,11 +36,6 @@ scenelight-setup
 `scenelight install --project <game folder>`, and
 `python -m scenelight.preview` opens Preview on its own. Everything else in this
 guide works the same way.
-
-If you do download the Windows package and would rather not see the one-time
-"Windows protected your PC" prompt, right-click the ZIP, open **Properties**,
-tick **Unblock**, then extract it. Unblocking removes the marker Windows added
-when the file was downloaded.
 
 ## Add SceneLight to a game
 
@@ -77,7 +62,9 @@ graphics hardware. Settings → Advanced shows the detection result.
 
 Choose **Settings → Tools → Open Preview & Calibrator**. Load a background and
 sprite, then drag to move the character or scroll to resize it. Use **Calibrate**
-to adjust the lighting and **Save profile** to keep your settings.
+to open the right-side **Adjust** page. **Save profile** and **Export config** open
+a review page; inspect the current values, destination and exact file contents
+before choosing the final save/write action. [Preview guide](PREVIEW_WORKSPACE.md).
 
 Export at 720p, 1080p or 4K. A small JSON file beside the export records its
 settings for reproduction. Videos retain their frame rate; GIFs retain their
@@ -91,6 +78,19 @@ runtime or surface maps.
 
 For developer projects, use **For mod developers → Check new assets → Update
 SceneLight**. [Author guide](AUTHOR_QUICKSTART.md).
+
+Compatible code-only and lighting-settings updates keep existing asset maps.
+Asset changes trigger inventory checks and reuse compatible capture/analysis work.
+The final transfer and verification steps are also faster on large installs.
+The [benchmark](performance.md#installation-and-update-finalization) measures those
+steps separately from capture and image analysis.
+
+### In-game inspector
+
+Press **Shift+F9** during a scene to inspect and temporarily adjust the applied
+lighting. Include or remove the tool through **Settings → Advanced → Include
+in-game inspector → Apply to project**, then restart the game. This setting is
+available for either installation mode. [Diagnostic walkthrough](TROUBLESHOOTING.md).
 
 ### Change which characters receive lighting
 

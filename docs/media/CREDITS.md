@@ -1,5 +1,20 @@
 # Example artwork and renders
 
+## Current app screenshots and banner
+
+`preview-workspace.png`, `preview-glow.png`, `preview-export.png`, and
+`ingame-inspector.png` were captured on 4 October 2026 from the production Preview
+and a real Ren'Py 8.5.2 demonstration project. They use Piroshki's `eileen happy.png`
+from that SDK's tutorial, under the Ren'Py artwork notice below. The background
+comes from `lighting_stage()` in `tools/build_docs_media.py`; it is original
+SceneLight documentation artwork. Inspector settings come from the actual runtime.
+The export destination shown is an example path; no project config was written.
+
+No private mod sprites, game scripts, saves or tester screenshots are included.
+[`workspace-captures.json`](workspace-captures.json) records source/renderer hashes
+and capture settings. PNG compression is lossless; controls were not composited
+onto the images. The banner is a vector layout using SceneLight's existing S logo.
+
 ## Forest and waterfall
 
 **Monika** is from *Doki Doki Literature Club!*, © Team Salvato. These are

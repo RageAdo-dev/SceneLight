@@ -4,6 +4,8 @@
 
 - [Installation, Preview, updates and removal](INSTALL.md)
 - [Preview controls, glow, exports, and bug reports](PREVIEW_WORKSPACE.md)
+- [Visual gallery](GALLERY.md)
+- [Troubleshooting and useful bug reports](TROUBLESHOOTING.md)
 - [How the lighting and surface maps work](HOW_IT_WORKS.md)
 - [Compatibility and hardware results](BETA_VALIDATION.md)
 
