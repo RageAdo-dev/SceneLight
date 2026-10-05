@@ -7,19 +7,18 @@ from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QPushButton,
-    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
 from ..calibration import ColorGlowRule
+from .controls import ScrollSlider, ScrollSpinBox
 
 
 class ColorGlowEditor(QWidget):
@@ -30,15 +29,12 @@ class ColorGlowEditor(QWidget):
         self._rules = []
         self._loading = False
         layout = QVBoxLayout(self)
-        note = QLabel(
-            "Make selected colors glow on this character only. Add separate rules for "
-            "red details, blue details, or any other color. Existing sprite glow is independent."
-        )
+        note = QLabel("Make colors in the artwork glow. Add a separate rule for each color.")
         note.setWordWrap(True)
         note.setObjectName("subtitle")
         layout.addWidget(note)
         self.rule_list = QListWidget()
-        self.rule_list.setMaximumHeight(130)
+        self.rule_list.setMaximumHeight(70)
         self.rule_list.currentRowChanged.connect(self._select)
         layout.addWidget(self.rule_list)
         actions = QHBoxLayout()
@@ -55,6 +51,7 @@ class ColorGlowEditor(QWidget):
         layout.addLayout(actions)
         self.details = QWidget()
         form = QFormLayout(self.details)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self.name = QLineEdit()
         self.name.setPlaceholderText("For example: Red gems")
         self.name.textEdited.connect(self._edit)
@@ -94,13 +91,15 @@ class ColorGlowEditor(QWidget):
             ),
         ):
             row = QHBoxLayout()
-            slider = QSlider(Qt.Horizontal)
+            slider = ScrollSlider(Qt.Horizontal)
             slider.setRange(0, round(maximum * 100))
+            slider.setAccessibleName(title)
             slider.setToolTip(hint)
-            spin = QDoubleSpinBox()
+            spin = ScrollSpinBox()
             spin.setRange(0, maximum)
             spin.setDecimals(2)
             spin.setSingleStep(0.05)
+            spin.setMaximumWidth(80)
             spin.setToolTip(hint)
             slider.valueChanged.connect(lambda value, k=key: self._slide(k, value))
             spin.valueChanged.connect(lambda value, k=key: self._spin(k, value))
@@ -140,13 +139,14 @@ class ColorGlowEditor(QWidget):
     def _select(self, index):
         valid = 0 <= index < len(self._rules)
         self.details.setEnabled(valid)
+        self.details.setVisible(valid)
+        self.rule_list.setVisible(bool(self._rules))
         self.copy_button.setEnabled(valid)
         self.remove_button.setEnabled(valid)
         self.hint.setText(
-            "Add a color to start. No color rules means the existing lighting stays unchanged."
+            "Choose + Add color to start, then pick the artwork color you want to glow."
             if not valid
-            else "Matching uses the original artwork, before lighting. Save profile or Export config "
-            "keeps these rules. Use the mod API for per-sprite settings. More active rules take more rendering time."
+            else "Match uses the original artwork. Adjust Color range and Soft edges to blend the glow."
         )
         if not valid:
             return
@@ -214,6 +214,9 @@ class ColorGlowEditor(QWidget):
         self.sliders[key].blockSignals(True)
         self.sliders[key].setValue(round(value * 100))
         self.sliders[key].blockSignals(False)
+        index = self.rule_list.currentRow()
+        if index >= 0:
+            self._rules[index] = replace(self._rules[index], **{key: value})
         self._edit()
 
     def _edit(self, *_args):
@@ -224,7 +227,6 @@ class ColorGlowEditor(QWidget):
             self._rules[index],
             name=self.name.text(),
             enabled=self.enabled.isChecked(),
-            **{key: spin.value() for key, spin in self.values.items()},
         )
         self.rule_list.item(index).setText(self._label(self._rules[index]))
         self.changed.emit()

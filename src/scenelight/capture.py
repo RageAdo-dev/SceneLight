@@ -37,6 +37,7 @@ from .project import (
     SpriteSpec,
     _looks_like_foreground_sprite,
 )
+from .script_cache import source_candidates
 from .sidecar import STATE_NAME, managed_project_root, renpy_runtime_command
 from .source_types import VISUAL_SOURCE_SUFFIXES
 
@@ -79,6 +80,10 @@ class _SurfaceCaptureInputError(ValueError):
 
 class CaptureInstanceConflict(RuntimeError):
     """The mod rejected another capture instance before rendering could start."""
+
+
+class CaptureScriptError(RuntimeError):
+    """This runtime cannot parse the scripts; another graphics backend cannot help."""
 
 
 def _is_instance_conflict(diagnostic: str) -> bool:
@@ -170,9 +175,12 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
             continue
         if authored is not None and path.suffix.lower() in {".rpyc", ".rpymc"}:
             key = path.relative_to(discovery.project_root).as_posix()
-            source_path = path.with_suffix(path.suffix[:-1])
-            source_key = source_path.relative_to(discovery.project_root).as_posix()
-            if key not in authored and source_key in authored and source_path.is_file():
+            source_backed = any(
+                source.is_file()
+                and source.relative_to(discovery.project_root).as_posix() in authored
+                for source in source_candidates(path)
+            )
+            if key not in authored and source_backed:
                 # Preflight can regenerate nondeterministic bytecode. It is not
                 # an authored input and sync_project removes it before playback.
                 # Keep hashing bytecode shipped by the author, even beside source.
@@ -1101,7 +1109,7 @@ def _capture_process_options(*, native_runtime: bool) -> tuple[object | None, in
 
 def _runtime_log_state(project_root: Path) -> dict[str, tuple[int, int, int]]:
     state = {}
-    for name in ("traceback.txt", "log.txt"):
+    for name in ("errors.txt", "traceback.txt", "log.txt"):
         try:
             stat = (project_root / name).stat()
             state[name] = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
@@ -1118,7 +1126,7 @@ def _runtime_diagnostic(
     sections: list[str] = []
     combined: list[str] = []
     current = _runtime_log_state(project_root)
-    for name in ("traceback.txt", "log.txt"):
+    for name in ("errors.txt", "traceback.txt", "log.txt"):
         if before is not None and name in before and current.get(name) == before[name]:
             continue
         path = project_root / name
@@ -1144,6 +1152,23 @@ def _runtime_diagnostic(
     else:
         diagnosis = ""
     return diagnosis + "".join(sections)
+
+
+def _fresh_script_error(project_root: Path, before: dict[str, tuple[int, int, int]]) -> bool:
+    """Ignore old error screens and require a newly written Ren'Py parse report."""
+    path = project_root / "errors.txt"
+    try:
+        stat = path.stat()
+        state = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+        if state == before.get("errors.txt") or stat.st_size == 0:
+            return False
+        with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
+            text = stream.read(65536)
+    except OSError:
+        return False
+    return "errors were detected in your script" in text.lower() and bool(
+        re.search(r"File .+, line \d+:", text)
+    )
 
 
 def _managed_runtime_pids(project_root: Path) -> set[int]:
@@ -1485,6 +1510,26 @@ def _run_capture_request(
                     if not isolated_parallel:
                         _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
                 break
+            if last_runtime_progress is None and _fresh_script_error(
+                discovery.project_root, logs_before
+            ):
+                detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
+                session = diagnostics.current_session()
+                if session is not None:
+                    session.event(
+                        "capture.script-error",
+                        "Ren'Py could not compile the game scripts",
+                        "error",
+                        executable=str(renpy_executable),
+                        renderer=renderer,
+                    )
+                    session.attach_text(discovery.project_root.name + "-script-error", detail)
+                if composite_executor is not None:
+                    composite_executor.shutdown(wait=True, cancel_futures=True)
+                raise CaptureScriptError(
+                    "Ren'Py could not compile the game scripts. Check the reported file/line "
+                    "and whether this is the game's compatible Ren'Py version." + detail
+                )
             if (
                 checkpoint_root is not None
                 and checkpoint_limit is not None

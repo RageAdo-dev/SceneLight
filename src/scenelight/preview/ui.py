@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QStatusBar,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -44,9 +45,7 @@ from ..calibration import (
     CalibrationProfile,
     lighting_mode_preset,
     load_profile,
-    merge_profile_into_config,
     profile_path,
-    save_profile,
 )
 from ..prepared import engine_identity, source_identity
 from ..runtime.prepared import Reader as PreparedReader
@@ -56,11 +55,12 @@ from .artifacts import (
     SceneArtifacts,
     TemporalSceneArtifacts,
 )
-from .calibration_dialog import CalibrationDialog
+from .calibration_dialog import CalibrationEditor
 from .exporter import GIFWriter, MP4Writer, composite_gif_timeline, export_extension
 from .gpu_view import SceneLightGPUView
 from .media import MediaClip, MediaFrame, environment_wrap
 from .playback import VideoPlayback
+from .settings_export import SettingsExportPage
 from .temporal import TemporalSceneFrame, interpolated_scene, scene_blend
 
 
@@ -289,20 +289,14 @@ class MainWindow(QMainWindow):
         body.addWidget(self._view, 1)
         panel = QFrame()
         panel.setObjectName("panel")
-        panel.setFixedWidth(360)
+        panel.setFixedWidth(440)
         panel_layout = QVBoxLayout(panel)
         title = QLabel("SceneLight Preview")
         title.setObjectName("title")
-        subtitle = QLabel("Adjust lighting and character placement")
-        subtitle.setObjectName("subtitle")
         panel_layout.addWidget(title)
-        panel_layout.addWidget(subtitle)
-        panel_layout.addSpacing(12)
-        panel_layout.addWidget(self._section("Background", self._background_label))
-        panel_layout.addWidget(self._section("Sprite", self._sprite_label))
-        panel_layout.addWidget(self._section("Automatic analysis", self._analysis_label))
 
         form = QFormLayout()
+        form.setContentsMargins(8, 8, 8, 8)
         form.addRow("Horizontal", self._control(self._horizontal_slider, self._horizontal_value))
         form.addRow("Baseline", self._control(self._baseline_slider, self._baseline_value))
         form.addRow("Character height", self._control(self._height_slider, self._height_value))
@@ -312,19 +306,39 @@ class MainWindow(QMainWindow):
         controls.setObjectName("section")
         controls.setLayout(form)
         panel_layout.addWidget(controls)
-        panel_layout.addWidget(self._section("GPU", self._gpu_label))
-        panel_layout.addWidget(self._frame_label)
-        panel_layout.addStretch(1)
-        hint = QLabel("Drag or arrows/WASD move · mouse wheel scales · Shift = fine movement")
+        self._sidebar_tabs = QTabWidget()
+        self._sidebar_tabs.setUsesScrollButtons(False)
+        scene = QWidget()
+        scene_layout = QVBoxLayout(scene)
+        scene_layout.addWidget(self._section("Background", self._background_label))
+        scene_layout.addWidget(self._section("Sprite", self._sprite_label))
+        scene_layout.addWidget(self._section("Automatic analysis", self._analysis_label))
+        scene_layout.addWidget(self._section("GPU", self._gpu_label))
+        scene_layout.addWidget(self._frame_label)
+        scene_layout.addStretch(1)
+        self._calibration_editor = CalibrationEditor(self._calibration, self._set_calibration)
+        self._settings_export = SettingsExportPage(
+            self._current_profile(),
+            self._profile_path,
+            self._project_root / "scenelight.json" if self._project_root else None,
+        )
+        self._settings_export.saved.connect(self._settings_saved)
+        self._settings_export.editRequested.connect(self._open_calibration)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(scene)
+        self._sidebar_tabs.addTab(scroll, "Scene")
+        self._sidebar_tabs.addTab(self._calibration_editor, "Adjust")
+        self._sidebar_tabs.addTab(self._settings_export, "Save / export")
+        self._sidebar_tabs.setCurrentIndex(1)
+        panel_layout.addWidget(self._sidebar_tabs, 1)
+        hint = QLabel("Drag to move · Scroll to scale · Shift for fine control")
+        hint.setToolTip("You can also use the arrow keys or WASD to move the sprite.")
         hint.setWordWrap(True)
         hint.setObjectName("hint")
         panel_layout.addWidget(hint)
-        panel_scroll = QScrollArea()
-        panel_scroll.setWidgetResizable(True)
-        panel_scroll.setFixedWidth(385)
-        panel_scroll.setFrameShape(QFrame.NoFrame)
-        panel_scroll.setWidget(panel)
-        body.addWidget(panel_scroll)
+        body.addWidget(panel)
         outer.addLayout(body, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
@@ -342,6 +356,7 @@ class MainWindow(QMainWindow):
     def _set_calibration(self, calibration: Calibration) -> None:
         self._calibration = calibration.normalized()
         self._view.set_calibration(self._calibration)
+        self._sync_settings_pages()
         if hasattr(self, "_lighting_look") and self._lighting_look.currentIndex() != 0:
             self._lighting_look.blockSignals(True)
             self._lighting_look.setCurrentIndex(0)
@@ -359,76 +374,38 @@ class MainWindow(QMainWindow):
         self._view.set_strength(strength)
         self._calibration = calibration
         self._view.set_calibration(calibration)
+        self._sync_settings_pages()
         self.statusBar().showMessage(
             f"{self._lighting_look.currentText()} lighting applied to the live preview"
         )
 
     def _open_calibration(self) -> None:
-        dialog = CalibrationDialog(self._calibration, self._set_calibration, self)
-        if dialog.exec():
-            self._set_calibration(dialog.calibration)
-            self.statusBar().showMessage(
-                "Calibration applied to the live preview; save it to use in Ren'Py"
-            )
+        self._sidebar_tabs.setCurrentIndex(1)
+
+    def _sync_settings_pages(self) -> None:
+        if self._calibration_editor.calibration != self._calibration:
+            self._calibration_editor._set_calibration(self._calibration, notify=False)
+        self._settings_export.set_profile(self._current_profile())
 
     def _current_profile(self) -> CalibrationProfile:
         return CalibrationProfile(
             calibration=self._calibration,
             scenes=dict(self._calibration_profile.scenes or {}),
-            strength=self._strength_slider.value() / 100.0,
+            strength=self._view._strength,
         )
 
     def _save_calibration_profile(self) -> None:
-        if self._profile_path is None:
-            selected, _filter = QFileDialog.getSaveFileName(
-                self,
-                "Save SceneLight profile",
-                "scenelight-profile.json",
-                "JSON (*.json)",
-            )
-            if not selected:
-                return
-            destination = Path(selected)
-        else:
-            destination = self._profile_path
-        try:
-            self._calibration_profile = self._current_profile()
-            save_profile(destination, self._calibration_profile)
-        except (OSError, ValueError) as error:
-            self._on_failed("Save calibration", str(error))
-            return
-        self.statusBar().showMessage(f"Calibration profile saved to {destination}")
+        self._settings_export.select_mode(0)
+        self._sidebar_tabs.setCurrentIndex(2)
 
     def _export_calibration_config(self) -> None:
-        default = (
-            self._project_root / "scenelight.json"
-            if self._project_root is not None
-            else Path("scenelight.json")
-        )
-        selected, _filter = QFileDialog.getSaveFileName(
-            self,
-            "Export SceneLight project config",
-            str(default),
-            "JSON (*.json)",
-        )
-        if not selected:
-            return
-        destination = Path(selected)
-        if destination.is_file():
-            choice = QMessageBox.question(
-                self,
-                "Update existing config?",
-                "This preserves asset-discovery settings and updates only lighting values.",
-            )
-            if choice != QMessageBox.Yes:
-                return
-        try:
-            self._calibration_profile = self._current_profile()
-            merge_profile_into_config(destination, self._calibration_profile)
-        except (OSError, ValueError) as error:
-            self._on_failed("Export calibration", str(error))
-            return
-        self.statusBar().showMessage(f"Project config exported to {destination}")
+        self._settings_export.select_mode(1)
+        self._sidebar_tabs.setCurrentIndex(2)
+
+    def _settings_saved(self, destination: str, mode: str) -> None:
+        if mode == "profile":
+            self._profile_path = Path(destination)
+        self.statusBar().showMessage(f"Reviewed {mode} saved to {destination}")
 
     @staticmethod
     def _slider(minimum: int, maximum: int, value: int, callback) -> QSlider:
@@ -1315,6 +1292,7 @@ class MainWindow(QMainWindow):
         strength = self._strength_slider.value() / 100.0
         self._strength_value.setText(f"{strength:.0%}")
         self._view.set_strength(strength)
+        self._sync_settings_pages()
         if self._lighting_look.currentIndex() != 0:
             self._lighting_look.blockSignals(True)
             self._lighting_look.setCurrentIndex(0)
@@ -1690,12 +1668,36 @@ class MainWindow(QMainWindow):
             QPushButton { background: #20334a; border: 1px solid #34516f; padding: 9px 13px; }
             QPushButton:hover { background: #294563; }
             QPushButton:pressed { background: #4d82ff; }
+            QLabel { background: transparent; }
+            QPushButton#calibrationCategory {
+                padding: 5px 3px; border-radius: 5px; background: #142131; color: #c4d8eb;
+            }
+            QPushButton#calibrationCategory:hover { background: #25405a; color: white; }
+            QPushButton#calibrationCategory:checked {
+                background: #25475b; color: #ffffff; border: 1px solid #74d5f3; font-weight: 600;
+            }
+            QPushButton#compactAction { padding: 5px 10px; }
+            QPushButton:disabled { background: #142131; color: #728498; border-color: #273748; }
+            QPushButton#primaryAction { background: #28546b; border-color: #74d5f3; color: #ffffff; }
+            QPushButton#primaryAction:disabled { background: #142131; color: #728498; border-color: #273748; }
+            QComboBox, QDoubleSpinBox, QLineEdit {
+                background: #142131; border: 1px solid #34516f; padding: 5px; min-height: 18px;
+                selection-background-color: #294563;
+            }
+            QTreeWidget { background: #0a1018; alternate-background-color: #142131; border: 1px solid #34516f; }
+            QTreeWidget::item { padding: 4px; }
+            QTreeWidget::item:selected { background: #294563; }
+            QScrollBar:vertical { background: #101a27; width: 12px; margin: 0; }
+            QScrollBar::handle:vertical { background: #3b536c; min-height: 28px; border-radius: 5px; }
+            QScrollBar::handle:vertical:hover { background: #76a8d7; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
             QTabWidget::pane { background: #0a1018; border: 1px solid #34516f; }
             QTabBar::tab {
                 background: #172638; color: #dbe8f7;
                 border: 1px solid #34516f; border-bottom: 3px solid #34516f;
                 border-top-left-radius: 4px; border-top-right-radius: 4px;
-                padding: 9px 14px; margin-right: 3px;
+                padding: 6px 14px; margin-right: 3px;
             }
             QTabBar::tab:hover { background: #25405a; color: #ffffff; }
             QTabBar::tab:selected {
@@ -1712,11 +1714,12 @@ class MainWindow(QMainWindow):
             QPlainTextEdit, QTextEdit { background: #070d14; color: #dbe8f7; border: 1px solid #34516f; selection-background-color: #294563; }
             QFrame#panel { background: #101a27; border: 1px solid #1f3045; }
             QFrame#section { background: #172638; border: 1px solid #22364e; padding: 4px; }
-            QLabel#title { color: white; font-size: 25px; font-weight: 700; }
+            QLabel#title { color: white; font-size: 20px; font-weight: 700; }
             QLabel#subtitle { color: #76a8d7; font-size: 12px; }
             QLabel#sectionTitle { color: #ffffff; font-size: 15px; font-weight: 650; }
             QLabel#hint { color: #7e9aba; }
             QSlider::groove:horizontal { height: 5px; background: #2a3d54; }
+            QSlider::sub-page:horizontal { background: #4faec5; }
             QSlider::handle:horizontal { width: 14px; margin: -5px 0; background: #dce8f6; }
             QStatusBar { color: #83a6c8; }
         """

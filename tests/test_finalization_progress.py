@@ -252,6 +252,7 @@ def test_existing_installation_is_not_labeled_ready_during_update(tmp_path):
         "sdk_entry",
         "sdk_browse",
         "cuda_check",
+        "inspector_check",
         "verify_button",
         "review_button",
         "characters_button",

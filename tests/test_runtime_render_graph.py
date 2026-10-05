@@ -302,6 +302,9 @@ def test_sprite_lighting_uses_child_dimensions_with_or_without_form_map(has_form
     }
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
     sprite_class = namespace["SceneLightSprite"]
+    _load_runtime_definitions(
+        namespace, "_scenelight_master_enabled", "_scenelight_master_strength"
+    )
 
     sprite = sprite_class(child, ("sayori", "1a"))
     assert sprite.has_form is has_form
@@ -334,6 +337,8 @@ def test_sprite_shader_does_not_depend_on_sampler_allocation_resolution():
 
 def _load_runtime_definitions(namespace, *names):
     """Execute the real init definitions without starting an engine or GPU."""
+    if "SceneLightSprite" in names:
+        names += ("_scenelight_master_enabled", "_scenelight_master_strength")
     source = _runtime_source()
     nodes = []
     for name in names:
@@ -950,7 +955,10 @@ def test_absolute_exposure_survives_mixed_authored_grade_chains(grades, expected
 
 def test_incoming_paint_and_new_additive_light_use_separate_exposure():
     source = _runtime_source()
-    assert "vec3 lit = base * input_exposure * u_sc_calibration0.z" in source
+    assert (
+        "vec3 lit = base * input_exposure * mix(1.0, u_sc_calibration0.z, sc_adjustment_strength)"
+        in source
+    )
     assert "lit += base * input_exposure * ground_chroma * bounce;" in source
     # Absolute attenuation must survive even when this pass does not own the
     # input multiplier. Otherwise new rim/specular light ignores a dark room.

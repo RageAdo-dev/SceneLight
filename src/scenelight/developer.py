@@ -7,10 +7,12 @@ anything after it has been changed or mixed with unowned content.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import shutil
+import stat as stat_mode
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,6 +20,7 @@ from pathlib import Path
 
 from . import __version__
 from .calibration import profile_path
+from .file_verification import bounded_file_work, verified_digest
 from .launch_safety import (
     LAUNCHER_CONFIG,
     ORIGINAL_LAUNCHER_DIR,
@@ -32,6 +35,7 @@ from .release import (
     release_record,
     release_version_from_manifest,
 )
+from .script_cache import source_candidates
 from .sidecar import find_native_executable, remove_analysis_cache, renpy_sdk_prefix
 from .source_types import VISUAL_SOURCE_SUFFIXES, is_effect_source
 
@@ -105,7 +109,7 @@ def _tracked_source_state(
             relative = path.relative_to(project_root)
             if suffix not in VISUAL_SOURCE_SUFFIXES and not is_effect_source(relative):
                 continue
-            if suffix in {".rpyc", ".rpymc"} and path.with_suffix(suffix[:-1]).is_file():
+            if any(source.is_file() for source in source_candidates(path)):
                 # A source-backed compiler cache is not a new authored input. Keep
                 # compiled-only games/mods trackable when no source twin exists.
                 continue
@@ -123,21 +127,89 @@ def _installation_source_state(project_root: Path) -> dict[str, list[int | str]]
         return _tracked_source_state(project_root, progress=progress)
 
 
-def _runtime_file_hashes(project_root: Path, destination_root: Path) -> dict[str, str]:
-    with ProgressStage("runtime-hashes", item="Counting copied files") as progress:
+def _runtime_file_hashes(
+    project_root: Path, destination_root: Path, *, expected=None, stamps=None, verified_out=None
+) -> dict[str, str]:
+    with ProgressStage("runtime-hashes", item="Counting prepared files") as progress:
         paths = []
         for path in destination_root.rglob("*"):
             if path.is_file():
                 paths.append(path)
-                progress.set_item(f"Counting copied files: {len(paths):,} found")
+                progress.set_item(f"Counting prepared files: {len(paths):,} found")
         progress.set_total(len(paths))
+        known = expected or {}
+        identities = stamps or {}
+        relative_paths = {path.relative_to(project_root).as_posix(): path for path in paths}
+        missing = set(known) - set(relative_paths)
+        if missing:
+            raise RuntimeError(
+                "Prepared runtime files disappeared: " + ", ".join(sorted(missing)[:5])
+            )
+
+        def check(item):
+            relative, path = item
+            digest, stamp, reused = verified_digest(
+                path, known.get(relative), identities.get(relative)
+            )
+            if relative in known and digest != known[relative]:
+                raise RuntimeError(f"Prepared runtime changed after verification: {relative}")
+            return relative, digest, stamp, reused
+
         files = {}
-        for path in paths:
-            relative = path.relative_to(project_root).as_posix()
+        reused_count = 0
+        for relative, digest, stamp, reused in bounded_file_work(
+            check, relative_paths.items(), workers=None if identities else 1
+        ):
             progress.set_item(relative)
-            files[relative] = _sha256(path)
+            files[relative] = digest
+            if stamp and verified_out is not None:
+                verified_out[relative] = stamp
+            reused_count += reused
             progress.advance()
+        print(
+            f"SceneLight files: {reused_count:,} verified checksums reused; {len(files) - reused_count:,} files read",
+            flush=True,
+        )
         return files
+
+
+def _prepared_integrity(install):
+    """Map the verified managed payload to its embedded names."""
+    hashes = install.get("runtime_files", {})
+    stamps = install.get("runtime_file_stamps", {})
+    if not isinstance(hashes, dict) or not isinstance(stamps, dict):
+        return {}, {}
+    excluded = {
+        (EMBED_ROOT / BOOTSTRAP_NAME).as_posix(),
+        (EMBED_ROOT / RECOVERY_NAME).as_posix(),
+        LAUNCHER_CONFIG.as_posix(),
+    }
+    prefix = EMBED_ROOT.as_posix() + "/"
+    result = {
+        key: value
+        for key, value in hashes.items()
+        if key.startswith(prefix)
+        and key not in excluded
+        and not key.startswith(ORIGINAL_LAUNCHER_DIR.as_posix() + "/")
+    }
+    script = "game/scenelight_runtime.rpy"
+    if script in hashes:
+        result[(EMBED_ROOT / BOOTSTRAP_NAME).as_posix()] = hashes[script]
+    return result, stamps
+
+
+def _analyzed_sources(project_root, install):
+    # Keep the analyzed snapshot, so edits made during publication are still
+    # discovered by the next update instead of being marked already prepared.
+    source = install.get("source")
+    snapshot = install.get("source_state")
+    if (
+        isinstance(source, str)
+        and Path(source).resolve() == project_root
+        and isinstance(snapshot, dict)
+    ):
+        return snapshot
+    return _installation_source_state(project_root)
 
 
 def _save_install_manifest(path: Path, payload: dict) -> None:
@@ -297,13 +369,20 @@ def _owned_paths(project_root: Path, manifest: dict[str, object]) -> dict[str, P
         raise RuntimeError("SceneLight developer ownership manifest has no files.")
 
     result: dict[str, Path] = {}
+    resolved_parents: dict[Path, Path] = {}
     for key, expected_hash in files.items():
         if not isinstance(key, str) or not isinstance(expected_hash, str):
             raise RuntimeError("SceneLight developer ownership manifest contains invalid entries.")
         relative = Path(key)
         if relative.is_absolute() or ".." in relative.parts:
             raise RuntimeError(f"Unsafe path in SceneLight developer manifest: {key}")
-        destination = (project_root / relative).resolve()
+        parent = resolved_parents.get(relative.parent)
+        if parent is None:
+            parent = (project_root / relative.parent).resolve()
+            resolved_parents[relative.parent] = parent
+        destination = parent / relative.name
+        if destination.is_symlink():
+            destination = destination.resolve()
         if project_root not in destination.parents:
             raise RuntimeError(f"Path escapes the selected project: {key}")
         in_namespace = relative.parts[: len(EMBED_ROOT.parts)] == EMBED_ROOT.parts
@@ -325,7 +404,9 @@ def _recognized_compiler_output(relative: str, owned: set[str]) -> bool:
     return path.with_suffix(".rpy").as_posix() in owned
 
 
-def developer_status(project: Path) -> DeveloperStatus:
+def developer_status(
+    project: Path, *, check_sources: bool = True, verified_out=None
+) -> DeveloperStatus:
     project_root = project.expanduser().resolve()
     manifest = _manifest(project_root)
     if manifest is None:
@@ -335,11 +416,26 @@ def developer_status(project: Path) -> DeveloperStatus:
     assert isinstance(expected, dict)
     missing: list[str] = []
     modified: list[str] = []
-    for key, path in owned_paths.items():
+    stamps = manifest.get("file_stamps", {})
+    if not isinstance(stamps, dict):
+        stamps = {}
+
+    def check(item):
+        key, path = item
         if not path.is_file():
+            return key, None, None
+        digest, stamp, _ = verified_digest(path, expected[key], stamps.get(key))
+        return key, digest, stamp
+
+    for key, digest, stamp in bounded_file_work(
+        check, owned_paths.items(), workers=None if stamps else 1
+    ):
+        if digest is None:
             missing.append(key)
-        elif _sha256(path) != expected[key]:
+        elif digest != expected[key]:
             modified.append(key)
+        elif stamp and verified_out is not None:
+            verified_out[key] = stamp
 
     owned = set(owned_paths)
     unowned: list[str] = []
@@ -356,9 +452,13 @@ def developer_status(project: Path) -> DeveloperStatus:
 
     previous_source_state = manifest.get("source_state")
     changed_sources = (
-        _changed_source_paths(previous_source_state, _tracked_source_state(project_root))
-        if isinstance(previous_source_state, dict)
-        else ("SceneLight source inventory upgrade",)
+        (
+            _changed_source_paths(previous_source_state, _tracked_source_state(project_root))
+            if isinstance(previous_source_state, dict)
+            else ("SceneLight source inventory upgrade",)
+        )
+        if check_sources
+        else ()
     )
     recorded_config = manifest.get("config")
     recorded_config_hash = manifest.get("config_sha256")
@@ -446,13 +546,31 @@ def _managed_runtime_sources(managed_root: Path) -> tuple[Path, Path, dict[str, 
     return source_script, source_data, install if isinstance(install, dict) else {}
 
 
+def _plain_runtime_tree(root: Path) -> bool:
+    """Only move private regular files, never links into another workspace."""
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                info = os.stat(entry.path, follow_symlinks=False)
+                if entry.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                    return False
+                if stat_mode.S_ISDIR(info.st_mode):
+                    pending.append(Path(entry.path))
+                elif not stat_mode.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    return False
+    return True
+
+
 def _stage_runtime(
     project_root: Path,
     source_script: Path,
     source_data: Path,
     *,
     native_launcher: bool,
-) -> tuple[Path, Path]:
+    consume_managed: bool = False,
+) -> tuple[Path, Path, bool]:
     game_root = project_root / "game"
     if not game_root.is_dir():
         raise FileNotFoundError(f"Ren'Py game folder not found: {game_root}")
@@ -461,8 +579,35 @@ def _stage_runtime(
     # crossed Win32's traditional MAX_PATH boundary in otherwise valid games.
     stage = game_root / f".sl-{uuid.uuid4().hex[:8]}"
     staged_data = stage / "runtime"
+    consumed = False
     try:
-        copytree_with_progress(source_data, staged_data, "runtime-copy")
+        if consume_managed:
+            live = project_root / EMBED_ROOT
+            if (
+                source_data.resolve() != source_data
+                or source_data == live
+                or live in source_data.parents
+                or source_data in live.parents
+            ):
+                raise RuntimeError("Prepared runtime must be in a separate, unlinked workspace.")
+            with ProgressStage("runtime-copy", item="Checking prepared files for safe transfer"):
+                consume_managed = _plain_runtime_tree(source_data)
+        if consume_managed:
+            stage.mkdir()
+            with ProgressStage(
+                "runtime-copy", total=1, item="Transferring the prepared runtime"
+            ) as progress:
+                try:
+                    os.replace(source_data, staged_data)
+                    consumed = True
+                    progress.advance()
+                except OSError as error:
+                    if error.errno != errno.EXDEV and getattr(error, "winerror", None) != 17:
+                        raise
+            if not consumed:
+                copytree_with_progress(source_data, staged_data, "runtime-copy")
+        else:
+            copytree_with_progress(source_data, staged_data, "runtime-copy")
         shutil.rmtree(staged_data / ORIGINAL_LAUNCHER_DIR.name, ignore_errors=True)
         staged_config = staged_data / LAUNCHER_CONFIG.name
         if staged_config.is_file():
@@ -478,10 +623,26 @@ def _stage_runtime(
             _recovery_text(native_launcher=native_launcher), encoding="utf-8"
         )
     except Exception:
-        if stage.is_dir():
-            shutil.rmtree(stage)
+        _discard_staged_runtime(stage, staged_data, source_data, consumed)
         raise
-    return stage, staged_data
+    return stage, staged_data, consumed
+
+
+def _discard_staged_runtime(stage, data, source_data, consumed):
+    if data.is_dir():
+        if consumed:
+            if source_data.exists():
+                # A different process populated the workspace. Keep both copies.
+                stage.mkdir(exist_ok=True)
+                recovery = stage / "prepared-recovery"
+                os.replace(data, recovery)
+                print(f"SceneLight retained prepared files for recovery: {recovery}", flush=True)
+            else:
+                os.replace(data, source_data)
+        else:
+            shutil.rmtree(data)
+    if stage.is_dir() and not any(stage.iterdir()):
+        stage.rmdir()
 
 
 def preflight_embed_destination(project: Path) -> None:
@@ -501,7 +662,9 @@ def preflight_embed_destination(project: Path) -> None:
         )
 
 
-def preflight_refresh_destination(project: Path) -> None:
+def preflight_refresh_destination(
+    project: Path, *, item: str = "Checking ownership of the existing runtime"
+) -> None:
     """Require a current, fully owned direct install before expensive analysis."""
 
     project_root = project.expanduser().resolve()
@@ -513,7 +676,8 @@ def preflight_refresh_destination(project: Path) -> None:
             "This developer installation predates safe refresh support. Remove it through "
             "SceneLight, then install the current developer API once."
         )
-    status = developer_status(project_root)
+    with ProgressStage("install-verify", item=item):
+        status = developer_status(project_root, check_sources=False)
     if not status.clean:
         details = [*(f"missing: {path}" for path in status.missing)]
         details.extend(f"modified: {path}" for path in status.modified)
@@ -524,8 +688,10 @@ def preflight_refresh_destination(project: Path) -> None:
         )
 
 
-def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object]:
-    """Copy a verified sidecar runtime into a new, reserved project namespace."""
+def embed_from_managed(
+    project: Path, managed_project: Path, *, consume_managed: bool = False
+) -> dict[str, object]:
+    """Publish a verified sidecar runtime in a new, reserved project namespace."""
 
     project_root = project.expanduser().resolve()
     managed_root = managed_project.expanduser().resolve()
@@ -549,11 +715,12 @@ def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object
         raise FileNotFoundError(
             "The Ren'Py 7 compatibility runtime recorded for this legacy game is unavailable."
         )
-    stage, staged_data = _stage_runtime(
+    stage, staged_data, consumed = _stage_runtime(
         project_root,
         source_script,
         source_data,
         native_launcher=legacy_playback,
+        consume_managed=consume_managed,
     )
     created_final = False
     native_launcher: dict[str, object] | None = None
@@ -583,7 +750,15 @@ def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object
                 "runtime": str(installed_launcher["runtime"]),
             }
 
-        files = _runtime_file_hashes(project_root, destination_root)
+        expected, stamps = _prepared_integrity(install)
+        file_stamps = {}
+        files = _runtime_file_hashes(
+            project_root,
+            destination_root,
+            expected=expected,
+            stamps=stamps if consumed else {},
+            verified_out=file_stamps,
+        )
         if native_launcher is not None:
             executable_relative = str(native_launcher["executable"])
             files[executable_relative] = _sha256(project_root / executable_relative)
@@ -596,20 +771,23 @@ def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object
                 "installed_at": datetime.now(timezone.utc).isoformat(),
                 "namespace": EMBED_ROOT.as_posix(),
                 "files": dict(sorted(files.items())),
+                "file_stamps": file_stamps,
                 "native_launcher": native_launcher,
                 "save_backup": save_backup,
-                "source_state": _installation_source_state(project_root),
+                "source_state": _analyzed_sources(project_root, install),
                 "config": _config_record(project_root, install),
+                "inspector_enabled": install.get("inspector_enabled", True),
                 "config_sha256": install.get("config_sha256"),
+                "analysis_config_sha256": install.get("analysis_config_sha256"),
+                "selection_settings": install.get("selection_settings"),
             },
         )
     except Exception:
         if native_launcher is not None:
             restore_native_launcher(project_root, native_launcher)
-        if created_final and destination_root.is_dir():
-            shutil.rmtree(destination_root)
-        if stage.is_dir():
-            shutil.rmtree(stage)
+        _discard_staged_runtime(
+            stage, destination_root if created_final else staged_data, source_data, consumed
+        )
         if manifest_path.is_file():
             manifest_path.unlink()
         raise
@@ -633,27 +811,37 @@ def embed_from_managed(project: Path, managed_project: Path) -> dict[str, object
             else None
         ),
         "save_backup": save_backup,
+        "prepared_runtime_transferred": consumed,
     }
 
 
-def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[str, object]:
+def refresh_embedded_from_managed(
+    project: Path,
+    managed_project: Path,
+    *,
+    consume_managed: bool = False,
+    preflight_complete: bool = False,
+) -> dict[str, object]:
     """Transactionally replace a verified direct runtime with freshly analyzed data."""
 
     project_root = project.expanduser().resolve()
     managed_root = managed_project.expanduser().resolve()
-    preflight_refresh_destination(project_root)
+    if not preflight_complete:
+        preflight_refresh_destination(project_root)
+    manifest_path = project_root / MANIFEST_NAME
+    original_manifest_hash = _sha256(manifest_path)
     original_manifest = _manifest(project_root)
     assert original_manifest is not None
     destination_root = project_root / EMBED_ROOT
-    manifest_path = project_root / MANIFEST_NAME
     source_script, source_data, install = _managed_runtime_sources(managed_root)
     native_launcher = original_manifest.get("native_launcher")
     launcher_owned = isinstance(native_launcher, dict)
-    stage, staged_data = _stage_runtime(
+    stage, staged_data, consumed = _stage_runtime(
         project_root,
         source_script,
         source_data,
         native_launcher=launcher_owned,
+        consume_managed=consume_managed,
     )
     backup = destination_root.parent / f".sl-backup-{uuid.uuid4().hex[:8]}"
     destination_moved = False
@@ -681,17 +869,28 @@ def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[
 
         # Re-verify after potentially long analysis/staging so a concurrent
         # manual edit can never be overwritten by the refresh swap.
-        with ProgressStage(
-            "install-verify", item="Rechecking ownership before replacing the runtime"
-        ):
-            preflight_refresh_destination(project_root)
+        preflight_refresh_destination(
+            project_root, item="Rechecking ownership before replacing the runtime"
+        )
+        if _sha256(manifest_path) != original_manifest_hash:
+            raise RuntimeError(
+                "Installation ownership changed during refresh; retry after the other operation finishes."
+            )
         os.replace(destination_root, backup)
         destination_moved = True
         os.replace(staged_data, destination_root)
         replacement_installed = True
         stage.rmdir()
 
-        files = _runtime_file_hashes(project_root, destination_root)
+        expected, stamps = _prepared_integrity(install)
+        file_stamps = {}
+        files = _runtime_file_hashes(
+            project_root,
+            destination_root,
+            expected=expected,
+            stamps=stamps if consumed else {},
+            verified_out=file_stamps,
+        )
         if launcher_owned:
             executable_relative = native_launcher.get("executable")
             if not isinstance(executable_relative, str):
@@ -708,11 +907,15 @@ def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[
             "refreshed_at": datetime.now(timezone.utc).isoformat(),
             "namespace": EMBED_ROOT.as_posix(),
             "files": dict(sorted(files.items())),
+            "file_stamps": file_stamps,
             "native_launcher": native_launcher,
             "save_backup": original_manifest.get("save_backup"),
-            "source_state": _installation_source_state(project_root),
+            "source_state": _analyzed_sources(project_root, install),
             "config": _config_record(project_root, install),
+            "inspector_enabled": install.get("inspector_enabled", True),
             "config_sha256": install.get("config_sha256"),
+            "analysis_config_sha256": install.get("analysis_config_sha256"),
+            "selection_settings": install.get("selection_settings"),
         }
         _save_install_manifest(manifest_path, refreshed_manifest)
         manifest_updated = True
@@ -724,14 +927,13 @@ def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[
             # Do not risk rolling back from a partially removed backup tree.
             cleanup_warning = f"Old verified runtime backup could not be removed: {error}"
     except Exception:
-        if replacement_installed and destination_root.is_dir():
-            shutil.rmtree(destination_root)
+        _discard_staged_runtime(
+            stage, destination_root if replacement_installed else staged_data, source_data, consumed
+        )
         if destination_moved and backup.is_dir() and not destination_root.exists():
             os.replace(backup, destination_root)
         if manifest_updated:
             _atomic_json(manifest_path, original_manifest)
-        if stage.is_dir():
-            shutil.rmtree(stage)
         raise
 
     return {
@@ -748,6 +950,7 @@ def refresh_embedded_from_managed(project: Path, managed_project: Path) -> dict[
         ),
         "save_backup": original_manifest.get("save_backup"),
         "cleanup_warning": cleanup_warning,
+        "prepared_runtime_transferred": consumed,
     }
 
 

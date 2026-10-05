@@ -15,6 +15,16 @@ from .sidecar import storage_root
 CALIBRATION_VERSION = 1
 
 
+def light_color_rgb(value: str) -> tuple[float, float, float]:
+    """Parse an author-facing hex color, without alpha or expressions."""
+    if not isinstance(value, str) or len(value) != 7 or not value.startswith("#"):
+        raise ValueError("light_color must be a hex color such as #4080FF")
+    try:
+        return tuple(int(value[index : index + 2], 16) / 255.0 for index in (1, 3, 5))
+    except ValueError as error:
+        raise ValueError("light_color must be a hex color such as #4080FF") from error
+
+
 def color_glow_blur_steps(size: tuple[int, int], radius: float) -> tuple[float, ...]:
     """Smooth before widening samples; small selected details cannot become ghost copies."""
     variance = (0.014 * min(size) * max(0.0, radius)) ** 2
@@ -104,6 +114,11 @@ class Calibration:
     shadow_strength: float = 0.62
     individual_light_colors: float = 0.0
     adaptive_light_colors: float = 1.0
+    light_color_red: float = 0.25
+    light_color_green: float = 0.50
+    light_color_blue: float = 1.0
+    light_color_amount: float = 0.0
+    light_color_tolerance: float = 0.25
     glow_strength: float = 0.0
     glow_radius: float = 1.0
     emission_strength: float = 0.0
@@ -126,9 +141,20 @@ class Calibration:
                 values[name] = tuple(ColorGlowRule.from_mapping(rule) for rule in values[name])
             elif name == "exposure_bias":
                 values[name] = max(-4.0, min(float(values[name]), 4.0))
+            elif name == "light_color_amount":
+                values[name] = max(-1.0, min(float(values[name]), 1.0))
             elif name == "glow_strength":
                 values[name] = max(0.0, min(float(values[name]), 10.0))
-            elif name in {"glow_red", "glow_green", "glow_blue", "glow_color_mix"}:
+            elif name in {
+                "glow_red",
+                "glow_green",
+                "glow_blue",
+                "glow_color_mix",
+                "light_color_red",
+                "light_color_green",
+                "light_color_blue",
+                "light_color_tolerance",
+            }:
                 values[name] = max(0.0, min(float(values[name]), 1.0))
             else:
                 values[name] = max(0.0, min(float(values[name]), 2.0))
@@ -171,7 +197,7 @@ class Calibration:
                 value.shadow_strength,
                 value.individual_light_colors,
                 value.adaptive_light_colors,
-                0.0,
+                value.light_color_tolerance,
             ),
             (
                 value.glow_strength,
@@ -181,6 +207,12 @@ class Calibration:
             ),
             (value.emission_red, value.emission_green, value.emission_blue, 0.0),
             (value.glow_red, value.glow_green, value.glow_blue, value.glow_color_mix),
+            (
+                value.light_color_red,
+                value.light_color_green,
+                value.light_color_blue,
+                value.light_color_amount,
+            ),
         )
 
     @classmethod
@@ -195,11 +227,20 @@ class Calibration:
         if not isinstance(value, dict):
             raise ValueError("SceneLight calibration must be a JSON object")
         names = {field.name for field in fields(cls)}
-        unknown = sorted(set(value) - names)
+        unknown = sorted(set(value) - names - {"light_color"})
         if unknown:
             raise ValueError("Unknown SceneLight calibration setting(s): " + ", ".join(unknown))
         values = asdict(base or cls())
+        if "light_color" in value:
+            values.update(
+                zip(
+                    ("light_color_red", "light_color_green", "light_color_blue"),
+                    light_color_rgb(value["light_color"]),
+                )
+            )
         for name, raw in value.items():
+            if name == "light_color":
+                continue
             if name == "glow_rules":
                 if not isinstance(raw, (list, tuple)):
                     raise ValueError("SceneLight glow_rules must be a list")

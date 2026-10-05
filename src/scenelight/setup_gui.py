@@ -535,6 +535,14 @@ def describe_operation_failure(output: str) -> tuple[str, str]:
     """Turn verbose CLI output into a truthful user-facing failure summary."""
 
     lowered = output.lower()
+    if "capturescripterror:" in lowered or "could not compile the game scripts" in lowered:
+        return (
+            "The game scripts could not be compiled",
+            "Ren'Py reported a script error. Activity and the support report contain the "
+            "file and line. Check that the mod runs with its intended Ren'Py version, then "
+            "fix the reported syntax or select that compatible runtime. The current "
+            "installation and completed analysis are retained.",
+        )
     if "captureinstanceconflict:" in lowered:
         return (
             "The mod allows only one running copy",
@@ -1019,6 +1027,11 @@ def operation_copy(operation: str) -> tuple[str, str, str]:
             "Checking the installed SceneLight files.",
             "Verifying the installation…",
         ),
+        "inspector": (
+            "Applying inspector setting",
+            "Adding or removing the optional in-game tool. Existing analysis is kept.",
+            "Applying the inspector choice…",
+        ),
         "remove": (
             "Removing SceneLight",
             "Checking the SceneLight copy before removing it.",
@@ -1413,6 +1426,11 @@ class SceneLightSetup(tk.Tk):
         self.project_var = tk.StringVar(value=initial_project or "")
         self.sdk_var = tk.StringVar()
         self.cuda_var = tk.BooleanVar(value=False)
+        self.inspector_var = tk.BooleanVar(value=True)
+        self.inspector_detail_var = tk.StringVar(
+            value="Choose a project to configure its in-game inspector."
+        )
+        self._inspector_selection_key = None
         self._cuda_support: CudaSupport | None = None
         self._cuda_user_choice = False
         self._cuda_probe_generation = 0
@@ -1447,6 +1465,7 @@ class SceneLightSetup(tk.Tk):
         self._cancel_requested = threading.Event()
         self._running = False
         self._active_operation: str | None = None
+        self._update_reason = ""
         self._component_download = ""
         self._continue_after_components = False
         self._scan_ok = False
@@ -1487,6 +1506,8 @@ class SceneLightSetup(tk.Tk):
         self.sdk_entry: ttk.Entry | None = None
         self.sdk_browse: ttk.Button | None = None
         self.cuda_check: ttk.Checkbutton | None = None
+        self.inspector_check: ttk.Checkbutton | None = None
+        self.inspector_apply: ttk.Button | None = None
         self.components_button: ttk.Button | None = None
         self.advanced_components_button: ttk.Button | None = None
         self.verify_button: ttk.Button | None = None
@@ -2061,7 +2082,7 @@ class SceneLightSetup(tk.Tk):
 
             advanced_tab = ttk.Frame(notebook, style="Card.TFrame", padding=12)
             advanced_tab.columnconfigure(1, weight=1)
-            advanced_tab.rowconfigure(6, weight=1)
+            advanced_tab.rowconfigure(7, weight=1)
             self._advanced_tab = advanced_tab
             notebook.add(advanced_tab, text="Advanced")
             ttk.Label(advanced_tab, text="Analysis & compatibility", style="CardTitle.TLabel").grid(
@@ -2100,13 +2121,37 @@ class SceneLightSetup(tk.Tk):
             ttk.Separator(advanced_tab, orient="horizontal").grid(
                 row=4, column=0, columnspan=3, sticky="ew", pady=(12, 9)
             )
+            inspector_card = ttk.Frame(advanced_tab, style="Card.TFrame")
+            inspector_card.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+            inspector_card.columnconfigure(0, weight=1)
+            self.inspector_check = ttk.Checkbutton(
+                inspector_card,
+                text="Include in-game inspector · Shift+F9",
+                variable=self.inspector_var,
+                style="Dark.TCheckbutton",
+            )
+            self.inspector_check.grid(row=0, column=0, sticky="w")
+            self.inspector_apply = ttk.Button(
+                inspector_card,
+                text="Apply to project",
+                command=self._apply_inspector_option,
+                style="Secondary.TButton",
+            )
+            self.inspector_apply.grid(row=0, column=1, padx=(12, 0))
+            ttk.Label(
+                inspector_card,
+                textvariable=self.inspector_detail_var,
+                style="Body.TLabel",
+                wraplength=650,
+                justify="left",
+            ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0))
             ttk.Label(
                 advanced_tab,
                 text="Required components · individually verified",
                 style="CardTitle.TLabel",
-            ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(0, 5))
+            ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 5))
             requirements_view = tk.Frame(advanced_tab, background="#12161c")
-            requirements_view.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(0, 6))
+            requirements_view.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(0, 6))
             requirements_view.grid_columnconfigure(0, weight=1)
             requirements_view.grid_rowconfigure(0, weight=1)
             self.requirements_canvas = tk.Canvas(
@@ -2159,7 +2204,7 @@ class SceneLightSetup(tk.Tk):
                 style="Primary.TButton",
             )
             self.advanced_components_button.grid(
-                row=7, column=0, columnspan=3, sticky="w", pady=(3, 0)
+                row=8, column=0, columnspan=3, sticky="w", pady=(3, 0)
             )
             activity_tab = ttk.Frame(notebook, style="Card.TFrame", padding=14)
             activity_tab.columnconfigure(0, weight=1)
@@ -2176,6 +2221,9 @@ class SceneLightSetup(tk.Tk):
                 self.sdk_entry = None
                 self.sdk_browse = None
                 self.cuda_check = None
+                self.inspector_check = None
+                self.inspector_apply = None
+                self._inspector_selection_key = None
                 self.components_button = None
                 self.advanced_components_button = None
                 self.verify_button = None
@@ -2595,6 +2643,8 @@ class SceneLightSetup(tk.Tk):
                 or inspection.unmanaged_namespace_present
             )
         )
+        if self.inspector_check is not None:
+            self._refresh_inspector_option(selection, inspection, existing_issue)
         state = self._dependency_state
         dependencies_ready = bool(state and state.ready)
         character_review_pending = bool(
@@ -2840,7 +2890,7 @@ class SceneLightSetup(tk.Tk):
             primary_state = "disabled"
             title, subtitle, _status = operation_copy(self._active_operation or "")
             self.workflow_title_var.set(title)
-            self.workflow_subtitle_var.set(subtitle)
+            self.workflow_subtitle_var.set(getattr(self, "_update_reason", "") or subtitle)
         elif self._project_checking:
             label = "Inspecting selected game…"
             primary_state = "disabled"
@@ -3011,6 +3061,52 @@ class SceneLightSetup(tk.Tk):
             analyzer=analyzer,
             executable=preferred_runtime_python(),
         )
+
+    def _refresh_inspector_option(self, selection, inspection, existing_issue: bool) -> None:
+        from .inspector_install import inspector_enabled
+
+        enabled = (
+            selection.valid
+            and selection.root is not None
+            and not existing_issue
+            and not self._running
+            and not self._project_checking
+        )
+        self.inspector_check.configure(state="normal" if enabled else "disabled")
+        self.inspector_apply.configure(state="normal" if enabled else "disabled")
+        if not selection.valid or selection.root is None:
+            self._inspector_selection_key = None
+            self.inspector_detail_var.set("Choose a project to configure its in-game inspector.")
+            return
+        embedded = self._attached or not (inspection and inspection.managed_install_present)
+        key = (selection.root, embedded)
+        if not self._running and key != self._inspector_selection_key:
+            self._inspector_selection_key = key
+            current = inspector_enabled(selection.root, embedded=embedded)
+            self.inspector_var.set(current)
+            installed = self._attached or bool(inspection and inspection.managed_install_present)
+            self.inspector_detail_var.set(
+                (
+                    "Enabled. Press Shift+F9 in game."
+                    if current
+                    else "Disabled. The inspector is not included."
+                )
+                + " Restart the game after applying changes."
+                if installed
+                else "Save this choice for the next installation."
+            )
+
+    def _apply_inspector_option(self) -> None:
+        if self._running or self._project_checking or self._inspector_selection_key is None:
+            return
+        _project, embedded = self._inspector_selection_key
+        command = self._command("inspector") + [
+            "--enabled",
+            "on" if self.inspector_var.get() else "off",
+            "--installation",
+            "embedded" if embedded else "managed",
+        ]
+        self._start_operation("inspector", command)
 
     def _review_characters(self) -> None:
         """Refresh discovery before reopening the authoritative selection."""
@@ -3747,6 +3843,7 @@ class SceneLightSetup(tk.Tk):
         self._cancel_requested.clear()
         self._running = True
         self._active_operation = operation
+        self._update_reason = ""
         previous_session = diagnostics.current_session()
         if previous_session is not None and previous_session._summary.get("operation") == "startup":
             previous_session.update(status="ready")
@@ -3860,6 +3957,7 @@ class SceneLightSetup(tk.Tk):
                     "embed",
                     "refresh",
                     "unembed",
+                    "inspector",
                 }
                 and payload is None
             ):
@@ -3913,6 +4011,12 @@ class SceneLightSetup(tk.Tk):
                 if event[0] == "log":
                     line = str(event[1])
                     self._append_log(line, record=not (len(event) > 2 and event[2]))
+                    if line.startswith("SceneLight update: ") and self._active_operation in {
+                        "install",
+                        "refresh",
+                    }:
+                        self._update_reason = line.removeprefix("SceneLight update: ").strip()
+                        self.workflow_subtitle_var.set(self._update_reason)
                     if self._active_operation in {"components", "preview-components"}:
                         component_update = parse_component_progress(
                             line,
@@ -4071,8 +4175,23 @@ class SceneLightSetup(tk.Tk):
                 "embed": "Developer API installation completed.",
                 "refresh": "SceneLight update completed.",
                 "unembed": "Developer API removal completed.",
+                "inspector": "In-game inspector setting applied. Restart the game to use it.",
             }
             self.operation_var.set(completion.get(operation, "Operation completed successfully."))
+            if operation == "inspector" and result.get("installed") is False:
+                self.operation_var.set("Inspector choice saved for the next installation.")
+            if result.get("update_mode") == "runtime-only":
+                self.operation_var.set(
+                    "SceneLight updated. Existing sprite and background analysis was reused."
+                )
+            elif result.get("update_mode") == "settings-only":
+                self.operation_var.set(
+                    "Settings updated. Existing sprite and background maps were kept."
+                )
+            elif result.get("update_mode") == "unchanged":
+                self.operation_var.set(
+                    "SceneLight is already current. No assets needed rebuilding."
+                )
             if operation == "compatibility":
                 self._scan()
                 return
@@ -4218,6 +4337,8 @@ class SceneLightSetup(tk.Tk):
             self._append_log(f"[{operation} failed with exit code {return_code}]\n")
             messagebox.showerror(title, message)
         self._refresh_dependency_display()
+        if operation == "inspector":
+            self._inspector_selection_key = None
         if self._cuda_apply_when_idle and self._cuda_support is not None:
             self._finish_cuda_detection(self._cuda_support)
         if operation in {
@@ -4228,6 +4349,7 @@ class SceneLightSetup(tk.Tk):
             "embed",
             "refresh",
             "unembed",
+            "inspector",
         }:
             self._begin_project_inspection()
         else:

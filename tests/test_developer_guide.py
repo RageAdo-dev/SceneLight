@@ -35,6 +35,8 @@ def _runtime_api():
         "scenelight_set_enabled",
         "scenelight_set_strength",
         "scenelight_register_tag",
+        "_scenelight_master_enabled",
+        "_scenelight_master_strength",
     }
     nodes = [
         node

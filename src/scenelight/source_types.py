@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-SCRIPT_SOURCE_SUFFIXES = frozenset({".rpy", ".rpym", ".rpyc", ".rpymc"})
+SCRIPT_SOURCE_SUFFIXES = frozenset({".rpy", ".rpym", ".rpyc", ".rpymc", ".py"})
+# Authored data can define dynamically generated images and composites.
+DATA_SOURCE_SUFFIXES = frozenset({".json", ".csv", ".yaml", ".yml", ".txt"})
 ARCHIVE_SOURCE_SUFFIXES = frozenset({".rpa"})
 IMAGE_SOURCE_SUFFIXES = frozenset(
     {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".apng", ".avif", ".svg"}
@@ -18,6 +20,7 @@ VISUAL_SOURCE_SUFFIXES = frozenset().union(
     ARCHIVE_SOURCE_SUFFIXES,
     IMAGE_SOURCE_SUFFIXES,
     VIDEO_SOURCE_SUFFIXES,
+    DATA_SOURCE_SUFFIXES,
 )
 
 

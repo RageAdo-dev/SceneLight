@@ -18,6 +18,23 @@ from scenelight.sidecar import (
 )
 
 
+def test_generated_support_reports_are_not_synced_or_deleted(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed"))
+    project = tmp_path / "game-project"
+    (project / "game").mkdir(parents=True)
+    (project / "game/script.rpy").write_text("label start:\n    return\n")
+    (project / "scenelight-support-test.zip").write_bytes(b"private diagnostic")
+    (project / "scenelight-inspector.json").write_text("{}")
+    result = sync_project(project)
+    assert not any(
+        "scenelight-support" in name or "scenelight-inspector" in name for name in result.copied
+    )
+    generated = result.managed / "scenelight-support-live.zip"
+    generated.write_bytes(b"diagnostic created while playing")
+    sync_project(project)
+    assert generated.is_file()
+
+
 def test_source_only_managed_copy_launches_with_recorded_sdk(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "source"
     managed = tmp_path / "managed"

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .script_cache import generated_script_cache, restore_playback_bytecode
 from .source_types import VISUAL_SOURCE_SUFFIXES, is_effect_source, source_digest
 
 STATE_NAME = ".scenelight_sidecar.json"
@@ -24,6 +25,8 @@ STATE_NAME = ".scenelight_sidecar.json"
 _EXCLUDED_ROOT_FILES = {
     "scenelight-runtime.jsonl",
     "scenelight-runtime.jsonl.1",
+    "scenelight-inspector.json",
+    ".scenelight_runtime_update.json",
     "launch with scenelight.bat",
     "log.txt",
     "traceback.txt",
@@ -103,6 +106,8 @@ def _is_source_file(relative: Path) -> bool:
         return False
     if len(parts) == 1 and parts[0] in _EXCLUDED_ROOT_FILES:
         return False
+    if len(parts) == 1 and parts[0].startswith("scenelight-support-") and parts[0].endswith(".zip"):
+        return False
     if parts[0] == "game" and len(parts) >= 2:
         if parts[1] in _EXCLUDED_GAME_NAMES:
             return False
@@ -113,6 +118,8 @@ def _is_source_file(relative: Path) -> bool:
 
 def _is_reserved_managed_file(relative: Path) -> bool:
     parts = tuple(part.lower() for part in relative.parts)
+    if len(parts) == 1 and parts[0].startswith("scenelight-support-") and parts[0].endswith(".zip"):
+        return True
     if relative.as_posix() in {STATE_NAME, ".scenelight_install.json"}:
         return True
     if len(parts) == 1 and parts[0] == "launch with scenelight.bat":
@@ -186,6 +193,7 @@ def sync_project(
         raise FileNotFoundError(f"Ren'Py game folder not found: {source / 'game'}")
     managed = managed_project_root(source)
     managed.mkdir(parents=True, exist_ok=True)
+    restore_playback_bytecode(managed / "game")
     state_path = managed / STATE_NAME
     old_state = _load_state(state_path)
     old_files = old_state.get("source_files", {})
@@ -230,14 +238,19 @@ def sync_project(
             target.unlink()
             removed.append(key)
 
-    # Remove files created by a foreign Ren'Py compiler, while preserving the
-    # isolated SceneLight runtime, maps, cache, and launcher.
+    # Native source-backed bytecode retains statement identities used by saves.
+    # Analysis temporarily protects/restores it through script_cache; orphaned
+    # outputs and files without a current authored source can still be removed.
     for target in managed.rglob("*"):
         if not target.is_file():
             continue
         relative = target.relative_to(managed)
         key = relative.as_posix()
-        if key not in current and not _is_reserved_managed_file(relative):
+        if (
+            key not in current
+            and not _is_reserved_managed_file(relative)
+            and not generated_script_cache(relative, current)
+        ):
             target.unlink()
             removed.append(key)
 

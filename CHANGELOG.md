@@ -4,6 +4,29 @@
 
 ### Lighting and playback
 
+- Reduced washed-out lighting on bright backgrounds. Automatic positive exposure now has a soft limit for already exposed artwork, neutral backgrounds no longer act as a desaturation filter, and highlight protection preserves existing painted detail while compressing newly added highlights. Preview at zero strength preserves the original artwork; explicit glow remains independent. Preview and the game share the correction without changing cached lighting-map formats.
+
+- Added live numeric sliders to the in-game inspector while retaining exact-value Edit and Reset. Master strength also has a slider; signed color influence and exposure retain their full ranges. Removed the Record 10 seconds button.
+
+- Made Preview's lighting and glow controls visible on its default Adjust page. Persistent category buttons replace the hidden dropdown; Sprite glow has strength/halo sliders and numeric inputs, Color glow has a clearer empty state, and Cast light is a separate page. Compact spacing fits the primary glow controls at 1280×720. Scrolling the panel no longer changes numeric or slider values.
+
+- Lighting/profile edits and choices among already prepared character families now update runtime settings without recapturing backgrounds or rebuilding maps. The updater compares asset-discovery inputs separately and still analyzes changed sources, newly requested families, or unknown legacy inputs. The main update window shows the reason for its chosen path.
+- Shortened the inspector option description to its enabled/disabled state and restart instruction.
+
+- Added a per-project Setup option to include or exclude the in-game inspector. Apply changes only its optional source/helper/compiled files, retains asset maps, and persists across updates. Excluded games have no inspector screen or Shift+F9 binding. Interrupted changes use the existing recovery journal.
+
+- Moved Preview calibration into the right sidebar with live controls and uninterrupted sprite dragging. Save/export now opens a review page showing every current value, the destination and exact output before an explicit write. Existing scene/sprite rules are preserved; stale or failed writes cannot silently overwrite the reviewed file. Editing one control preserves precision in untouched settings.
+
+- Preserve source-backed Ren'Py bytecode and its statement identities in player copies across updates. Raw analysis snapshots/restores the prior playback bytecode, including interrupted-run recovery, so analyzer compilation cannot move existing saves to an earlier checkpoint.
+
+- Detect newly reported Ren'Py script parse errors immediately, retain the file/line in support reports, and skip further graphics-backend retries for that runtime while allowing a different compatible engine to be tried.
+
+- In-game support exports now bundle a readable report, conflict checks, exact runtime identity, engine logs, reproduction notes and a ten-second settings recording. Screenshots are optional. Activity preserves complete inspector JSON instead of truncating it into an invalid tail.
+- Compatible runtime updates now replace only changed code after source/integrity checks, leaving existing maps in place. Updates use a recovery journal and a per-project writer lock. Background scene fields join transport/form caches; update decisions and cache counts are reported. Authored Python and data files also invalidate visual inventories.
+
+- Added an in-game lighting inspector (Shift+F9) with effective values, override chains, authored script locations, master strength, nested lighting passes, temporary test edits, reset and diagnostic export. New games and loads clear test edits; story rules and saved player preferences remain unchanged.
+- Added selective background-light color adjustment through a hex target, signed influence and a soft hue range. The game API and Preview share the controls; the default amount is zero. Activity support exports include the inspector report.
+
 - Setup now shows finalization stages after sprite maps reach 100%: worker shutdown, index/report writing, background-video preparation, cache copying, runtime copying and verification, and workspace cleanup. Large copies/hashes report file counts; video preparation reports the current video and frame counts. Otherwise the active stage and elapsed time remain visible. Activity records the same live stages, refreshes while visible, follows new entries at the bottom, and preserves the view when reading older entries.
 - An active installation/update no longer displays the previous installation as "installed and ready"; it explicitly asks users to wait for completion.
 
@@ -47,6 +70,9 @@
 - Live analysis runs in about a quarter less time on an older Radeon laptop GPU, with fewer GPU passes and smaller analysis buffers.
 
 ### Setup and author tools
+
+- Large installs transfer a private prepared runtime directly when it is on the same volume, avoiding another full copy. Verification reuses checksums only when the filesystem confirms the same file identity and change time; modified files, older records and unsupported filesystems still require byte reads. Verification uses bounded workers, retains a final ownership check, and returns prepared files on failed publication. Source edits made after analysis remain pending for the next update.
+- Removed a duplicate update ownership pass and an extra source scan during finalization. Transfer checks and prepared-file verification stay visible in Activity. Full file reads stay sequential to avoid competing disk seeks on hard drives; cached identity checks use bounded concurrency. Large-file benchmarks measure finalization separately from asset capture and analysis.
 
 - Character selection can be reopened and refreshed for installed projects. Automatic inclusion of newly detected characters defaults on, with persistent exclusions; disabling it keeps a fixed selection. Asset changes are prepared by Scan/Update in both player and developer workflows.
 

@@ -194,6 +194,7 @@ def test_cinematic_quick_look_applies_strength_and_calibration_together() -> Non
         _lighting_look=look,
         _view=view,
         statusBar=lambda: SimpleNamespace(showMessage=statuses.append),
+        _sync_settings_pages=lambda: None,
     )
 
     ui.MainWindow._lighting_look_changed(window, 2)
@@ -211,7 +212,7 @@ def test_current_preview_profile_keeps_lighting_strength() -> None:
     window = SimpleNamespace(
         _calibration=Calibration(exposure_bias=-0.22),
         _calibration_profile=CalibrationProfile(scenes={"hallway": Calibration(rim_strength=0.4)}),
-        _strength_slider=SimpleNamespace(value=lambda: 72),
+        _view=SimpleNamespace(_strength=0.72),
     )
 
     profile = ui.MainWindow._current_profile(window)

@@ -7,24 +7,25 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
-    QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSlider,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ..calibration import Calibration
 from .color_glow_ui import ColorGlowEditor
+from .controls import ScrollSlider, ScrollSpinBox
 
 _BASIC = (
     ("auto_strength", "Automatic match", 0.0, 2.0, 0.01),
@@ -65,7 +66,9 @@ _EMITTED_LIGHT = (
 )
 
 
-class CalibrationDialog(QDialog):
+class CalibrationEditor(QWidget):
+    """Embedded live controls; persistence is handled by the separate review page."""
+
     def __init__(
         self,
         calibration: Calibration,
@@ -73,43 +76,114 @@ class CalibrationDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("SceneLight calibration")
-        self.setMinimumWidth(560)
         self._initial = calibration.normalized()
         self._on_change = on_change
         self._controls: dict[str, QDoubleSpinBox] = {}
+        self._sliders: dict[str, QSlider] = {}
         self._glow_color = QColor("#ffffff")
+        self._glow_color_rgb = (1.0, 1.0, 1.0)
         self._glow_color_mix = 0.0
+        self._light_color = QColor("#4080ff")
+        self._light_color_rgb = (0.25, 0.50, 1.0)
 
         layout = QVBoxLayout(self)
-        tabs = QTabWidget()
-        tabs.setUsesScrollButtons(False)
-        tabs.addTab(self._page(_BASIC), "Basic")
-        tabs.addTab(self._page(_ADVANCED), "Advanced")
-        tabs.addTab(self._glow_page(), "Glow && emitted light")
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        navigation = QGridLayout()
+        navigation.setSpacing(5)
+        self._categories = QButtonGroup(self)
+        self.category_buttons = {}
+        for position, (index, name, hint) in enumerate(
+            (
+                (0, "Lighting", "Automatic matching, exposure, contrast and saturation"),
+                (3, "Sprite glow", "Glow strength, halo spread, glow color and tint"),
+                (4, "Color glow", "Make selected colors in the artwork glow"),
+                (2, "Light color", "Adjust a color in the background light"),
+                (1, "Advanced", "Shadows, bounce, rim light and other lighting controls"),
+                (
+                    5,
+                    "Cast light",
+                    "Configure light this sprite casts onto other characters in-game",
+                ),
+            )
+        ):
+            button = QPushButton(name)
+            button.setCheckable(True)
+            button.setObjectName("calibrationCategory")
+            button.setToolTip(hint)
+            self._categories.addButton(button, index)
+            self.category_buttons[name] = button
+            navigation.addWidget(button, position // 3, position % 3)
+            navigation.setColumnStretch(position % 3, 1)
+        self._categories.idClicked.connect(self._show_page)
+        layout.addLayout(navigation)
+        self._page_title = QLabel()
+        self._page_title.setObjectName("sectionTitle")
+        layout.addWidget(self._page_title)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setMinimumHeight(100)
+        contents = QWidget()
+        pages_layout = QVBoxLayout(contents)
+        pages_layout.setContentsMargins(0, 0, 0, 0)
         self._color_glow = ColorGlowEditor()
         self._color_glow.changed.connect(self._changed)
-        tabs.addTab(self._color_glow, "Color glow")
-        layout.addWidget(tabs)
+        self._pages = [
+            self._page(_BASIC),
+            self._page(_ADVANCED),
+            self._light_color_page(),
+            self._glow_page(),
+            self._color_glow,
+            self._cast_light_page(),
+        ]
+        for index, page in enumerate(self._pages):
+            pages_layout.addWidget(page)
+            page.setVisible(index == 0)
+        pages_layout.addStretch(1)
+        self.scroll.setWidget(contents)
+        layout.addWidget(self.scroll, 1)
 
         buttons = QHBoxLayout()
         reset = QPushButton("Restore defaults")
+        reset.setObjectName("compactAction")
+        reset.setToolTip("Restore all calibration and glow settings to their defaults.")
         reset.clicked.connect(lambda: self._set_calibration(Calibration()))
         buttons.addWidget(reset)
         buttons.addStretch(1)
-        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        box.accepted.connect(self.accept)
-        box.rejected.connect(self.reject)
-        buttons.addWidget(box)
         layout.addLayout(buttons)
-
+        self.select_category(0)
         self._set_calibration(self._initial, notify=False)
+
+    def select_category(self, index: int) -> None:
+        button = self._categories.button(index)
+        if button is not None:
+            button.setChecked(True)
+            self._show_page(index)
+
+    def _show_page(self, index: int) -> None:
+        for number, page in enumerate(self._pages):
+            page.setVisible(number == index)
+        self._page_title.setText(
+            (
+                "Basic lighting",
+                "Advanced lighting",
+                "Background light color",
+                "Sprite glow",
+                "Color glow",
+                "Cast light · in-game",
+            )[index]
+        )
+        self.scroll.verticalScrollBar().setValue(0)
 
     def _page(self, fields) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
+        form.setContentsMargins(6, 6, 6, 6)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         for name, label, minimum, maximum, step in fields:
-            control = QDoubleSpinBox()
+            control = ScrollSpinBox()
             control.setRange(minimum, maximum)
             control.setSingleStep(step)
             control.setDecimals(2)
@@ -128,17 +202,48 @@ class CalibrationDialog(QDialog):
                 control.setToolTip(
                     "This light affects other visible characters in-game. Preview shows one sprite, so check cast light in your mod. It does not recolor this sprite’s own glow."
                 )
-            control.valueChanged.connect(self._changed)
+            control.valueChanged.connect(lambda value, key=name: self._value_changed(key, value))
             self._controls[name] = control
-            form.addRow(label, control)
+            if name in {"glow_strength", "glow_radius"}:
+                slider = ScrollSlider(Qt.Horizontal)
+                slider.setRange(round(minimum * 100), round(maximum * 100))
+                slider.setSingleStep(round(step * 100))
+                slider.setPageStep(round(step * 1000))
+                slider.setAccessibleName(label)
+                slider.setToolTip(
+                    "0–10 · 0 turns glow off"
+                    if name == "glow_strength"
+                    else "0–2 · controls the halo’s spread"
+                )
+                slider.valueChanged.connect(
+                    lambda value, field=control: field.setValue(value / 100)
+                )
+                self._sliders[name] = slider
+                row = QWidget()
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.addWidget(slider, 1)
+                row_layout.addWidget(control)
+                control.setMaximumWidth(80)
+                form.addRow(label, row)
+            else:
+                form.addRow(label, control)
         return page
+
+    def _value_changed(self, name: str, value: float) -> None:
+        self._values[name] = value
+        if name in self._sliders:
+            slider = self._sliders[name]
+            slider.blockSignals(True)
+            slider.setValue(round(value * 100))
+            slider.blockSignals(False)
+        self._changed()
 
     def _glow_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        own = QGroupBox("Sprite glow · visible in Preview")
-        own_layout = QVBoxLayout(own)
-        own_layout.addWidget(self._page(_GLOW))
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.addWidget(self._page(_GLOW))
         color_row = QHBoxLayout()
         self._custom_glow = QCheckBox("Custom glow color")
         self._custom_glow.toggled.connect(self._toggle_glow_color)
@@ -146,10 +251,10 @@ class CalibrationDialog(QDialog):
         self._color_button.clicked.connect(self._choose_glow_color)
         color_row.addWidget(self._custom_glow)
         color_row.addWidget(self._color_button)
-        own_layout.addLayout(color_row)
+        layout.addLayout(color_row)
         mix_row = QHBoxLayout()
         mix_row.addWidget(QLabel("Artwork"))
-        self._glow_mix_slider = QSlider(Qt.Horizontal)
+        self._glow_mix_slider = ScrollSlider(Qt.Horizontal)
         self._glow_mix_slider.setRange(0, 100)
         self._glow_mix_slider.setToolTip(
             "0% preserves artwork colors; 100% replaces them with the chosen glow color. Values between apply a tint."
@@ -158,25 +263,58 @@ class CalibrationDialog(QDialog):
         mix_row.addWidget(self._glow_mix_slider, 1)
         self._glow_mix_value = QLabel("0% color")
         mix_row.addWidget(self._glow_mix_value)
-        own_layout.addLayout(mix_row)
+        layout.addLayout(mix_row)
         self._glow_hint = QLabel()
         self._glow_hint.setObjectName("subtitle")
         self._glow_hint.setWordWrap(True)
-        own_layout.addWidget(self._glow_hint)
-        layout.addWidget(own)
+        layout.addWidget(self._glow_hint)
+        layout.addStretch(1)
+        return page
 
-        cast = QGroupBox("Light cast onto other characters")
-        cast_layout = QVBoxLayout(cast)
+    def _cast_light_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
         note = QLabel(
-            "These settings affect other characters in-game. Preview shows one sprite; check cast light in your mod. They do not change this sprite’s own glow."
+            "Let this sprite light nearby characters in your mod. Preview shows one sprite; check cast light in-game."
         )
         note.setObjectName("subtitle")
         note.setWordWrap(True)
-        cast_layout.addWidget(note)
-        cast_layout.addWidget(self._page(_EMITTED_LIGHT))
-        layout.addWidget(cast)
+        layout.addWidget(note)
+        layout.addWidget(self._page(_EMITTED_LIGHT))
         layout.addStretch(1)
         return page
+
+    def _light_color_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        note = QLabel(
+            "Reduce or increase a selected color in the background light reaching the sprite. "
+            "Negative values reduce the color cast; positive values increase it. "
+            "0 leaves the lighting unchanged. The background image and artwork are preserved."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self._light_color_button = QPushButton()
+        self._light_color_button.clicked.connect(self._choose_light_color)
+        layout.addWidget(self._light_color_button)
+        layout.addWidget(
+            self._page(
+                (
+                    ("light_color_amount", "Color influence", -1.0, 1.0, 0.05),
+                    ("light_color_tolerance", "Similar colors", 0.0, 1.0, 0.05),
+                )
+            )
+        )
+        layout.addStretch(1)
+        return page
+
+    def _choose_light_color(self) -> None:
+        selected = QColorDialog.getColor(self._light_color, self, "Background light color")
+        if selected.isValid():
+            self._light_color = selected
+            self._light_color_rgb = (selected.redF(), selected.greenF(), selected.blueF())
+            self._light_color_button.setText("Color: " + selected.name().upper())
+            self._changed()
 
     def _toggle_glow_color(self, checked: bool) -> None:
         self._glow_color_mix = 1.0 if checked else 0.0
@@ -194,6 +332,7 @@ class CalibrationDialog(QDialog):
         if not selected.isValid():
             return
         self._glow_color = selected
+        self._glow_color_rgb = (selected.redF(), selected.greenF(), selected.blueF())
         self._glow_color_mix = 1.0
         self._custom_glow.blockSignals(True)
         self._custom_glow.setChecked(True)
@@ -219,11 +358,16 @@ class CalibrationDialog(QDialog):
 
     @property
     def calibration(self) -> Calibration:
-        values = {name: control.value() for name, control in self._controls.items()}
+        # Preserve loaded precision in untouched fields instead of reading the
+        # rounded spinbox display back into every unrelated setting.
+        values = dict(self._values)
         values.update(
-            glow_red=self._glow_color.redF(),
-            glow_green=self._glow_color.greenF(),
-            glow_blue=self._glow_color.blueF(),
+            light_color_red=self._light_color_rgb[0],
+            light_color_green=self._light_color_rgb[1],
+            light_color_blue=self._light_color_rgb[2],
+            glow_red=self._glow_color_rgb[0],
+            glow_green=self._glow_color_rgb[1],
+            glow_blue=self._glow_color_rgb[2],
             glow_color_mix=self._glow_color_mix,
             glow_rules=[rule.as_dict() for rule in self._color_glow.rules],
         )
@@ -231,9 +375,20 @@ class CalibrationDialog(QDialog):
 
     def _set_calibration(self, calibration: Calibration, *, notify: bool = True) -> None:
         values = calibration.as_dict()
+        self._values = values
+        self._light_color_rgb = tuple(
+            values["light_color_" + channel] for channel in ("red", "green", "blue")
+        )
+        self._light_color = QColor.fromRgbF(
+            values["light_color_red"], values["light_color_green"], values["light_color_blue"]
+        )
+        self._light_color_button.setText("Color: " + self._light_color.name().upper())
         self._color_glow.set_rules(calibration.glow_rules)
         self._glow_color = QColor.fromRgbF(
             values["glow_red"], values["glow_green"], values["glow_blue"]
+        )
+        self._glow_color_rgb = tuple(
+            values["glow_" + channel] for channel in ("red", "green", "blue")
         )
         self._glow_color_mix = values["glow_color_mix"]
         self._custom_glow.blockSignals(True)
@@ -243,6 +398,10 @@ class CalibrationDialog(QDialog):
             control.blockSignals(True)
             control.setValue(values[name])
             control.blockSignals(False)
+        for name, slider in self._sliders.items():
+            slider.blockSignals(True)
+            slider.setValue(round(values[name] * 100))
+            slider.blockSignals(False)
         self._refresh_glow_controls()
         if notify:
             self._on_change(self.calibration)
@@ -250,7 +409,3 @@ class CalibrationDialog(QDialog):
     def _changed(self, _value: float | None = None) -> None:
         self._refresh_glow_controls()
         self._on_change(self.calibration)
-
-    def reject(self) -> None:
-        self._on_change(self._initial)
-        super().reject()

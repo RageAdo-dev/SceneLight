@@ -329,7 +329,7 @@ _SETTING_ROWS = (
         "Saturation matching",
         "0–2",
         "0.8",
-        "Control how strongly character color saturation follows the scene.",
+        "Control how strongly character saturation follows colored surroundings. Neutral backgrounds preserve the artwork's color.",
         "saturation colorful colourful muted",
     ),
     (
@@ -337,7 +337,7 @@ _SETTING_ROWS = (
         "Highlight softness",
         "0–2",
         "1.2",
-        "Compress bright colors to soften harsh highlights.",
+        "Soften newly added highlights while preserving brightness and shading already painted into the sprite.",
         "bright highlights rolloff",
     ),
     (
@@ -529,6 +529,49 @@ _SETTING_ROWS += (
     ),
 )
 
+_SETTING_ROWS += (
+    (
+        "light_color_red",
+        "Background color target · red",
+        "0–1",
+        "0.25",
+        "Red channel of the light color to adjust. The light_color='#4080FF' shorthand sets all three channels.",
+        "background blue hex color cast target",
+    ),
+    (
+        "light_color_green",
+        "Background color target · green",
+        "0–1",
+        "0.5",
+        "Green channel of the selected background light color.",
+        "background hex color cast target",
+    ),
+    (
+        "light_color_blue",
+        "Background color target · blue",
+        "0–1",
+        "1.0",
+        "Blue channel of the selected background light color.",
+        "background blue hex color cast target",
+    ),
+    (
+        "light_color_amount",
+        "Selected background color influence",
+        "−1–1",
+        "-0.5",
+        "Negative reduces the selected color cast toward neutral; positive strengthens it. Zero is unchanged. This targets incoming light, not colors painted on the sprite or background.",
+        "background blue hex less more remove tint color influence",
+    ),
+    (
+        "light_color_tolerance",
+        "Similar background colors",
+        "0–1",
+        "0.25",
+        "Widen the hue match around the selected light color. Nearby shades match softly. Gray targets have no color cast to adjust.",
+        "background color hue tolerance similar range",
+    ),
+)
+
 _SETTINGS = tuple(
     _topic(
         "setting-" + name,
@@ -647,7 +690,45 @@ _WORKFLOW = (
     ),
 )
 
-TOPICS = _INTRO + _COMMANDS + _SETTINGS + _WORKFLOW
+_INSPECTOR = (
+    _topic(
+        "inspector",
+        COMMANDS,
+        "Open the in-game lighting inspector",
+        "scenelight.inspector()",
+        "Shift+F9 also opens it. Select a visible sprite to see every setting, its winning source, and the player master multiplier. All sources lists overridden values too.",
+        "Newly executed rules record their .rpy filename and line. Older saved rules may not have a recorded location. Nested lighting passes and external color grades are included in the diagnostic report.",
+        "Edits are temporary and do not change story rules, saves or persistent preferences. Clear all test edits restores the originals; a new game, load or restart also clears them. Closing the panel keeps test edits active with a visible badge.",
+        "Drag numeric sliders to adjust lighting live, or use Edit for an exact value. Checks highlights observed conflicts and lets you add notes or include a screenshot in the support report.",
+        "Export report saves one scenelight-support ZIP in the game's main folder with readable HTML, settings, sources, build identity, engine logs and samples. A JSON copy remains available for Activity exports. Source artwork, scripts and saves are excluded; a screenshot is optional.",
+        example="$ scenelight.inspector()",
+        placement=STORY,
+        keywords="debug inspect tester hidden settings priority override diagnostic report",
+    ),
+    _topic(
+        "inspect",
+        COMMANDS,
+        "Read effective lighting and its sources",
+        "scenelight.inspect(tag=None)",
+        "Returns a diagnostic snapshot for all visible sprites, or one tag. Includes rules, temporary edits, effective/master strengths, last drawn state, map availability and external color grading. It does not edit the game.",
+        example='$ lighting_report = scenelight.inspect("hero")',
+        placement=STORY,
+        keywords="debug inspect snapshot report effective source actual",
+    ),
+    _topic(
+        "background-color",
+        COMMANDS,
+        "Reduce or increase one background color",
+        "Select a hex color and adjust its influence on sprites.",
+        "light_color accepts #RRGGBB. light_color_amount runs from -1 (neutralize matching light color) through 0 (unchanged) to +1 (stronger color). light_color_tolerance widens the soft hue match. Light luminance is retained; this is separate from exposure or glow.",
+        "Use this per background, or the existing scene, character and image scopes. Preview has the same controls in Calibrate → Background color.",
+        example='init python:\n    scenelight.background("lake", light_color="#4080FF", light_color_amount=-0.5, light_color_tolerance=0.25)',
+        placement=INIT,
+        keywords="background blue hex tint color cast more less",
+    ),
+)
+
+TOPICS = _INTRO + _COMMANDS + _INSPECTOR + _SETTINGS + _WORKFLOW
 
 
 def search_topics(query: str = "", category: str = "All topics") -> tuple[GuideTopic, ...]:

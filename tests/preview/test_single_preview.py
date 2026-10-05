@@ -59,13 +59,20 @@ def _wait_for_sprite(window):
 def test_simple_controls_replace_sprite_keep_glow_and_ignore_stale_results(single_preview):
     window, paths, _errors = single_preview
     buttons = {button.text() for button in window.findChildren(QPushButton)}
-    assert buttons == {
+    assert buttons >= {
         "Open background  Ctrl+O",
         "Open sprite / animation",
         "Calibrate",
         "Save profile",
         "Export config",
         "Export PNG / GIF / video",
+    }
+    assert not buttons & {
+        "Asset library…",
+        "Add character…",
+        "Save scene…",
+        "Export sprite rules",
+        "Logs & report…",
     }
     labels = {label.text() for label in window.findChildren(QLabel)}
     assert {
@@ -103,6 +110,11 @@ def test_drag_keeps_subpercent_coordinates_across_frames_and_slider_changes(sing
     window, paths, _errors = single_preview
     window._load_sprite(paths[0])
     _wait_for_sprite(window)
+    window._open_calibration()
+    assert window._sidebar_tabs.currentIndex() == 1
+    assert QApplication.activeModalWidget() is None
+    window._calibration_editor._controls["exposure_bias"].setValue(-0.35)
+    assert window._view._calibration.exposure_bias == -0.35
     view = window._view
     view.set_placement(0.5032, 0.9113, 0.8057)
     view.placementChanged.emit(view._horizontal, view._baseline, view._character_height)
@@ -149,6 +161,8 @@ def test_preset_and_strength_changes_render_the_same_as_direct_settings(single_p
         _strength, calibration = lighting_mode_preset(name)
         window._strength_slider.setValue(63)
         assert window._calibration == window._view._calibration == calibration
+        assert window._calibration_editor.calibration == calibration
+        assert window._settings_export._profile.calibration == calibration
         assert window._view._strength == 0.63
         frame = window._view.render_rgba((640, 360))
         # An independent GL view starts directly in the requested final state.
@@ -164,3 +178,168 @@ def test_preset_and_strength_changes_render_the_same_as_direct_settings(single_p
         np.testing.assert_array_equal(frame, reference)
     renderer.set_calibration(Calibration())
     renderer.set_strength(1.0)
+
+
+def test_toolbar_save_and_export_open_review_without_writing_or_blocking(single_preview):
+    window, paths, _errors = single_preview
+    profile_path = paths[0].parent / "profile.json"
+    config_path = paths[0].parent / "scenelight.json"
+    window._settings_export.set_destination(profile_path)
+    window._save_calibration_profile()
+    assert window._sidebar_tabs.currentIndex() == 2
+    assert QApplication.activeModalWidget() is None
+    assert not profile_path.exists()
+    window._export_calibration_config()
+    window._settings_export.set_destination(config_path)
+    assert not config_path.exists()
+    window._strength_slider.setValue(78)
+    window._settings_export.write_button.click()
+    import json
+
+    assert json.loads(config_path.read_bytes())["strength"] == 0.78
+    assert not profile_path.exists()
+    window._open_calibration()
+    assert window._sidebar_tabs.currentIndex() == 1
+    assert window._strength_slider.value() == 78
+
+
+def test_adjustments_visible_on_open_and_navigation_stays_accessible(single_preview):
+    from PySide6.QtCore import QPoint
+
+    window, _paths, _errors = single_preview
+    window.resize(1280, 720)
+    assert window._sidebar_tabs.tabText(window._sidebar_tabs.currentIndex()) == "Adjust"
+    editor = window._calibration_editor
+    expected = {
+        "Lighting": "ambient_strength",
+        "Advanced": "key_strength",
+        "Light color": "light_color_amount",
+        "Sprite glow": "glow_strength",
+        "Cast light": "emission_strength",
+    }
+    initial = editor.calibration
+    for name in (*expected, "Color glow"):
+        editor.category_buttons[name].click()
+        QApplication.processEvents()
+        assert editor.category_buttons[name].isChecked()
+        assert sum(button.isChecked() for button in editor.category_buttons.values()) == 1
+        if name in expected:
+            assert editor._controls[expected[name]].isVisible()
+        else:
+            assert editor._color_glow.add_button.isVisible()
+            assert not editor._color_glow.details.isVisible()
+            editor._color_glow.add_button.click()
+            QApplication.processEvents()
+            assert editor._color_glow.details.isVisible()
+            assert editor._color_glow.values["strength"].maximum() == 10
+            editor._color_glow.remove_button.click()
+        assert not editor.scroll.horizontalScrollBar().isVisible()
+        positions = {
+            key: button.mapTo(window, QPoint()) for key, button in editor.category_buttons.items()
+        }
+        editor.scroll.verticalScrollBar().setValue(editor.scroll.verticalScrollBar().maximum())
+        QApplication.processEvents()
+        for key, button in editor.category_buttons.items():
+            assert button.isVisible()
+            assert button.mapTo(window, QPoint()) == positions[key]
+            assert window.rect().contains(button.mapTo(window, button.rect().bottomRight()))
+        assert editor.calibration == initial
+    editor.category_buttons["Sprite glow"].click()
+    QApplication.processEvents()
+    # All the primary glow controls fit without scrolling on a 720p logical window.
+    assert editor.scroll.verticalScrollBar().maximum() == 0
+
+
+def test_glow_controls_drive_live_render_and_review(single_preview, renderer, monkeypatch):
+    import numpy as np
+    from PySide6.QtGui import QColor
+
+    from scenelight.preview.calibration_dialog import QColorDialog
+
+    window, paths, _errors = single_preview
+    window._load_sprite(paths[0])
+    _wait_for_sprite(window)
+    baseline = window._view.render_rgba((640, 360))
+    editor = window._calibration_editor
+    editor.category_buttons["Sprite glow"].click()
+    editor._sliders["glow_strength"].setValue(1000)
+    assert editor.calibration.glow_strength == 10
+    assert editor._controls["glow_strength"].value() == 10
+    editor._controls["glow_strength"].setValue(1.75)
+    assert editor._sliders["glow_strength"].value() == 175
+    editor._sliders["glow_radius"].setValue(65)
+    monkeypatch.setattr(QColorDialog, "getColor", lambda *args: QColor("#22aaff"))
+    editor._color_button.click()
+    editor._glow_mix_slider.setValue(35)
+    editor.category_buttons["Color glow"].click()
+    editor._color_glow.add_button.click()
+    editor._color_glow.values["strength"].setValue(0.6)
+    editor.category_buttons["Cast light"].click()
+    editor._controls["emission_strength"].setValue(0.5)
+    calibration = editor.calibration
+    assert calibration.glow_strength == 1.75
+    assert calibration.glow_radius == 0.65
+    assert calibration.glow_color_mix == 0.35
+    assert calibration.glow_rules[0].strength == 0.6
+    assert calibration.emission_strength == 0.5
+    assert window._view._calibration == window._settings_export._profile.calibration == calibration
+    frame = window._view.render_rgba((640, 360))
+    assert np.abs(frame.astype(float) - baseline).mean() > 1.0
+    renderer.set_sprite(paths[0], window._form_artifacts_by_frame[0])
+    renderer.set_placement(
+        window._view._horizontal, window._view._baseline, window._view._character_height
+    )
+    renderer.set_calibration(calibration)
+    renderer.set_strength(window._view._strength)
+    renderer.set_live_analysis_enabled(True)
+    renderer.set_background_frame(window._view._background_frame)
+    np.testing.assert_array_equal(frame, renderer.render_rgba((640, 360)))
+    renderer.set_calibration(Calibration())
+    renderer.set_strength(1.0)
+
+
+def test_sidebar_wheel_does_not_edit_glow_values(single_preview):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+
+    window, _paths, _errors = single_preview
+    editor = window._calibration_editor
+    editor.category_buttons["Sprite glow"].click()
+    editor._controls["glow_strength"].setValue(3.0)
+    before = editor.calibration
+    for widget in (editor._controls["glow_strength"], editor._sliders["glow_strength"]):
+        widget.setFocus()
+        center = widget.rect().center()
+        event = QWheelEvent(
+            QPointF(center),
+            QPointF(widget.mapToGlobal(center)),
+            QPoint(),
+            QPoint(0, -120),
+            Qt.NoButton,
+            Qt.NoModifier,
+            Qt.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(widget, event)
+        assert editor.calibration == before
+    editor.category_buttons["Advanced"].click()
+    window.resize(1280, 720)
+    QApplication.processEvents()
+    scroll = editor.scroll
+    assert scroll.verticalScrollBar().maximum() > 0
+    center = scroll.viewport().rect().center()
+    QApplication.sendEvent(
+        scroll.viewport(),
+        QWheelEvent(
+            QPointF(center),
+            QPointF(scroll.viewport().mapToGlobal(center)),
+            QPoint(),
+            QPoint(0, -120),
+            Qt.NoButton,
+            Qt.NoModifier,
+            Qt.NoScrollPhase,
+            False,
+        ),
+    )
+    assert scroll.verticalScrollBar().value() > 0
+    assert editor.calibration == before

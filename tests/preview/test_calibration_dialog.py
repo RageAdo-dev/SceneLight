@@ -6,19 +6,19 @@ import pytest
 from scenelight.calibration import Calibration, CalibrationProfile
 
 
-def test_glow_picker_toggle_cancel_and_defaults_preserve_separate_cast_color(monkeypatch):
+def test_glow_picker_toggle_restore_and_defaults_preserve_separate_cast_color(monkeypatch):
     if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QApplication
 
-    from scenelight.preview.calibration_dialog import CalibrationDialog, QColorDialog
+    from scenelight.preview.calibration_dialog import CalibrationEditor, QColorDialog
 
     app = QApplication.instance() or QApplication([])
     initial = Calibration(emission_red=0.8, emission_green=0.25, emission_blue=0.1)
     changes = []
-    dialog = CalibrationDialog(initial, changes.append)
+    dialog = CalibrationEditor(initial, changes.append)
     try:
         assert "Glow is off" in dialog._glow_hint.text()
         dialog._controls["glow_strength"].setValue(10.0)
@@ -57,7 +57,7 @@ def test_glow_picker_toggle_cancel_and_defaults_preserve_separate_cast_color(mon
         assert dialog.calibration == Calibration()
         assert not dialog._custom_glow.isChecked()
         assert "Glow is off" in dialog._glow_hint.text()
-        dialog.reject()
+        dialog._set_calibration(initial)
         assert changes[-1] == initial
     finally:
         dialog.close()

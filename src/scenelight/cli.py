@@ -19,6 +19,7 @@ from .builder import RUNTIME_MANIFEST_VERSION, TRANSPORT_GRID_SIZE, build_projec
 from .calibration import profile_path
 from .capture import (
     CaptureInstanceConflict,
+    CaptureScriptError,
     capture_runtime_assets,
     capture_runtime_review,
     capture_source,
@@ -40,6 +41,7 @@ from .launch_safety import install_native_launcher, snapshot_saves
 from .progress import ProgressStage, copytree_with_progress
 from .project import discover_project
 from .release import release_record
+from .script_cache import preserve_playback_bytecode
 from .sidecar import (
     analysis_cache_root,
     find_native_executable,
@@ -92,10 +94,14 @@ def _parser() -> argparse.ArgumentParser:
         "refresh",
         "unembed",
         "embed-status",
+        "inspector",
     ):
         command = subcommands.add_parser(name)
         command.add_argument("--project", required=True, type=Path)
         command.add_argument("--config", type=Path)
+        if name == "inspector":
+            command.add_argument("--enabled", required=True, choices=("on", "off"))
+            command.add_argument("--installation", required=True, choices=("embedded", "managed"))
         if name == "scan":
             command.add_argument(
                 "--runtime-review",
@@ -172,20 +178,16 @@ def _launch_config(project_root: Path, install: dict[str, object]) -> tuple[Path
     return config, changed
 
 
-def _install_runtime_files(game_root: Path) -> None:
-    shutil.copy2(_runtime_source(), game_root / "scenelight_runtime.rpy")
-    data_root = game_root / "scenelight_runtime"
-    data_root.mkdir(parents=True, exist_ok=True)
-    for name in (
-        "live_gpu",
-        "live_renpy",
-        "live_opencl",
-        "prepared",
-        "prepared_renpy",
-        "shader_stages",
-        "shader_renpy",
-    ):
-        shutil.copy2(_runtime_source().with_name(name + ".py"), data_root / (name + ".txt"))
+def _install_runtime_files(game_root: Path, *, inspector: bool = True) -> None:
+    from .updates import runtime_payload
+
+    for relative, source in runtime_payload(embedded=False, inspector=inspector).items():
+        destination = game_root / Path(relative).relative_to("game")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    if not inspector:
+        for name in ("inspector.rpy", "inspector.rpyc", "inspector.txt"):
+            (game_root / "scenelight_runtime" / name).unlink(missing_ok=True)
 
 
 def _resolve_renpy_executable(project_root: Path, explicit: Path | None) -> Path | None:
@@ -445,7 +447,8 @@ def _capture_without_installed_runtime(game_root: Path) -> Iterator[None]:
 
     _clear_runtime_script_cache(game_root)
     try:
-        yield
+        with preserve_playback_bytecode(game_root):
+            yield
     finally:
         _remove_capture_bootstrap(game_root)
         _clear_runtime_script_cache(game_root)
@@ -518,8 +521,11 @@ def _scan_runtime_review(
         selected_attempt: tuple[Path, bool, str, str | None] | None = None
         review = None
         failures: list[str] = []
+        script_failed_runtimes: set[Path] = set()
         for index, attempt in enumerate(attempts, start=1):
             executable, native_runtime, label, renderer = attempt
+            if executable.resolve() in script_failed_runtimes:
+                continue
             print(f"SceneLight renderer {index}/{len(attempts)}: trying {label}", flush=True)
             try:
                 preflight_runtime(
@@ -539,6 +545,10 @@ def _scan_runtime_review(
                 )
             except CaptureInstanceConflict:
                 raise
+            except CaptureScriptError as error:
+                script_failed_runtimes.add(executable.resolve())
+                failures.append(f"{label}: {error}")
+                continue
             except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
                 failures.append(f"{label}: {error}")
                 continue
@@ -548,6 +558,10 @@ def _scan_runtime_review(
 
     if attempts and selected_attempt is None:
         detail = "\n\n".join(failures)
+        if script_failed_runtimes:
+            raise CaptureScriptError(
+                "Ren'Py could not compile the game scripts with an available runtime.\n\n" + detail
+            )
         raise RuntimeError(
             "SceneLight tried every compatible graphics backend bundled with the game "
             f"and any selected SDK, but none initialized.\n\n{detail}"
@@ -598,6 +612,12 @@ def _write_install_config(
     native_launcher: dict[str, object] | None,
     save_backup: dict[str, object],
 ) -> None:
+    from .developer import _installation_source_state
+    from .project import _load_config
+    from .update_settings import analysis_config_sha256, selection_settings
+    from .updates import runtime_hashes
+
+    runtime_stamps = {}
     payload = {
         "version": 1,
         "scenelight_version": __version__,
@@ -605,6 +625,8 @@ def _write_install_config(
         "source": str(project_root),
         "config": str(config) if config else None,
         "config_sha256": _config_sha256(config),
+        "analysis_config_sha256": analysis_config_sha256(_load_config(project_root, config)),
+        "selection_settings": selection_settings(_load_config(project_root, config)),
         "grid": list(grid),
         "workers": workers,
         "analyzer": analyzer,
@@ -614,6 +636,10 @@ def _write_install_config(
         "playback_runtime_major": renpy_runtime_major(playback_executable),
         "native_launcher": native_launcher,
         "save_backup": save_backup,
+        "source_state": _installation_source_state(project_root),
+        "runtime_files": runtime_hashes(managed_root, verified_out=runtime_stamps),
+        "runtime_file_stamps": runtime_stamps,
+        "inspector_enabled": (managed_root / "game/scenelight_runtime/inspector.rpy").is_file(),
     }
     path = managed_root / ".scenelight_install.json"
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -734,7 +760,12 @@ def _install_managed(
     analyzer: str,
     renpy_sdk: Path | None,
     reuse_embedded_cache: bool = False,
+    include_inspector: bool | None = None,
 ) -> dict[str, object]:
+    if include_inspector is None:
+        from .inspector_install import inspector_enabled
+
+        include_inspector = inspector_enabled(project_root, embedded=reuse_embedded_cache)
     # Finish the read-only compatibility checks before taking a save snapshot
     # or starting expensive background/sprite analysis.
     discover_project(project_root, config)
@@ -780,9 +811,12 @@ def _install_managed(
         runtime_save_directory: str | None = None
         selected_attempt: tuple[Path, bool, str, str | None] | None = None
         preflight_failures: list[str] = []
+        script_failed_runtimes: set[Path] = set()
         if attempts:
             for index, attempt in enumerate(attempts, start=1):
                 executable, native_runtime, label, renderer = attempt
+                if executable.resolve() in script_failed_runtimes:
+                    continue
                 print(f"SceneLight renderer {index}/{len(attempts)}: trying {label}", flush=True)
                 try:
                     runtime_save_directory = preflight_runtime(
@@ -793,6 +827,10 @@ def _install_managed(
                     )
                 except CaptureInstanceConflict:
                     raise
+                except CaptureScriptError as error:
+                    script_failed_runtimes.add(executable.resolve())
+                    preflight_failures.append(f"{label}: {error}")
+                    continue
                 except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
                     preflight_failures.append(f"{label}: {error}")
                     continue
@@ -802,6 +840,11 @@ def _install_managed(
                 break
             if selected_attempt is None:
                 detail = "\n\n".join(preflight_failures)
+                if script_failed_runtimes:
+                    raise CaptureScriptError(
+                        "Ren'Py could not compile the game scripts with an available runtime.\n\n"
+                        + detail
+                    )
                 raise RuntimeError(
                     "SceneLight tried every compatible graphics backend bundled with the game "
                     f"and any selected SDK, but none initialized.\n\n{detail}"
@@ -848,6 +891,8 @@ def _install_managed(
             for capture_index, (executable, native_runtime, label, renderer) in enumerate(
                 ordered_attempts, start=1
             ):
+                if executable.resolve() in script_failed_runtimes:
+                    continue
                 print(
                     f"SceneLight capture {capture_index}/{total_capture_attempts}: trying {label}",
                     flush=True,
@@ -862,6 +907,10 @@ def _install_managed(
                     break
                 except CaptureInstanceConflict:
                     raise
+                except CaptureScriptError as error:
+                    script_failed_runtimes.add(executable.resolve())
+                    failures.append(f"{label}: {error}")
+                    continue
                 except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
                     failures.append(f"{label}: {error}")
                     print(
@@ -871,6 +920,11 @@ def _install_managed(
                     )
             if capture is None:
                 detail = "\n\n".join(failures)
+                if script_failed_runtimes:
+                    raise CaptureScriptError(
+                        "Ren'Py could not compile the game scripts with an available runtime.\n\n"
+                        + detail
+                    )
                 raise RuntimeError(
                     "SceneLight could not resolve this mod's dynamic assets with any compatible "
                     f"Ren'Py runtime.\n\n{detail}"
@@ -892,7 +946,7 @@ def _install_managed(
         prepare_project_movies(discovery)
     preserved_cache = _preserve_analysis_cache(project_root, managed_root)
     with ProgressStage("runtime-setup", item="Installing runtime support and launcher files"):
-        _install_runtime_files(discovery.game_root)
+        _install_runtime_files(discovery.game_root, inspector=include_inspector)
         _remove_capture_bootstrap(discovery.game_root)
         legacy_live_config = discovery.game_root / "scenelight_live.json"
         if legacy_live_config.is_file():
@@ -945,6 +999,15 @@ def _install_managed(
     report_payload = json.loads(result.report_path.read_text(encoding="utf-8"))
     report_payload.update(attach_report)
     result.report_path.write_text(json.dumps(report_payload, indent=2) + "\n", encoding="utf-8")
+    from .developer import _atomic_json
+    from .updates import read_json
+
+    install_record_path = managed_root / ".scenelight_install.json"
+    install_record = read_json(install_record_path)
+    install_record["runtime_files"][result.report_path.relative_to(managed_root).as_posix()] = (
+        hashlib.sha256(result.report_path.read_bytes()).hexdigest()
+    )
+    _atomic_json(install_record_path, install_record)
     return {
         "ok": verification["ok"],
         "project": str(project_root),
@@ -1053,10 +1116,28 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main(argv: list[str] | None = None) -> int:
+    from .updates import operation_lock
+
+    args = _parser().parse_args(argv)
+    if args.command in {"install", "attach", "embed", "refresh", "remove", "unembed", "inspector"}:
+        with operation_lock(args.project):
+            return _dispatch(argv)
+    return _dispatch(argv)
+
+
+def _dispatch(argv: list[str] | None = None) -> int:
     _configure_utf8_output(sys.stdout)
     _configure_utf8_output(sys.stderr)
     args = _parser().parse_args(argv)
     project_root = args.project.expanduser().resolve()
+    if args.command == "inspector":
+        from .inspector_install import set_inspector_enabled
+
+        result = set_inspector_enabled(
+            project_root, args.enabled == "on", embedded=args.installation == "embedded"
+        )
+        print(json.dumps(result, indent=2))
+        return 0
     if args.command == "verify":
         result = _verify(project_root)
         print(json.dumps(result, indent=2))
@@ -1117,6 +1198,15 @@ def _main(argv: list[str] | None = None) -> int:
         return 0 if status.clean else 1
 
     config = _effective_config(project_root, args.config)
+    if args.command in {"refresh", "install"}:
+        from .updates import try_runtime_update
+
+        quick = try_runtime_update(
+            project_root, config=config, grid=args.grid, embedded=args.command == "refresh"
+        )
+        if quick is not None:
+            print(json.dumps(quick, indent=2))
+            return 0
     if args.command in {"attach", "embed"}:
         preflight_embed_destination(project_root)
     elif args.command == "refresh":
@@ -1134,6 +1224,8 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
+    from .inspector_install import inspector_enabled
+
     result = _install_managed(
         project_root,
         config=config,
@@ -1142,9 +1234,12 @@ def _main(argv: list[str] | None = None) -> int:
         analyzer=args.analyzer,
         renpy_sdk=args.renpy_sdk,
         reuse_embedded_cache=args.command == "refresh",
+        include_inspector=inspector_enabled(project_root, embedded=args.command != "install"),
     )
     if args.command in {"attach", "embed"}:
-        embedded = embed_from_managed(project_root, Path(str(result["managed_project"])))
+        embedded = embed_from_managed(
+            project_root, Path(str(result["managed_project"])), consume_managed=True
+        )
         result = {
             **result,
             **embedded,
@@ -1159,7 +1254,10 @@ def _main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "refresh":
         refreshed = refresh_embedded_from_managed(
-            project_root, Path(str(result["managed_project"]))
+            project_root,
+            Path(str(result["managed_project"])),
+            consume_managed=True,
+            preflight_complete=True,
         )
         result = {
             **result,

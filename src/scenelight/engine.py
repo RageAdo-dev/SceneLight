@@ -1351,6 +1351,18 @@ def scene_target_mid(analysis: SceneAnalysis) -> float:
     return float(np.clip(corrected_target, 0.0, 0.58))
 
 
+def _display_referred_exposure(scene_exposure):
+    """Soften automatic brightening of already exposed artwork.
+
+    A bright wall or sky is not a measurement of incident light on the sprite.
+    Preserve the dark-scene response and the slope at unity, but limit the
+    automatic positive gain to 1.25. Explicit exposure bias remains unrestricted.
+    Keep this response in rendering, not in cached scene measurements.
+    """
+    boost = np.maximum(scene_exposure - 1.0, 0.0)
+    return np.minimum(scene_exposure, 1.0) + boost / (1.0 + 4.0 * boost)
+
+
 def _material_light_response(linear_luma: np.ndarray) -> np.ndarray:
     """Estimate how visibly a painted material should reflect generated light.
 
@@ -1453,6 +1465,7 @@ def relight_sprite(
     # be driven to the value of the brightest windows or sky behind them.
     target_mid = scene_target_mid(analysis)
     auto_exposure = np.clip(target_mid / REFERENCE_ART_MID, 0.0001, 2.15)
+    auto_exposure = _display_referred_exposure(auto_exposure)
     exposure = (auto_exposure**settings.auto_strength) * (2.0**settings.exposure_bias)
 
     ambient_chroma = _apply_warmth(
@@ -1791,15 +1804,20 @@ def relight_sprite(
     # Scene saturation adaptation in linear-light opponent distance.
     gray = _luminance(lit)[..., None]
     target_sat_scale = np.clip(0.72 + analysis.local_saturation * 1.05, 0.68, 1.3)
+    # Neutral surroundings provide little evidence about material saturation.
+    # White walls/snow must not act as an automatic desaturation filter.
+    if target_sat_scale < 1.0:
+        evidence = float(_smoothstep(analysis.local_saturation, 0.04, 0.16))
+        target_sat_scale = 1.0 + (target_sat_scale - 1.0) * evidence
     sat_scale = 1.0 + (target_sat_scale - 1.0) * settings.saturation_match * settings.auto_strength
     lit = gray + (lit - gray) * sat_scale
 
-    # A filmic shoulder keeps pale skin, white shirts, and hair shine from
-    # clipping when a bright photo background drives exposure upward. It only
-    # acts above middle gray, preserving line art and low-light separation.
+    # Protect newly generated highlights, not brightness already painted into
+    # display-referred art. A fixed shoulder flattened existing white fabric
+    # even when scene lighting only darkened it. Match the production shader.
     if settings.highlight_rolloff > 0:
         lit_luma = _luminance(lit)
-        shoulder_start = 0.46
+        shoulder_start = np.maximum(0.46, original_luma)
         excess = np.maximum(lit_luma - shoulder_start, 0.0)
         compressed = shoulder_start + excess / (1.0 + excess * (1.7 * settings.highlight_rolloff))
         compression_ratio = np.where(
@@ -1810,9 +1828,11 @@ def relight_sprite(
         # (purple hair and red bows are common DDLC examples). A hue-preserving
         # gamut shoulder scales RGB together and asymptotically approaches 1.0.
         peak = np.max(lit, axis=2)
-        peak_start = 0.82
+        peak_start = np.maximum(0.82, np.minimum(np.max(linear, axis=2), 1.0))
         peak_excess = np.maximum(peak - peak_start, 0.0)
-        fully_compressed_peak = peak_start + peak_excess / (1.0 + peak_excess / (1.0 - peak_start))
+        fully_compressed_peak = peak_start + peak_excess / (
+            1.0 + peak_excess / np.maximum(1.0 - peak_start, 0.0001)
+        )
         gamut_strength = float(np.clip(settings.highlight_rolloff / 1.2, 0.0, 1.0))
         target_peak = peak + (fully_compressed_peak - peak) * gamut_strength
         lit *= np.where(peak > peak_start, target_peak / (peak + EPSILON), 1.0)[..., None]

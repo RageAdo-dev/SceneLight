@@ -63,6 +63,9 @@ def test_support_export_redacts_credentials_escapes_html_and_never_collects_asse
     game = tmp_path / "game"
     game.mkdir()
     (game / "log.txt").write_text("API_KEY=sensitive\nrenderer: gl2")
+    (game / "scenelight-inspector.json").write_text(
+        json.dumps({"effective_strength": 0.39, "origins": {"strength": "Character: hero"}})
+    )
     (game / "art.png").write_bytes(b"private artwork")
     (game / "persistent").write_text("private save")
     destination = tmp_path / "report.zip"
@@ -70,6 +73,9 @@ def test_support_export_redacts_credentials_escapes_html_and_never_collects_asse
     with zipfile.ZipFile(destination) as archive:
         assert "report.html" in archive.namelist()
         assert "game/log.txt" in archive.namelist()
+        assert (
+            json.loads(archive.read("game/scenelight-inspector.json"))["effective_strength"] == 0.39
+        )
         assert not any(name.endswith(("art.png", "persistent")) for name in archive.namelist())
         text = "\n".join(archive.read(name).decode() for name in archive.namelist())
         assert "abc123" not in text and "sensitive" not in text and "name:pass@" not in text
@@ -94,3 +100,16 @@ def test_progress_is_compact_but_full_console_remains_available(tmp_path):
     session.attach_text("same-worker", "first failure")
     session.attach_text("same-worker", "second failure")
     assert len(list((session.path / "evidence").glob("*.txt"))) == 2
+
+
+def test_large_inspector_json_is_exported_whole_not_a_broken_tail(tmp_path, monkeypatch):
+    session = diagnostics.Session("test", root=tmp_path / "logs")
+    game = tmp_path / "project"
+    game.mkdir()
+    content = {"recording": [{"details": "x" * 5000}]}
+    (game / "scenelight-inspector.json").write_text(json.dumps(content))
+    monkeypatch.setattr(diagnostics, "SEGMENT_BYTES", 100)
+    destination = tmp_path / "report.zip"
+    diagnostics.export_report(session.path, destination, game_root=game)
+    with zipfile.ZipFile(destination) as archive:
+        assert json.loads(archive.read("game/scenelight-inspector.json")) == content

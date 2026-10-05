@@ -22,7 +22,8 @@ def test_default_uniforms_reproduce_validated_constants() -> None:
     assert blocks[1] == (0.72, 0.58, 1.2, 0.82)
     assert blocks[2] == (0.58, 0.34, 0.48, 0.32)
     assert blocks[3] == (0.24, 0.64, 0.42, 0.52)
-    assert blocks[4] == (0.62, 0.0, 1.0, 0.0)
+    assert blocks[4] == (0.62, 0.0, 1.0, 0.25)
+    assert blocks[8] == (0.25, 0.50, 1.0, 0.0)
 
 
 def test_individual_light_colors_is_bounded_and_uses_spare_uniform_slot() -> None:
@@ -30,7 +31,7 @@ def test_individual_light_colors_is_bounded_and_uses_spare_uniform_slot() -> Non
         0.62,
         2.0,
         1.0,
-        0.0,
+        0.25,
     )
 
 
@@ -39,7 +40,7 @@ def test_adaptive_light_colors_is_bounded_and_uses_spare_uniform_slot() -> None:
         0.62,
         0.0,
         2.0,
-        0.0,
+        0.25,
     )
 
 

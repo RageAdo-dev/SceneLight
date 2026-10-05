@@ -393,11 +393,25 @@ def export_report(
         for name in (
             "scenelight-runtime.jsonl",
             "scenelight-runtime.jsonl.1",
+            "scenelight-inspector.json",
+            "errors.txt",
             "traceback.txt",
             "log.txt",
         ):
             path = game_root / name
             if path.is_file():
+                if name == "scenelight-inspector.json":
+                    if path.stat().st_size <= 32 * 1024 * 1024:
+                        files["game/" + name] = redact(
+                            path.read_text(encoding="utf-8", errors="replace")
+                        )
+                    else:
+                        files["game/" + name] = json.dumps(
+                            {
+                                "omitted": "Inspector report exceeds 32 MiB; send the in-game support ZIP instead."
+                            }
+                        )
+                    continue
                 with path.open("rb") as stream:
                     size = path.stat().st_size
                     stream.seek(max(0, size - SEGMENT_BYTES))

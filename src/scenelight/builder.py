@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import zipfile
 from colorsys import rgb_to_hsv
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
@@ -1005,6 +1006,40 @@ def _transport_cache_path(
     return cache_root / f"{_safe_stem(scene_name)}_{digest.hexdigest()[:16]}.npz"
 
 
+def _cached_scene_fields(source: Path, transport_cache: Path):
+    """Reuse all scene-only work, with the same source/algorithm digest as transport."""
+    cache = transport_cache.with_name(transport_cache.stem + "_fields_v1.npz")
+    try:
+        with np.load(cache, allow_pickle=False) as saved:
+            arrays = tuple(saved[name] for name in ("irradiance", "emitter", "wrap"))
+            metadata = json.loads(saved["metadata"].tobytes().decode("utf-8"))
+        shapes = ((TILE_SIZE[1], TILE_SIZE[0], 4),) * 2 + ((TILE_SIZE[1], TILE_SIZE[0], 3),)
+        if not isinstance(metadata, dict) or any(
+            array.shape != shape or array.dtype != np.uint8
+            for array, shape in zip(arrays, shapes, strict=True)
+        ):
+            raise ValueError("Invalid scene field cache")
+        return (*arrays, metadata, True)
+    except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
+        pass
+    irradiance, emitter, metadata = _scene_maps(source)
+    wrap = _wrap_map(source)
+    temporary = cache.with_suffix(".npz.tmp")
+    try:
+        with temporary.open("wb") as stream:
+            np.savez_compressed(
+                stream,
+                irradiance=irradiance,
+                emitter=emitter,
+                wrap=wrap,
+                metadata=np.frombuffer(json.dumps(metadata).encode("utf-8"), dtype=np.uint8),
+            )
+        os.replace(temporary, cache)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return irradiance, emitter, wrap, metadata, False
+
+
 def _form_payload(
     fallback: dict[str, str],
     entries: dict[str, object],
@@ -1435,6 +1470,12 @@ def _build_form_maps(
 
     with ProgressStage("form-index", item="Writing the completed sprite-map index"):
         payload = _form_payload(fallback, entries, skipped)
+        payload["cache"] = {
+            "reused": cached_count,
+            "unique_analyzed": len(pending),
+            "duplicates": duplicate_count,
+            "skipped": len(skipped),
+        }
         _write_json_atomic(manifest_path, payload)
     return payload
 
@@ -1650,24 +1691,30 @@ def build_project(
 
     def render_scene_fields(
         scene_name: str,
-    ) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
+    ):
         source_path = discovery.scenes[scene_name]
-        irradiance, emitter, metadata = _scene_maps(source_path)
-        return scene_name, irradiance, emitter, _wrap_map(source_path), metadata
+        return (scene_name, *_cached_scene_fields(source_path, cache_paths[scene_name]))
 
     scene_fields: dict[
         str,
         tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, object]],
     ] = {}
     print(f"scene 0/{len(scene_names)}: preparing", flush=True)
+    cached_scene_fields = 0
     with ThreadPoolExecutor(max_workers=max(1, min(worker_count, len(scene_names)))) as executor:
         futures = {
             executor.submit(render_scene_fields, scene_name): scene_name
             for scene_name in scene_names
         }
         for future in as_completed(futures):
-            scene_name, irradiance, emitter, wrap, metadata = future.result()
+            scene_name, irradiance, emitter, wrap, metadata, reused = future.result()
+            cached_scene_fields += int(reused)
             scene_fields[scene_name] = (irradiance, emitter, wrap, metadata)
+    print(
+        f"SceneLight background cache: {cached_scene_fields}/{len(scene_names)} reused; "
+        f"{len(scene_names) - cached_scene_fields} analyzed",
+        flush=True,
+    )
 
     scene_manifest: dict[str, dict[str, object]] = {}
     for tile_index, scene_name in enumerate(scene_names, start=1):
@@ -1777,6 +1824,13 @@ def build_project(
         "analysis_backend": resolved_backend,
         "scene_count": len(scene_manifest),
         "sprite_count": len(forms["sprites"]),
+        "sprite_cache": forms.get("cache", {}),
+        "background_cache": {
+            "fields_reused": cached_scene_fields,
+            "fields_analyzed": len(scene_names) - cached_scene_fields,
+            "transport_reused": len(scene_names) - len(missing_transport),
+            "transport_analyzed": len(missing_transport),
+        },
         "character_tags": discovery.character_tags,
         "unsupported": discovery.unsupported,
         "skipped_sprites": forms.get("skipped", []),

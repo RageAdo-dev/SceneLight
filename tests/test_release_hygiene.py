@@ -383,7 +383,7 @@ def test_optional_effects_are_modular_post_relight_gpu_branches() -> None:
     runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
         encoding="utf-8"
     )
-    shoulder = runtime.index("float peak_excess = max(peak - 0.82")
+    shoulder = runtime.index("float peak_excess = max(peak - peak_start")
     optional = runtime.index("if (u_sc_rain_data.x > 0.0001")
     output = runtime.index("gl_FragColor = vec4(output_srgb * output_alpha, output_alpha)")
     assert shoulder < optional < output

@@ -95,6 +95,11 @@ init -50 python:
         "shadow_strength": 0.62,
         "individual_light_colors": 0.0,
         "adaptive_light_colors": 1.0,
+        "light_color_red": 0.25,
+        "light_color_green": 0.50,
+        "light_color_blue": 1.0,
+        "light_color_amount": 0.0,
+        "light_color_tolerance": 0.25,
         "glow_strength": 0.0,
         "glow_radius": 1.0,
         "emission_strength": 0.0,
@@ -255,6 +260,14 @@ init -50 python:
 
     def _scenelight_control_values(settings):
         normalized = {}
+        if "light_color" in settings:
+            color = settings["light_color"]
+            if not isinstance(color, _SCENELIGHT_STRING_TYPES) or len(color) != 7 or not color.startswith("#"):
+                raise ValueError("light_color must be a hex color such as #4080FF")
+            try:
+                channels = [int(color[index:index + 2], 16) / 255.0 for index in (1, 3, 5)]
+            except ValueError:
+                raise ValueError("light_color must be a hex color such as #4080FF")
         raw_mode = settings.get("light_mode")
         if raw_mode is not None:
             mode = str(raw_mode).strip().lower().replace("-", "_")
@@ -264,9 +277,11 @@ init -50 python:
                     "SceneLight light_mode must be 'physical', 'cinematic', or 'separate'"
                 )
             normalized.update(mode_values)
+        if "light_color" in settings:
+            normalized.update(zip(("light_color_red", "light_color_green", "light_color_blue"), channels))
         for raw_name, raw_value in settings.items():
             name = _SCENELIGHT_CONTROL_ALIASES.get(str(raw_name), str(raw_name))
-            if name == "light_mode":
+            if name in ("light_mode", "light_color"):
                 continue
             if name not in _SCENELIGHT_CONTROL_KEYS:
                 raise ValueError("Unknown SceneLight lighting setting: %s" % raw_name)
@@ -292,9 +307,11 @@ init -50 python:
                 value = max(0.0, min(value, 2.0))
             elif name == "exposure_bias":
                 value = max(-4.0, min(value, 4.0))
+            elif name == "light_color_amount":
+                value = max(-1.0, min(value, 1.0))
             elif name == "glow_strength":
                 value = max(0.0, min(value, 10.0))
-            elif name in ("glow_red", "glow_green", "glow_blue", "glow_color_mix"):
+            elif name in ("glow_red", "glow_green", "glow_blue", "glow_color_mix", "light_color_red", "light_color_green", "light_color_blue", "light_color_tolerance"):
                 value = max(0.0, min(value, 1.0))
             else:
                 value = max(0.0, min(value, 2.0))
@@ -309,15 +326,37 @@ init -50 python:
         else:
             key = _scenelight_control_name(name, scope[:-1])
             state.setdefault(scope, {}).setdefault(key, {}).update(values)
+        # Keep the authored call site with the rollback-aware rule, so the
+        # inspector can locate a hidden override in the mod's actual script.
+        location = None
+        getter = getattr(renpy, "get_filename_line", None)
+        if getter is not None:
+            try:
+                filename, line = getter()
+                if filename:
+                    location = {"file": filename, "line": int(line or 0)}
+            except (AttributeError, TypeError, ValueError):
+                pass
+        if location is not None or "call_sites" in state:
+            sites = state.setdefault("call_sites", {}).setdefault(scope, {})
+            if scope not in ("defaults", "scene"):
+                sites = sites.setdefault(key, {})
+            for setting in values:
+                if location is not None:
+                    sites[setting] = dict(location)
+                else:
+                    sites.pop(setting, None)
         _scenelight_control_assign(state)
 
     def _scenelight_control_clear(scope, name=None):
         state = copy.deepcopy(_scenelight_control_current_state())
         if scope in ("defaults", "scene"):
             state[scope] = {}
+            state.get("call_sites", {}).pop(scope, None)
         else:
             key = _scenelight_control_name(name, scope[:-1])
             state.setdefault(scope, {}).pop(key, None)
+            state.get("call_sites", {}).get(scope, {}).pop(key, None)
         _scenelight_control_assign(state)
 
     def _scenelight_control_snapshot(background_key, tag, image_name):
@@ -356,7 +395,20 @@ init -50 python:
         # reusable character or image rule authored at a narrower scope.
         if isinstance(scene_layer, dict) and scene_layer.get("enabled") is False:
             result["enabled"] = False
+        inspector = getattr(getattr(renpy, "display", None), "_scenelight_inspector", None)
+        if inspector is not None:
+            result = inspector.apply(background_key, character_key, image_key, result)
         return result
+
+    def _scenelight_master_enabled():
+        session = getattr(getattr(renpy, "display", None), "_scenelight_inspector", None)
+        value = bool(getattr(persistent, "scenelight_enabled", True))
+        return bool(session.master.get("enabled", value)) if session is not None else value
+
+    def _scenelight_master_strength():
+        session = getattr(getattr(renpy, "display", None), "_scenelight_inspector", None)
+        value = float(getattr(persistent, "scenelight_strength", 1.0))
+        return float(session.master.get("strength", value)) if session is not None else value
 
     class _SceneLightAPI(object):
         """Rollback-safe authored lighting controls for Ren'Py scripts."""
@@ -417,6 +469,15 @@ init -50 python:
 
         def state(self):
             return copy.deepcopy(_scenelight_control_current_state())
+
+        def inspect(self, tag=None):
+            helper = globals().get("_scenelight_inspect")
+            return helper(tag) if helper is not None else {}
+
+        def inspector(self):
+            helper = globals().get("_scenelight_open_inspector")
+            if helper is not None:
+                helper()
 
     scenelight = _SceneLightAPI()
 
@@ -1167,10 +1228,11 @@ init -50 python:
             (bounded("contrast_match"), bounded("saturation_match"), bounded("highlight_rolloff"), bounded("key_strength")),
             (bounded("ray_shadow_strength"), bounded("ambient_occlusion"), bounded("probe_strength"), bounded("bounce_strength")),
             (bounded("specular_strength"), bounded("rim_strength"), bounded("wrap_strength"), bounded("grain_match")),
-            (bounded("shadow_strength"), bounded("individual_light_colors"), bounded("adaptive_light_colors"), 0.0),
+            (bounded("shadow_strength"), bounded("individual_light_colors"), bounded("adaptive_light_colors"), bounded("light_color_tolerance", 0.0, 1.0)),
             (bounded("glow_strength", 0.0, 10.0), bounded("glow_radius"), bounded("emission_strength"), bounded("emission_radius")),
             (bounded("emission_red"), bounded("emission_green"), bounded("emission_blue"), 0.0),
             (bounded("glow_red", 0.0, 1.0), bounded("glow_green", 0.0, 1.0), bounded("glow_blue", 0.0, 1.0), bounded("glow_color_mix", 0.0, 1.0)),
+            (bounded("light_color_red", 0.0, 1.0), bounded("light_color_green", 0.0, 1.0), bounded("light_color_blue", 0.0, 1.0), bounded("light_color_amount", -1.0, 1.0)),
         )
 
     def _scenelight_emission_controls(scene_key, tag, controls):
@@ -1206,14 +1268,14 @@ init -50 python:
     def _scenelight_sprite_emitters(receiver_tag):
         """Resolve visible emitters from the scene, independent of draw order."""
         global _SCENELIGHT_MEASURING_EMITTERS
-        if _SCENELIGHT_MEASURING_EMITTERS or not getattr(persistent, "scenelight_enabled", True):
+        if _SCENELIGHT_MEASURING_EMITTERS or not _scenelight_master_enabled():
             return ()
         try:
             entries = renpy.game.context().scene_lists.layers.get("master", ())
         except Exception:
             return ()
         scene_key, scene = _scenelight_live_scene_entry()
-        master = max(0.0, float(getattr(persistent, "scenelight_strength", 1.0)))
+        master = max(0.0, _scenelight_master_strength())
         lights = []
         for entry in entries:
             tag = getattr(entry, "tag", None)
@@ -1722,7 +1784,7 @@ init -50 python:
         if (
             not transition
             or paired is not None
-            or not getattr(persistent, "scenelight_enabled", True)
+            or not _scenelight_master_enabled()
         ):
             return transition
 
@@ -2089,6 +2151,7 @@ init -50 python:
             uniform vec4 u_sc_calibration2;
             uniform vec4 u_sc_calibration3;
             uniform vec4 u_sc_calibration4;
+            uniform vec4 u_sc_calibration8;
             uniform vec2 u_sc_glow_data;
             uniform vec4 u_sc_glow_color;
             uniform float u_sc_screen_aspect;
@@ -2280,6 +2343,27 @@ init -50 python:
             vec3 scenelight_unit_energy(vec3 chroma) {
                 float energy = dot(chroma, vec3(0.2126, 0.7152, 0.0722));
                 return clamp(chroma / max(energy, 0.001), vec3(0.45), vec3(2.4));
+            }
+
+            // Adjust incident light colors, never select/repaint artwork pixels.
+            // Each independent light contribution passes through this once.
+            vec3 scenelight_adjust_light_color(vec3 color, vec4 adjustment, float tolerance) {
+                if (abs(adjustment.a) < 0.000001) return color;
+                vec3 weights = vec3(0.2126, 0.7152, 0.0722);
+                float energy = dot(color, weights);
+                vec3 target = scenelight_srgb_to_linear(adjustment.rgb);
+                vec3 direction = color - vec3(energy);
+                vec3 target_direction = target - vec3(dot(target, weights));
+                float magnitude = length(direction);
+                float target_magnitude = length(target_direction);
+                if (energy < 0.000001 || magnitude < 0.000001 || target_magnitude < 0.000001) return color;
+                float distance = sqrt(max(0.0, 0.5 * (1.0 - clamp(
+                    dot(direction / magnitude, target_direction / target_magnitude), -1.0, 1.0))));
+                float match_color = 1.0 - smoothstep(tolerance, tolerance + 0.10, distance);
+                match_color *= smoothstep(0.015, 0.08, magnitude / max(energy, 0.001));
+                vec3 adjusted = max(vec3(0.0), vec3(energy)
+                    + direction * (1.0 + adjustment.a * match_color));
+                return adjusted * (energy / max(dot(adjusted, weights), 0.000001));
             }
 
             float scenelight_fx_hash(vec2 value) {
@@ -3048,6 +3132,12 @@ init -50 python:
                 + dot(sc_screen_dependency, vec2(1.0))
                 + dot(sc_transport_dependency, vec4(1.0));
             float scene_exposure = clamp(target_mid / u_sc_reference_mid, 0.0001, 2.15);
+            // Source art is already exposed. Bright walls/sky should not nearly
+            // double it. Preserve dark-scene gain and the slope at unity; only
+            // automatic positive gain has a shoulder. Authored bias stays free.
+            float sc_exposure_boost = max(scene_exposure - 1.0, 0.0);
+            scene_exposure = min(scene_exposure, 1.0)
+                + sc_exposure_boost / (1.0 + 4.0 * sc_exposure_boost);
             float auto_amount = u_sc_calibration0.x * u_sc_strength;
             // A Ren'Py matrixcolor outside this displayable is authored final
             // grading, not unlit material. Keep generated form and direction,
@@ -3372,7 +3462,12 @@ init -50 python:
                     sc_separated_source_mix
                 );
             }
-            vec3 lit = base * input_exposure * u_sc_calibration0.z
+            // Apply after physical color guards and source classification so a
+            // stronger artistic cast cannot accidentally trigger their clamps.
+            ambient_tint = scenelight_adjust_light_color(ambient_tint, u_sc_calibration8, u_sc_calibration4.w);
+            source_tint = scenelight_adjust_light_color(source_tint, u_sc_calibration8, u_sc_calibration4.w);
+            float sc_adjustment_strength = clamp(u_sc_strength, 0.0, 1.0);
+            vec3 lit = base * input_exposure * mix(1.0, u_sc_calibration0.z, sc_adjustment_strength)
                 * ambient_tint * source_tint * form_light * (1.0 - occlusion);
 
             // Colored shadow transport is independent from source tint. It
@@ -3386,6 +3481,7 @@ init -50 python:
                 clamp(shadow_chroma, vec3(0.55), vec3(1.75)),
                 sc_environment_adaptation
             );
+            sc_shadow_tint = scenelight_adjust_light_color(sc_shadow_tint, u_sc_calibration8, u_sc_calibration4.w);
             lit *= mix(vec3(1.0), sc_shadow_tint, shadow_mix);
 
             // The exact eight directional probes measured by the CPU scene
@@ -3449,6 +3545,7 @@ init -50 python:
             );
             vec3 probe_tint = probe_rgb / max(probe_weight, 0.001);
             probe_tint = scenelight_unit_energy(probe_tint);
+            probe_tint = scenelight_adjust_light_color(probe_tint, u_sc_calibration8, u_sc_calibration4.w);
             probe_tint = mix(vec3(1.0), probe_tint, sc_environment_adaptation);
             float probe_mix = clamp(u_sc_calibration2.z * 0.16 * (probe_weight / 4.0), 0.0, 0.22) * u_sc_strength;
             lit *= mix(vec3(1.0), clamp(probe_tint, vec3(0.58), vec3(1.9)), probe_mix);
@@ -3463,6 +3560,7 @@ init -50 python:
             float bounce = (0.24 * lower_body + 0.76 * downward_facing)
                 * u_sc_calibration2.w * 0.16 * u_sc_strength;
             vec3 ground_chroma = clamp(ground_rgb / max(ground_energy, 0.001), vec3(0.52), vec3(2.2));
+            ground_chroma = scenelight_adjust_light_color(ground_chroma, u_sc_calibration8, u_sc_calibration4.w);
             ground_chroma = mix(vec3(1.0), ground_chroma, sc_environment_adaptation);
             lit += base * input_exposure * ground_chroma * bounce;
 
@@ -3490,6 +3588,7 @@ init -50 python:
             // otherwise flat painted regions. They remain useful for diffuse
             // form, but may create a sharp fake specular band unless the source
             // art has nearby structure capable of receiving that highlight.
+            specular_field = scenelight_adjust_light_color(specular_field, u_sc_calibration8, u_sc_calibration4.w);
             lit += specular_field * specular_material * u_sc_calibration3.x * 0.13
                 * form_detail_visibility * u_sc_strength * exposure;
 
@@ -3515,6 +3614,7 @@ init -50 python:
                 clamp(sc_light0_color.rgb, vec3(0.55), vec3(2.2)),
                 sc_environment_adaptation
             );
+            sc_rim_chroma = scenelight_adjust_light_color(sc_rim_chroma, u_sc_calibration8, u_sc_calibration4.w);
             lit += sc_rim_chroma * rim * 0.52 * exposure;
 
             // In creative mode, secondary lights also receive a colored edge
@@ -3545,6 +3645,7 @@ init -50 python:
                     * u_sc_calibration3.y * confidence
                     * (0.12 + 0.88 * material_response)
                     * sc_individual_light_colors;
+                sc_multi_rim_color = scenelight_adjust_light_color(sc_multi_rim_color, u_sc_calibration8, u_sc_calibration4.w);
                 lit += clamp(sc_multi_rim_color, vec3(0.34), vec3(2.85))
                     * sc_multi_rim * 0.24 * exposure;
             }
@@ -3556,6 +3657,7 @@ init -50 python:
             vec3 environment_wrap = scenelight_srgb_to_linear(
                 scenelight_wrap_at(v_sc_screen)
             );
+            environment_wrap = scenelight_adjust_light_color(environment_wrap, u_sc_calibration8, u_sc_calibration4.w);
             float sc_wrap_luma = dot(environment_wrap, vec3(0.2126, 0.7152, 0.0722));
             environment_wrap = mix(
                 vec3(sc_wrap_luma),
@@ -3610,6 +3712,12 @@ init -50 python:
             float lit_luma = dot(lit, vec3(0.2126, 0.7152, 0.0722));
             vec3 lit_gray = vec3(lit_luma);
             float target_sat_scale = clamp(0.72 + local_saturation * 1.05, 0.68, 1.30);
+            // An almost colorless environment does not imply colorless paint.
+            // Fade out desaturation when the scene has no chromatic evidence.
+            if (target_sat_scale < 1.0) {
+                target_sat_scale = 1.0 + (target_sat_scale - 1.0)
+                    * smoothstep(0.04, 0.16, local_saturation);
+            }
             float sat_scale = 1.0 + (target_sat_scale - 1.0)
                 * u_sc_calibration1.y * auto_amount * sc_environment_adaptation;
             lit = lit_gray + (lit - lit_gray) * sat_scale;
@@ -3622,22 +3730,29 @@ init -50 python:
                 + scenelight_sprite_light(u_sc_sprite_light3_data, u_sc_sprite_light3_color, normal, u_sc_screen_aspect);
             lit += base * sprite_emission * u_sc_strength;
 
-            // Match the desktop filmic shoulder exactly. It is applied after
-            // contrast and saturation, without re-injecting the source art.
+            // Compress new illumination above the painted pixel's own level.
+            // Re-tonemapping an already exposed white shirt collapses its
+            // painted folds even when lighting only darkens it. The source
+            // sets the shoulder's start, never the scene exposure or output.
             float generated_luma = dot(lit, vec3(0.2126, 0.7152, 0.0722));
-            float shoulder_excess = max(generated_luma - 0.46, 0.0);
-            float shoulder_luma = 0.46 + shoulder_excess / (
-                1.0 + shoulder_excess * (1.7 * u_sc_calibration1.z)
+            float sc_highlight_protection = u_sc_calibration1.z * sc_adjustment_strength;
+            float shoulder_start = max(0.46, base_luma);
+            float shoulder_excess = max(generated_luma - shoulder_start, 0.0);
+            float shoulder_luma = shoulder_start + shoulder_excess / (
+                1.0 + shoulder_excess * (1.7 * sc_highlight_protection)
             );
             lit *= shoulder_luma / max(generated_luma, shoulder_luma);
             float peak = max(lit.r, max(lit.g, lit.b));
-            float peak_excess = max(peak - 0.82, 0.0);
-            float compressed_peak = 0.82 + peak_excess / (1.0 + peak_excess / 0.18);
-            float gamut_strength = clamp(u_sc_calibration1.z / 1.2, 0.0, 1.0);
+            float peak_start = max(0.82, min(max(base.r, max(base.g, base.b)), 1.0));
+            float peak_excess = max(peak - peak_start, 0.0);
+            float compressed_peak = peak_start + peak_excess / (
+                1.0 + peak_excess / max(1.0 - peak_start, 0.0001)
+            );
+            float gamut_strength = clamp(sc_highlight_protection / 1.2, 0.0, 1.0);
             lit *= mix(
                 1.0,
                 compressed_peak / max(peak, compressed_peak),
-                step(0.82, peak) * gamut_strength
+                step(peak_start, peak) * gamut_strength
             );
 
             // Optional effects are applied only after the approved physical
@@ -3697,7 +3812,7 @@ init -50 python:
                 float post_luma = dot(lit, vec3(0.2126, 0.7152, 0.0722));
                 float grain_weight = clamp(1.0 - abs(post_luma - 0.35) * 1.8, 0.24, 1.0);
                 lit += vec3(
-                    form_noise * sc_live_grain * u_sc_calibration3.w * 0.018 * grain_weight
+                    form_noise * sc_live_grain * u_sc_calibration3.w * 0.018 * grain_weight * sc_adjustment_strength
                 );
             }
 
@@ -4035,7 +4150,7 @@ init -50 python:
                 self.form_key,
             )
             controls = _scenelight_emission_controls(scene_key, self.image_name[0], controls)
-            enabled = bool(getattr(persistent, "scenelight_enabled", True)) and bool(
+            enabled = _scenelight_master_enabled() and bool(
                 controls["enabled"]
             )
             authored_strength = (
@@ -4043,9 +4158,7 @@ init -50 python:
                 if controls.get("strength_override")
                 else SCENELIGHT_PROFILE_STRENGTH
             )
-            strength = float(
-                getattr(persistent, "scenelight_strength", 1.0)
-            ) * authored_strength
+            strength = _scenelight_master_strength() * authored_strength
             effects = _scenelight_fx_snapshot(self.image_name[0])
             effect_time = float(renpy.get_game_runtime())
             return scene, enabled, strength, effects, effect_time, controls
@@ -4233,7 +4346,7 @@ init -50 python:
             # otherwise unrecognized scenes, while ordinary lighting still
             # requires a valid SceneLight scene record.
             rules = _scenelight_color_glow_rules(scene, controls) if enabled else ()
-            master = max(0.0, float(getattr(persistent, "scenelight_strength", 1.0)))
+            master = max(0.0, _scenelight_master_strength())
             if not scene:
                 _receive_covered, glow_covered = self._sc_emission_coverage()
                 source = _scenelight_color_glow_tree(child_render, original=True) if rules and not glow_covered else child_render
@@ -4373,7 +4486,7 @@ init -50 python:
             result.add_uniform("u_sc_compare_mode", 0.0)
             glow_block = _scenelight_calibration_blocks(scene, controls.get("calibration", {}))[5]
             result.add_uniform("u_sc_glow_data", (
-                glow_block[0] * float(getattr(persistent, "scenelight_strength", 1.0))
+                glow_block[0] * _scenelight_master_strength()
                 if enabled and not glow_covered else 0.0,
                 glow_block[1],
             ))

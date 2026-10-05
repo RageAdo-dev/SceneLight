@@ -6,20 +6,20 @@ import pytest
 from scenelight.calibration import Calibration, ColorGlowRule
 
 
-def test_color_rules_edit_independently_and_cancel_restores_all_settings(monkeypatch):
+def test_color_rules_edit_independently_and_restore_all_settings(monkeypatch):
     if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QApplication
 
-    from scenelight.preview.calibration_dialog import CalibrationDialog
+    from scenelight.preview.calibration_dialog import CalibrationEditor
     from scenelight.preview.color_glow_ui import QColorDialog
 
     app = QApplication.instance() or QApplication([])
     initial = Calibration(exposure_bias=-0.4, glow_strength=0.3, glow_color_mix=0.25)
     changes = []
-    dialog = CalibrationDialog(initial, changes.append)
+    dialog = CalibrationEditor(initial, changes.append)
     try:
         editor = dialog._color_glow
         assert not editor.rules
@@ -51,7 +51,7 @@ def test_color_rules_edit_independently_and_cancel_restores_all_settings(monkeyp
         editor.remove_button.click()
         assert dialog.calibration == initial
         editor.add_button.click()
-        dialog.reject()
+        dialog._set_calibration(initial)
         assert changes[-1] == initial
     finally:
         dialog.close()

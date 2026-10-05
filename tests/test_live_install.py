@@ -15,10 +15,20 @@ from scenelight.project import ProjectDiscovery
 
 def test_installed_runtime_contains_exact_shared_solver_and_host_adapter(tmp_path):
     _install_runtime_files(tmp_path)
-    for name in ("live_gpu", "live_renpy", "live_opencl", "shader_stages", "shader_renpy"):
+    for name in (
+        "live_gpu",
+        "live_renpy",
+        "live_opencl",
+        "shader_stages",
+        "shader_renpy",
+        "inspector",
+    ):
         assert (
             tmp_path / "scenelight_runtime" / (name + ".txt")
         ).read_bytes() == _runtime_source().with_name(name + ".py").read_bytes()
+    assert (
+        tmp_path / "scenelight_runtime/inspector.rpy"
+    ).read_bytes() == _runtime_source().with_name("inspector.rpy").read_bytes()
 
 
 def test_live_movie_install_decodes_only_first_frame(tmp_path, monkeypatch):
