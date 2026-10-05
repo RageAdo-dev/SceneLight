@@ -26,7 +26,15 @@ QT_TOOLS = {
     "rcc.exe",
     "uic.exe",
 }
-OFFLINE_DIAGRAMS = {"media/lighting-comparison.png", "media/surface-maps.png"}
+OFFLINE_DIAGRAMS = {
+    "media/lighting-comparison.png",
+    "media/surface-maps.png",
+    "media/scenelight-banner.svg",
+    "media/preview-workspace.png",
+    "media/preview-glow.png",
+    "media/preview-export.png",
+    "media/ingame-inspector.png",
+}
 ONLINE_FILES = "https://github.com/RageAdo-dev/SceneLight/blob/main/"
 
 

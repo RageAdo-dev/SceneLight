@@ -85,6 +85,11 @@ def _policy():
                 "media/RENPY_ART_LICENSE.txt",
                 "media/lighting-comparison.png",
                 "media/surface-maps.png",
+                "media/scenelight-banner.svg",
+                "media/preview-workspace.png",
+                "media/preview-glow.png",
+                "media/preview-export.png",
+                "media/ingame-inspector.png",
             ],
             [
                 "EFFECT_PACKS.md",
