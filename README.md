@@ -38,7 +38,7 @@ The Windows package includes everything needed to start; no Python setup is requ
 Setup detects project edits while it stays open. Choose **Check changed assets →
 Update SceneLight**, then restart the game. Updates reuse compatible prepared data.
 
-## See it in motion
+## Example
 
 ![A character moving between warm and cool lights](docs/media/moving-light-preview.webp)
 
