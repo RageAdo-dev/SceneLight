@@ -288,13 +288,13 @@ def test_current_managed_install_does_not_offer_replacement(tmp_path: Path, monk
     managed = managed_project_root(project)
     managed.mkdir(parents=True)
     (managed / ".scenelight_install.json").write_text(
-        json.dumps({"scenelight_version": "1.1.0"}), encoding="utf-8"
+        json.dumps({"scenelight_version": "1.1.1"}), encoding="utf-8"
     )
     (managed / "Game.exe").write_bytes(b"launcher")
 
     inspection = inspect_project_installation(project)
 
-    assert installed_managed_version(project) == "1.1.0"
+    assert installed_managed_version(project) == "1.1.1"
     assert inspection.managed_release_relation is not None
     assert inspection.managed_release_relation.kind == "current"
     assert not inspection.release_replacement_available
@@ -333,7 +333,7 @@ def test_current_direct_install_keeps_asset_refresh_separate_from_release_update
         unowned=(),
         refresh_required=True,
         changed_sources=("game/images/new-background.png",),
-        installed_version="1.1.0",
+        installed_version="1.1.1",
     )
     inspection = ProjectInspection(selection, developer_status=status)
 
