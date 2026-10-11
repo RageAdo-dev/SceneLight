@@ -42,12 +42,11 @@ old hardware. Rendering still uses Ren'Py's normal graphics renderer.
 
 ## Components
 
-Player setup includes Qt Essentials and FFmpeg for preparation; opening Preview is
-not required. The `preview` extra adds the full interface. If components are
-missing, installation reports how to repair them before preparing movies.
+The package includes Qt Essentials, PyOpenGL and FFmpeg. Movie preparation uses
+these components without opening Preview. If components are missing, Setup
+reports how to repair them before preparing movies.
 
 The sprite shader also skips unused form-lighting work on transparent canvas
-pixels. The original alpha threshold and contact-shadow calculation remain in
-place, and later shader parts still execute. This optimization was checked against
-the previous shader with complete rendered-pixel comparisons on NVIDIA and the
+pixels. The alpha threshold is unchanged, and later shader parts still execute.
+This optimization was checked against the previous shader with complete rendered-pixel comparisons on NVIDIA and the
 2011 iMac's AMD graphics hardware.

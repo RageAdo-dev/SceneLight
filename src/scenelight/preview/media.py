@@ -431,7 +431,7 @@ class MediaClip:
         changes, preventing brief lighting events from disappearing between
         the regular samples.
 
-        Change detection intentionally runs only in the temporal worker (or at
+        Change detection runs only in the temporal worker (or at
         export), never on the UI thread.
         """
 
@@ -534,7 +534,7 @@ class MediaClip:
     ) -> Iterator[tuple[int, tuple[int, ...]]]:
         """Stream exact cut/flash decisions in bounded look-ahead windows.
 
-        The metric and thresholds are intentionally identical to the complete
+        The metric and thresholds match the complete
         scan above. Yielding prefixes lets the temporal analyzer solve the
         first seconds and start exact playback while FFmpeg remains paused on
         its pipe, instead of making the viewer wait for an entire first pass.

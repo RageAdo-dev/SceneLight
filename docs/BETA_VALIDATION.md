@@ -76,7 +76,7 @@ are additional work.
 
 ## Earlier local candidate — 18 September 2026
 
-The latest tester build passed **768 tests** locally. It includes the sprite-map
+The 18 September candidate passed **768 tests** locally. It includes the sprite-map
 and exposure corrections, responsive Setup controls, optional-CUDA-independent
 Preview startup, and correct still-image handling for JPEG/MPO HDR gain maps.
 The reported HDR photo produced identical pixels across six consecutive Preview
@@ -105,12 +105,12 @@ comparison, not a claim of exact pixels for all game transforms or GPUs.
 See [resolution benchmarks](performance.md#sprite-map-resolution) for preparation
 time, drawing cost, and storage tradeoffs.
 
-The approved S icon is embedded in both Windows launchers at seven sizes from
+The S icon is embedded in both Windows launchers at seven sizes from
 16 to 256 pixels. Setup's ICO now uses bitmap frames: Tk previously misread the
 PNG-backed frames and enlarged the smallest image, blurring the taskbar icon.
 Native Setup and dialog icons are checked against Windows' direct icon loading
 for matching dimensions and identical pixels. Qt Preview retains the original
-artwork; packaged icon frames match the approved source.
+artwork; packaged icon frames match the source artwork.
 
 | GPU family | Current evidence |
 | --- | --- |
@@ -145,7 +145,7 @@ unchanged.
 
 Painted shading is now read at form scale, so an artist's own shading bands and
 line boundaries no longer arrive as steps in the inferred surface. This is general
-to any sprite with painted shading; it was measured against the approved surface,
+to any sprite with painted shading; it was measured against the reference surface,
 where faceting in the inferred normals drops by about half while a small painted
 highlight still reaches the surface at 81% of its previous strength.
 
@@ -169,10 +169,8 @@ clip and all 900 storm frames at 1080p and their original frame rates. The Windo
 launcher has been checked with an isolated bundled interpreter; this is not a
 clean Windows virtual-machine test.
 
-Video export length is now determined by the number of frames the exporter
-declares, not by how long the source audio happens to last. An encoder that
-receives the wrong number of frames refuses to publish the file, so a truncated
-export fails loudly instead of shipping.
+Video export uses the declared frame count, so short audio cannot end a video
+early. A frame-count mismatch stops export and reports an error.
 
 The directional revision was measured on the older Radeon HD 6700M host by running
 one frame of analysis on each build, back to back, through the same offscreen
@@ -189,7 +187,7 @@ instead, because it copied the runtime into a game without re-running setup.
 
 A 48-interaction scripted session in *Still With You* on Ren'Py 8.5.3 kept live
 lighting enabled across three backgrounds and two characters with several
-expressions, with no renderer failures. It stopped at an author-authored pause the
+expressions, with no renderer failures. It stopped at a scripted pause the
 probe does not drive, so this is a long opening session rather than a full route.
 
 ## Previous published validation

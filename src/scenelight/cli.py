@@ -456,7 +456,7 @@ def _capture_without_installed_runtime(game_root: Path) -> Iterator[None]:
 
 
 def _restore_suspended_runtime(game_root: Path) -> None:
-    """Recover a killed capture BEFORE reseeding forms on the next attempt."""
+    """Recover an interrupted capture before reseeding forms on retry."""
     backup_root = game_root.parent / ".scenelight_cache" / "suspended-runtime"
     names = ("scenelight_runtime", "scenelight_runtime.rpy", "scenelight_runtime.rpyc")
     conflict_root = backup_root.parent / "recovered-runtime-conflicts" / uuid.uuid4().hex
@@ -648,7 +648,7 @@ def _write_install_config(
 
 
 def _restore_analysis_cache(project_root: Path, managed_root: Path) -> bool:
-    """Hydrate a disposable managed build with the last verified analysis cache."""
+    """Seed a disposable managed build with the last verified analysis cache."""
 
     source = analysis_cache_root(project_root)
     destination = managed_root / ".scenelight_cache"

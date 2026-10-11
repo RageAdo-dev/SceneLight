@@ -1836,13 +1836,9 @@ init -999 python:
             and request.get("inventory_backgrounds")
             and not scene_names
         ):
-            # Ren'Py 6.99 can invoke several early interactions while its
-            # renderer test and archive-backed image registry are still being
-            # initialized. Retry briefly instead of publishing a false empty
-            # inventory. If a title genuinely registers no static scenes, the
-            # a bounded five-second readiness window expires, at which point
-            # a title with genuinely no static scenes publishes a precise
-            # compatibility result.
+            # Ren'Py 6.99 can invoke this before its renderer test and image
+            # registry finish initializing. Allow up to five seconds before
+            # reporting an empty static-scene inventory.
             if _scenelight_inventory_wait_started[0] is None:
                 _scenelight_inventory_wait_started[0] = time.time()
             if time.time() - _scenelight_inventory_wait_started[0] < 5.0:

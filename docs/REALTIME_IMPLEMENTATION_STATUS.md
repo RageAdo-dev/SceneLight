@@ -4,7 +4,7 @@ Preview and Ren'Py share the scene analyzer and lighting shader. Static scenes
 reuse their analysis; supported movies use lighting prepared for every frame.
 Backgrounds changed by code or effects can use live analysis.
 
-Sprite maps are prepared separately. Form-map version 8 smooths the broad
+Sprite maps are prepared separately. Form-map version 9 smooths the broad
 silhouette while retaining finer painted relief, and reads painted shading at
 form scale so painted band boundaries stay flat. Moving a character reuses those
 maps and changes its lighting at the new screen position.

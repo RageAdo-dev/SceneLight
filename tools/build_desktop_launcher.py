@@ -2,8 +2,7 @@
 
 Both launchers are tiny C programs: one starts the bundled interpreter, the
 other routes a game's executable through SceneLight's compatibility runtime.
-Windows shows their version resources in the file properties, which is also what
-a code-signing certificate later attaches to.
+Windows displays the embedded version resources in file properties.
 """
 
 from __future__ import annotations

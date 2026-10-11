@@ -33,7 +33,7 @@ def test_hardware_plan_scales_every_expensive_pool() -> None:
     assert tiny.form_workers == 1
     assert tiny.temporal_batch_size == 4
 
-    # This preserves the approved 7800X3D scheduling while deriving it from
+    # Preserve the measured 7800X3D scheduling while deriving it from
     # the host instead of naming or assuming that processor.
     assert (common.process_workers, common.component_threads, common.store_workers) == (8, 6, 2)
     assert common.form_workers == 2

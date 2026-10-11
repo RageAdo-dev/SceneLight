@@ -9,7 +9,7 @@
     {
       "id": "eyes_everywhere",
       "name": "Eyes Everywhere",
-      "description": "The character's living surface opens into irregular independently roaming eyes.",
+      "description": "Adds irregular eyes that move independently across the sprite.",
       "preset": "eyes_everywhere"
     }
   ]

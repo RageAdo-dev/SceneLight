@@ -9,7 +9,7 @@
     {
       "id": "underwater_caustics",
       "name": "Underwater Caustics",
-      "description": "Cool submerged color response with moving bands of filtered light.",
+      "description": "Cool tint with moving bands of light.",
       "parameters": {
         "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
         "speed": { "type": "float", "default": 0.75, "min": 0.05, "max": 4.0 },
@@ -22,7 +22,7 @@
     {
       "id": "sunset_air",
       "name": "Sunset Air",
-      "description": "A warm atmospheric veil that preserves the underlying SceneLight transport.",
+      "description": "Warm haze over the lit sprite.",
       "parameters": {
         "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
         "warmth": { "type": "vec3", "default": [1.18, 0.78, 0.52], "min": 0.0, "max": 1.5 },
@@ -34,7 +34,7 @@
     {
       "id": "dream_phase",
       "name": "Dream Phase",
-      "description": "A slow luminous dream pulse with pastel shadow lift.",
+      "description": "Slow pulsing glow with brighter pastel shadows.",
       "parameters": {
         "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
         "speed": { "type": "float", "default": 0.45, "min": 0.05, "max": 3.0 },

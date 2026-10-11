@@ -1,8 +1,7 @@
 """Hardware-aware scheduling for exact SceneLight analysis.
 
-This module never selects a different renderer or a lower-quality analysis.
-It only decides how many independent exact jobs may run concurrently and how
-much exact temporal state must exist before first-view playback begins.
+Choose worker counts and the amount of prepared lighting needed before
+playback. Scheduling changes do not alter the renderer or analysis quality.
 """
 
 from __future__ import annotations

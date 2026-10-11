@@ -1,12 +1,10 @@
 """Deterministic screen-space light transport for transparent 2D sprites.
 
-This is intentionally not advertised as physical 3D ray tracing: a flat PNG
-contains no hidden geometry.  The engine instead reconstructs a soft height
-field, estimates multiple scene lights and an eight-direction environment,
-then evaluates diffuse/specular response, ray-marched self-shadow, ambient
-occlusion, ground bounce, edge spill, and camera matching in
-linear RGB.  Every estimate is recomputed in scene coordinates when the
-character moves.
+The engine estimates surface height from the sprite and light sources from
+the background. It evaluates diffuse and specular lighting, self-shadow,
+ambient occlusion, bounce, edge spill, and camera matching in linear RGB.
+Lighting follows the character's scene position. The inferred surface cannot
+recover geometry hidden in a flat image.
 """
 
 from __future__ import annotations
@@ -27,21 +25,13 @@ cv2.setNumThreads(1)
 
 EPSILON = 1e-6
 
-# All input sprites are treated as display-referred artwork made under the same
-# neutral reference illumination.  Exposure therefore belongs to the scene,
-# not to the subject's palette: a white shirt must not make its wearer darker,
-# and black fur must not make an animal brighter.  This neutral-art midpoint is
-# fixed from the renderer's neutral reference artwork, then applied unchanged
-# to every sprite. No filename or character identity is allowed to alter scene
-# exposure.
+# Sprites are treated as artwork painted under neutral lighting. Use one
+# reference midpoint for scene exposure, so differences in clothing, palette,
+# or pose do not change how much exposure the same scene applies.
 REFERENCE_ART_MID = 0.221169
 
-# Broad daylight and overcast photos can have a high robust midpoint without
-# containing a compact source that should make the subject glow.  In that
-# specific high-key/low-contrast regime, a restrained scene-referred shoulder
-# keeps pale anime materials from reading as self-emissive.  The gate depends
-# only on measured scene radiometry; sprite palette, filename, and identity are
-# intentionally absent.
+# Bright, low-contrast backgrounds can otherwise overexpose pale artwork.
+# Limit that gain using the measured scene brightness and contrast.
 BROAD_DIFFUSE_MAX_STOPS = 0.42
 
 # A bright, broad, low-confidence source is normally camera-white-balanced in
@@ -51,10 +41,8 @@ BROAD_DIFFUSE_MAX_STOPS = 0.42
 # chroma-only restoration; it never changes exposure or generated form.
 BROAD_DIFFUSE_CHROMA_PRESERVATION = 0.78
 
-# The palette meter remains useful for diagnostics and audit stratification,
-# but it must never drive radiometric exposure.  Its wide variation across
-# intentionally black, white, and saturated materials is precisely why a
-# content-dependent exposure anchor is physically invalid here.
+# Keep the palette meter for diagnostics. Using it for exposure would make
+# dark, pale, and saturated sprites receive different gains in the same scene.
 REFERENCE_MATERIAL_CALIBRATION = 0.611
 
 
@@ -1630,8 +1618,7 @@ def relight_sprite(
     average_ly /= total_light_weight
     confidence = 0.34 + 0.66 * analysis.light_confidence
     key_amount = settings.key_strength * confidence
-    # Keep the mean close to one. Directional light models form rather than
-    # simply multiplying an already bright anime palette into clipping.
+    # Keep the mean near one so directional shading does not clip bright art.
     diffuse = 0.22 + lambert * (0.22 + key_amount * 1.35)
 
     # A broad positional falloff stabilizes flat painted regions while all

@@ -1,4 +1,4 @@
-"""Measured installation progress and liveness during otherwise silent file work."""
+"""Installation progress and status updates during file operations."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ STAGE_LABELS = {
 
 
 class ProgressStage:
-    """Report real item completion; heartbeat repeats counts rather than inventing progress."""
+    """Report completed items; repeat the last count while an operation is running."""
 
     def __init__(self, phase: str, *, total: int = 0, item: str = "", interval: float = 1.0):
         if phase not in STAGE_LABELS:

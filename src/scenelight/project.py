@@ -1,8 +1,7 @@
 """Conservative Ren'Py project discovery.
 
-SceneLight only evaluates declarations it can resolve without executing game
-code. Dynamic declarations are reported and remain unlit at runtime; this is a
-safe fallback, not a failed install.
+This parser resolves static declarations without executing game code.
+Dynamic declarations are reported for the in-engine capture pass.
 """
 
 from __future__ import annotations

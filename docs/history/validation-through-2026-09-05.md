@@ -168,8 +168,8 @@ repository so no game or third-party art is distributed with SceneLight.
   downloaded into a new private environment with the package cache disabled.
   An initial SSH Session-0 preflight safely rejected all three renderers after
   their 90-second timeouts; the identical command then ran through an
-  interactive-only scheduled task in the logged-in console session. The truly
-  cold 50,400-statement/152-scene/7,386-form install completed in 2,688.7
+  interactive-only scheduled task in the logged-in console session. The uncached
+  50,400-statement/152-scene/7,386-form install completed in 2,688.7
   seconds with exit code 0. Independent `verify` and `pip check` passed. The
   remote source remained 2,312 files and 1,227,165,592 bytes with zero
   SceneLight files and all four core hashes unchanged. The temporary task,
@@ -283,7 +283,7 @@ repository so no game or third-party art is distributed with SceneLight.
   rendered the bounded real-Sayori map through its legacy texture path, produced
   a 676,126-byte capture, and exited with zero traceback, shader-error, or
   exception matches after its isolated test save was reset.
-- A truly cold CPU install on the same laptop took 300.54 seconds because exact
+- An uncached CPU install on the same laptop took 300.54 seconds because exact
   transport for 29 backgrounds remains the dominant 29-scene cost. With scene
   transport cached, the complete preflight/rebuild/verification pass took 69.29
   seconds. These timings are reported separately so the under-one-minute form
@@ -297,7 +297,7 @@ repository so no game or third-party art is distributed with SceneLight.
   with live relighting on Intel GL2. The completed log contained no traceback,
   exception, or shader failure; the first-run missing shader-cache message was
   followed by successful GL2 initialization and is expected cache creation.
-- The final 1.8.6 package was then tested from a genuinely clean laptop state:
+- The final 1.8.6 package was then tested from a clean laptop state:
   the old SceneLight Python registration was removed with Python's verified
   uninstaller and both owned test trees were recycled. The new small online
   ZIP and untouched 231,593,427-byte DDLC archive matched their source hashes.
@@ -329,7 +329,7 @@ repository so no game or third-party art is distributed with SceneLight.
   separate-light frame above the dialogue area was byte-identical to its earlier
   state: zero changed pixels and zero maximum channel difference. The Ren'Py test
   passed and the log contained no traceback, exception, or shader failure.
-- The user-discovered hybrid was reproduced exactly as separated source colors
+- The hybrid preset was reproduced with separated source colors
   at 0.72 strength, -0.22-stop bias, and 0.92 color adaptation. A production-
   shader matrix then tested eight candidate methods across all 45 retained Studio
   originals with the exact real Sayori form. Physical, separate, the exact
@@ -343,7 +343,7 @@ repository so no game or third-party art is distributed with SceneLight.
   the stronger candidates' inconsistent detail loss. No character, palette,
   filename, or scene-specific rule was introduced; reference art and generated
   experiment output remain outside the repository and release.
-- The hybrid is now the deliberate `light_mode="cinematic"` preset while the
+- The hybrid is now the `light_mode="cinematic"` preset while the
   established physical default remains unchanged and Separate remains fully
   exaggerated. Preview exposes all three complete looks. Its version-1 profile
   schema now carries the independent lighting strength, older profiles default
@@ -515,9 +515,9 @@ repository so no game or third-party art is distributed with SceneLight.
   lighting still changed 271,946 pixels. The inverse image-declaration nesting
   retained a 319,514-pixel SceneLight contribution. MVN animated uniforms and
   combined MVN/ATL movement advanced on both engines.
-- The UI badge crop was byte-identical across every captured state. This proves
-  SceneLight remained limited to the selected character while MVN's own pass
-  ordering remained under the author's Ren'Py transforms.
+- The UI badge crop was byte-identical across every captured state. SceneLight
+  affected only the selected character in these checks; the author's Ren'Py
+  transforms still controlled MVN pass ordering.
 - The extracted 1.8.3 online package repeated the embed, ownership verification,
   Ren'Py 7/8 capture matrix, and clean 18-file removal. Final status was clean
   and uninstalled, and the three MVN source hashes remained unchanged.
@@ -833,9 +833,8 @@ characters plus Ayami, Fuyuki, Ms. Ida, Kagami, Kenzo, Rie, and Ryan.
 - Zero character-name, filename, skin-tone, or palette-specific lighting
   rules.
 - Manifest verification, Ren'Py 8.5.2 compile, and lint passed. The one runtime
-  capture diagnostic is a genuine source typo (`monika turned casual...`) for
-  a pose the mod does not define; ordinary unsupported backgrounds remain
-  normally rendered and are listed rather than guessed.
+  capture diagnostic refers to an undefined pose (`monika turned casual...`).
+  Unsupported backgrounds are listed and retain their normal rendering.
 
 ### Canonical LayeredImage form regression
 
@@ -843,8 +842,8 @@ Ren'Py can omit inherited/default `LayeredImage` attributes from the visible
 runtime image name. Previously that made a valid expression miss its detailed
 form cache and silently use the generic fallback. The production resolver now
 matches the smallest canonical attribute superset, with exact-name matching
-first and the generic map last. This is universal attribute logic, not a
-Monika fix.
+first and the generic map last. Matching uses the declared attributes for any
+character.
 
 Against the exact CPU form-map renderer used by SceneLight, after
 sub-pixel registration of the visible sprite content:
@@ -866,7 +865,7 @@ the generic fallback.
   right captures with continuously changing warm/cool, rim, and shadow
   response.
 - The first frame of an instant cut to the bright bathroom and the stable frame
-  were byte-identical PNGs, proving there is no one-frame color pop.
+  were byte-identical PNGs, with no one-frame color pop in this check.
 - During a dissolve, the outgoing character retained the outgoing scene's
   lighting while the incoming character used the incoming scene's field.
 - The installed mod completed the normal playable story-start path without the
@@ -891,7 +890,7 @@ Result: passed.
 
 The production analyzer now executes its full-resolution geometry, 144-position
 metering, radiance probes, and transport reductions with CUDA while sharing the
-approved CPU component decisions. It does not use a smaller grid, downsampled
+CPU reference component decisions. It does not use a smaller grid, downsampled
 preview, provisional lighting, or cache hits in the cold benchmark. CUDA is an
 optional acceleration path; an unavailable or failed CUDA backend falls back
 to the complete CPU analyzer and is covered by an automated regression test.
@@ -909,7 +908,7 @@ On the Windows validation machine with an NVIDIA RTX 4090:
 - Fresh 960x960 arbitrary bear form analysis remains 0.703 seconds; warm
   background and form lookups remain below 1 ms each.
 
-Six difficult real scenes were compared against the unchanged approved CPU
+Six difficult real scenes were compared against the unchanged CPU
 reference: fog, backrooms, red corridor, bright greenhouse, Photo 09, and
 sunset meadow. Each 14,976-byte CUDA transport LUT differed in only 4 to 29
 bytes, every difference was at most one 8-bit step, and mean absolute error was
@@ -921,7 +920,7 @@ Result: passed.
 ## Non-DDLC Ren'Py project
 
 An original Ren'Py 8.5.2 project used a custom `Character(image="nova")` and a
-real two-layer `LayeredImage`, not a flattened compatibility stand-in.
+two-layer `LayeredImage`.
 
 - The installer discovered the custom tag and resolved both form aliases
   automatically.
@@ -948,7 +947,7 @@ black fur, a white shirt, alternate clothing, and Demonika.
 - Local form error: 0.088 stops.
 - Eight alternate expressions: mean Delta E 1.555.
 - Movement and transition suite: 67 captures passed.
-- The previously approved 25-background desktop gallery remains unchanged.
+- The 25-background desktop reference gallery remains unchanged.
 
 Result: passed.
 

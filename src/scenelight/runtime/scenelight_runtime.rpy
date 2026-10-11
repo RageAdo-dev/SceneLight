@@ -70,9 +70,8 @@ init -50 python:
     # API entirely. Keep the original executable playable; SceneLight itself
     # is activated by the compatibility launcher installed beside that game.
     _SCENELIGHT_SHADER_AVAILABLE = callable(getattr(renpy, "register_shader", None))
-    # Custom/effect-pack controls are intentionally dormant in the 1.0 release.
-    # The implementation remains versioned for a later opt-in update, but 1.0
-    # must not register a player-facing hotkey or expose the panel accidentally.
+    # Custom effect packs are deferred. Keep their panel and hotkey disabled
+    # until that feature is released.
     _SCENELIGHT_PLAYER_EFFECT_UI_ENABLED = False
     SCENELIGHT_DEBUG_CONTRAST = 0.0 if os.environ.get("SCENELIGHT_DEBUG_NO_CONTRAST") == "1" else 1.0
     _SCENELIGHT_CALIBRATION_DEFAULTS = {

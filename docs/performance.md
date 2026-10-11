@@ -6,9 +6,9 @@ See [prepared playback](prepared-playback.md) and [older-hardware results](BETA_
 
 ## Installation and update finalization
 
-**Historical beta 27 measurement.** Beta 28 adds stronger Windows change detection
-and has not repeated this large-file timing run. The numbers below must not be
-read as measured beta 28 performance.
+**Historical beta 27 measurement.** Windows verification changed in beta 28.
+The large-file timing run has not been repeated for that revision or 1.1.0;
+the numbers below describe beta 27 only.
 
 Measured on 29 September 2026 using 43,835 generated runtime files (2.03 GB) on
 Windows/NTFS and a WDC WD4005FZBX mechanical SATA drive. The previous installer and
@@ -28,7 +28,7 @@ includes the initial ownership check, old-runtime cleanup and temporary-runtime
 cleanup. File generation, capture, image analysis and recreation of analyzer output
 were outside the measured intervals. The size distribution was 75% 16 KiB,
 20% 64 KiB, 4% 256 KiB and 1% 1 MiB. Disk cache and machine activity affect results.
-These are local file-work measurements, not a promise of a 10× whole-install gain.
+They measure file operations only; whole-install speed also depends on capture and analysis.
 
 The installer transfers a private prepared runtime on the same volume instead of
 copying it again. Cross-volume or linked trees keep the copy fallback. Verification

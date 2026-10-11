@@ -427,9 +427,8 @@ def _cached_transport_geometry(
 
     def gaussian_weights(key: tuple[float, float, float, float]) -> np.ndarray:
         target_x, target_y, sigma_x, sigma_y = key
-        # This is intentionally the same single float64 exp followed by the
-        # same float32 cast used by the reference analyzer. It is cached, not
-        # approximated or made separable.
+        # Match the reference analyzer's float64 exp and float32 cast.
+        # Cache the result without changing its evaluation order.
         return np.exp(
             -0.5 * (((probe_x - target_x) / sigma_x) ** 2 + ((probe_y - target_y) / sigma_y) ** 2)
         ).astype(np.float32)
@@ -781,7 +780,7 @@ def _transport_maps_accelerated(
 ) -> tuple[str, np.ndarray]:
     """Build one exact scene with overlapped CUDA geometry/classification.
 
-    This is the low-latency path used by Studio 2. Image-independent GPU
+    This is the low-latency path used by Preview. Image-independent GPU
     geometry builds while the CPU performs the exact connected-component
     decisions. The final LUT is the same production CUDA transport used by a
     full project build; machines without CUDA retain the CPU reference path.
@@ -854,7 +853,7 @@ def _annular_meter_fields(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Evaluate the desktop meter at every possible subject center.
 
-    The CPU reference uses a wide annulus and deliberately downweights the
+    The CPU reference uses a wide annulus and downweights the
     pixels directly behind the sprite. A compact Gaussian instead mistakes a
     white wall, lamp globe, or flower cluster for local illumination. This
     convolution is the same scene-only meter evaluated once into a GPU field.

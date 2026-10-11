@@ -97,7 +97,7 @@ available state. Late arrivals can change the lighting without a new background
 event. Unlike the game, the preview does interpolate, so the two hosts' temporal
 behavior is not equivalent even though they share a final fragment shader.
 
-The current analyzer is not suitable for simply moving into the frame callback:
+The current analyzer exceeds the frame budget:
 
 | Warm sequential stage | Median, five runs |
 |---|---:|
@@ -172,8 +172,8 @@ obligation to preserve an inefficient execution order.
 Robust quantiles, connected components, and source ranking are substantial work.
 Evaluate GPU histograms/reductions and component labeling against a spatial
 source representation with stable identities. Reject an alternative if it loses
-distinct emitters, changes exposure materially, or degrades the approved looks.
-Do not claim this is solved by sampling an average background color.
+distinct emitters, changes exposure materially, or changes the reference lighting results.
+An average background color cannot represent multiple directional sources.
 
 Use reusable GPU targets and texture-based scene parameters. Keep full-image
 readbacks, PNG encoding, disk cache misses, worker synchronization, and Python
@@ -319,6 +319,5 @@ inspected rather than assuming the current online API applies unchanged.
   document and development probe, with no production renderer changes.
 - Final review checked the reported figures against raw observations, verified
   that Copy (2)'s runtime hash remained unchanged, and confirmed the probe was
-  absent from the user's game. The repository already contains extensive staged
-  and unstaged work; this task's repository additions are this document and
+  absent from the original game. This investigation added the design record and
   `tools/fixtures/realtime_budget_audit.rpy`.

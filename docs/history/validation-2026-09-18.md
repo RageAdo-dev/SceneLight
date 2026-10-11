@@ -1,4 +1,7 @@
-# Validation results
+# Validation results — 18 September 2026
+
+> Historical results for the build tested on this date, including its package
+> and CI status. They do not describe the current release.
 
 The latest recorded checks, hardware measurements and known limits are in
 [Compatibility and validation](../BETA_VALIDATION.md).

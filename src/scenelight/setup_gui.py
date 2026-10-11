@@ -538,7 +538,7 @@ def requirement_statuses(state: DependencyState) -> tuple[tuple[str, bool], ...]
 
 
 def describe_operation_failure(output: str) -> tuple[str, str]:
-    """Turn verbose CLI output into a truthful user-facing failure summary."""
+    """Extract the failure reason from CLI output for the Setup window."""
 
     lowered = output.lower()
     if "capturescripterror:" in lowered or "could not compile the game scripts" in lowered:

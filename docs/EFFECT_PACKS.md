@@ -10,8 +10,8 @@ disabled. The source package includes example packs.
 ## Add a pack
 
 Place a JSON file in `game/scenelight_effects/`, then run **Update SceneLight**.
-Invalid packs are skipped and reported. Built-in rain and glitch need no pack;
-see the [effects API](MOD_AUTHOR_API.md#optional-effects).
+Invalid packs are skipped and reported. Built-in rain and glitch need no pack.
+These experimental controls are outside the current lighting guide.
 
 This example adds a configurable color effect:
 
@@ -61,7 +61,7 @@ private lighting textures are not exposed.
 
 An effect may select a built-in `preset` and override its `defaults`. A preset
 cannot also replace its fragment, parameters or source-texture contract.
-Ready-made packs ship with SceneLight in [`examples/effect-packs`](../examples/effect-packs);
+The source package includes examples in [`examples/effect-packs`](../examples/effect-packs);
 the same files are kept in the
 [source tree](https://github.com/RageAdo-dev/SceneLight/tree/main/examples/effect-packs).
 

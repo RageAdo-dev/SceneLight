@@ -1,4 +1,4 @@
-"""Finalization stays visible without inventing file counts or weakening transactions."""
+"""Finalization reports stages and completed file counts through commit or rollback."""
 
 import json
 import queue

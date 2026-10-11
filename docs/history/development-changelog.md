@@ -93,7 +93,7 @@
 - Launches source-only Ren'Py projects through the exact compatible runtime
   recorded during installation. Setup no longer claims that a bundled Windows
   executable is required when a valid SDK playback command exists.
-- Makes Preview & Calibrator genuinely standalone: its Tools button remains
+- Lets Preview & Calibrator open independently: its Tools button remains
   available before a game is selected, installs optional Preview components on
   demand, and passes `--project` only when a valid game was actually chosen.
 - Labels the installed-project operation **Updating SceneLight** and reports an
@@ -349,7 +349,7 @@ published GitHub releases and do not outrank the public 1.0.0 release.
 - Moved the in-place ownership conflict check ahead of renderer capture and
   analysis, so an already modified or unmanaged destination is refused before
   any expensive work starts.
-- Made per-sprite runtime capture failures first-class structured skips. A bad
+- Recorded per-sprite runtime capture failures as structured skips. A bad
   displayable no longer hides in a generic resolver log: setup and later
   verification name the image, failed stage, and error while valid sprites
   continue through installation.
@@ -401,7 +401,7 @@ published GitHub releases and do not outrank the public 1.0.0 release.
   the result manifest and setup activity log.
 - Made verification aware of both reversible in-place installs and managed
   copies, so a healthy in-place attachment is no longer reported as missing.
-- Added a first-class Ren'Py author API with rollback-safe whole-mod, current
+- Added a Ren'Py author API with rollback-safe whole-mod, current
   scene, background, character-tag, and exact-image controls.
 - Added per-scene enable/disable and complete lighting calibration overrides;
   authored settings layer over automatic analysis without replacing it.
@@ -432,7 +432,7 @@ published GitHub releases and do not outrank the public 1.0.0 release.
 
 - Made **Individual light colors** retain several saturated hue families even
   when nearby lamps merge into one physical source during normal analysis.
-- Added a deliberately stylized separation path that lets warm, cyan, and
+- Added a stylized color-separation path that lets warm, cyan, and
   green emitters paint different regions of a flat sprite at higher creative
   settings instead of collapsing into one scene-wide warm tint.
 - Kept the realistic default pixel-identical: creative-only sources have zero
@@ -547,11 +547,11 @@ published GitHub releases and do not outrank the public 1.0.0 release.
 ### Internal build 1.5.0 (pre-release)
 
 - Added optional live GPU rain/wetness and glitch/corruption effects after the
-  approved physical relighting pass. Both can be applied scene-wide or to one
+  physical relighting pass. Both can be applied scene-wide or to one
   character and are deterministic under save/load, rollback, skip, motion, and
   scene transitions.
 - Added a player effects panel on `Shift+F8` and a small `scenelight_fx` API for
-  mod authors. All effect intensities default to zero, preserving the approved
+  mod authors. All effect intensities default to zero, preserving the existing
   relighting output byte-for-byte until an effect is explicitly enabled.
 - Kept effects universal: no character names, filenames, palettes, or scene
   presets select their behavior.
@@ -607,7 +607,7 @@ published GitHub releases and do not outrank the public 1.0.0 release.
 - Added NVIDIA detection and an explicit CUDA dependency/performance option so
   the GUI cannot silently downgrade a requested accelerated install to CPU.
 - Preserved the existing CLI contract for automation and non-Windows use.
-- Added exact CUDA background analysis with approved CPU fallback, reusable
+- Added exact CUDA background analysis with the reference CPU fallback, reusable
   caches, and the full live hybrid GPU runtime.
 - Added automatic target-Ren'Py capture for LayeredImage and archive-backed
   declarations without prebaking final relit sprites.
