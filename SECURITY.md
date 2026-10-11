@@ -29,14 +29,10 @@ The shared dependency environment can be removed after closing SceneLight by
 deleting `%LOCALAPPDATA%\SceneLight\python-env`. Installed game runtimes do not
 import from that environment.
 
-## Third-party game code
+## Using games and sharing logs
 
-A managed copy is **not a security sandbox**. Ren'Py games can execute Python
-code with the user's permissions. Static source scanning does not execute the
-game, but renderer-backed discovery and gameplay do. Only use games you trust.
-
-SceneLight never requires disabling antivirus, SmartScreen or a firewall.
-Review logs before sharing them; they may contain local paths.
+Only use games you trust: preparing lighting can run the game's code.
+Keep your security software enabled, and review logs for personal paths before sharing.
 
 ## Reporting a vulnerability
 

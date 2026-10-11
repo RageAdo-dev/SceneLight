@@ -30,10 +30,10 @@ Build with Python 3.11 including Tcl/Tk. The Windows package contains
 archive retains the Python and batch entry points. `-DesktopRuntime <directory>`
 can reuse a runtime built by `tools/bundle_runtime.py`; its requirements must match.
 
-For an offline package, also provide `-PythonInstaller <installer>` and
-`-Wheelhouse <pinned-wheels>`. The builder must reject incomplete bundles, invalid
-Python signatures and incompatible runtime versions. Distribute the ZIP checksums
-alongside the packages, wheel and source distribution.
+The full Windows package includes its interpreter, dependencies and the supplied
+compatibility runtime for offline use. Optional CUDA acceleration is separate.
+For offline setup from the source archive, also provide `-PythonInstaller <installer>`
+and `-Wheelhouse <pinned-wheels>`. Distribute the ZIP checksums alongside the packages.
 
 The current compatibility runtime is **Ren'Py 7.7.1**. Its SDK ZIP SHA-256 is:
 

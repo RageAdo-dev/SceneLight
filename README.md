@@ -17,13 +17,19 @@ colors and light sources as they move, with controls for shadows, highlights and
 
 ## Get started
 
-1. Download **SceneLight-v1.1.1-Windows.zip**, extract it, and open **SceneLight.exe**.
+| Download | Choose this if… |
+| --- | --- |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | You want a small installer that downloads the app on first launch. |
+| [Full / offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | You want everything included, ready to use without an internet connection. |
+
+1. Download either ZIP, extract it, and open **SceneLight.exe**.
 2. Select your game folder, scan it, and choose the characters to light.
 3. Install, wait for completion, and launch the game.
 
 Players can add SceneLight to a game or create a separate copy. Mod developers can
 install the API in their project and control lighting from their scripts.
-The Windows package includes everything needed to start; no Python setup is required.
+Both downloads provide the same app; no Python setup is required.
+Optional CUDA acceleration may need an additional download.
 
 ## Preview and controls
 

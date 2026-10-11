@@ -1,7 +1,13 @@
 # Installation
 
-[Download SceneLight for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.1).
-Extract **SceneLight-v1.1.1-Windows.zip** and open **SceneLight.exe**.
+Choose a Windows download:
+
+| Download | How it works |
+| --- | --- |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | Downloads the app on first launch. Later launches reuse that installation. |
+| [Full / offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | Includes the app and required components for use without an internet connection. |
+
+Both contain the same version. Extract the entire ZIP and open **SceneLight.exe**.
 You do not need administrator access or a separate Python installation.
 
 Keep a backup of your game and saves before installing.
@@ -21,8 +27,8 @@ Preparing a large game can take time. The percentage applies to the current stag
 100% does not mean the whole installation has finished. **Cancel** stops the
 operation. **Settings → Activity** shows progress and any errors.
 
-CUDA acceleration is optional. Declining it keeps CPU preparation available;
-the game still needs working graphics acceleration.
+CUDA acceleration is optional and may need a separate download. Declining it
+keeps CPU preparation available; the game still needs working graphics acceleration.
 
 ## Change character choices
 
