@@ -17,7 +17,7 @@ strength remain above the pages, and you can continue dragging/scaling the sprit
 At 0% Lighting strength, scene lighting leaves the source artwork unchanged;
 explicit sprite glow remains independent. Bright scenes use a restrained automatic
 exposure boost, and highlight protection retains existing painted detail. Use
-Exposure bias when you deliberately want a stronger brightening effect.
+Exposure bias for stronger brightening.
 
 ## Glow
 
@@ -31,8 +31,7 @@ Choose a color, widen Color range to include nearby shades, and adjust Soft edge
 Glow strength (0–10), and Halo spread. Each rule can be enabled, duplicated, or
 removed. Choose **+ Add color** to create the first rule. Scrolling the settings
 panel does not change slider or numeric values. Matching uses the original artwork
-before lighting and tint. More active
-rules require more rendering time.
+before lighting and tint. More active rules require more rendering time.
 
 **Cast light** controls remain available for configuration. They illuminate other
 characters in-game; check their result in the mod because Preview shows one sprite.
@@ -75,8 +74,8 @@ ranges, scope precedence, tint, emitted light, and selective color glow examples
 
 ## Bug reports
 
-Open **Settings → Activity** in Setup, then select the Preview session. Select the
-session, search messages, or filter to errors/warnings. Choose **raw console** for
+Open **Settings → Activity** in Setup and select the Preview session.
+Search messages or filter to errors/warnings. Choose **raw console** for
 retained command output. Sessions remain available after restarting the app.
 
 Use **Include game logs** and select the game's main folder when reporting an

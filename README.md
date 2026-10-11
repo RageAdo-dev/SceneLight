@@ -4,7 +4,7 @@
 
 **Character lighting for Ren’Py games and mods.**
 
-Automatic lighting, color and glow for Ren’Py sprites. Preview a scene, tune it in-game, and keep your existing story workflow.
+Match sprites to the light in a background, add glow, and adjust the result in Preview or in-game.
 
 [![CI](https://img.shields.io/badge/CI-Windows_%2B_Linux-233c51?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml) [![Tester build: 1.1.0](https://img.shields.io/badge/tester_build-1.1.0-57c7dc?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.0) [![Ren’Py 7 and 8](https://img.shields.io/badge/Ren%27Py-7_%26_8-233c51?style=flat-square)](docs/BETA_VALIDATION.md) [![License: MIT](https://img.shields.io/badge/code-MIT-233c51?style=flat-square)](LICENSE)
 
@@ -98,7 +98,7 @@ The default anchor follows the center of the visible group. Choose a member or a
 
 Compatible code-only and lighting-settings updates retain the existing asset maps. When artwork changes, SceneLight checks the inventory and reuses compatible capture and analysis results. Missing or unsupported assets are reported individually while usable assets continue.
 
-The latest installer also avoids another complete runtime copy on the same volume and repeated byte reads for verified, unchanged files.
+On the same volume, Setup can move the prepared runtime into place without a second full copy. It also reuses verified checksums when the filesystem confirms a file is unchanged.
 
 | Update | What happens |
 | --- | --- |

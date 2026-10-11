@@ -76,7 +76,7 @@ Open the newer SceneLight, select your installed game and choose **Update
 SceneLight**. Downloading a new package alone does not update a game’s installed
 runtime or surface maps.
 
-For developer projects, use **For mod developers → Check new assets → Update
+For developer projects with detected edits, use **Check changed assets → Update
 SceneLight**. [Author guide](AUTHOR_QUICKSTART.md).
 
 Compatible code-only and lighting-settings updates keep existing asset maps.
@@ -108,9 +108,10 @@ While Setup stays open, it checks the selected project every five seconds and
 waits for two matching file snapshots before checking the installation again.
 Changed files clear the cached scan and show **Check changed assets**. Apply
 **Update SceneLight**, then restart the game. New characters need discovery and
-prepared lighting maps before they can use the full effect. Player-copy updates synchronize authored game files
-while preserving saves and your lighting choices. Developer updates refresh the
-embedded runtime and generated maps without replacing story scripts.
+prepared lighting maps before they can use the full effect. Player-copy updates
+synchronize authored game files while preserving saves and your lighting choices.
+Developer updates refresh the embedded runtime and generated maps without replacing
+story scripts.
 
 ## Remove
 

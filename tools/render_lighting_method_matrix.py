@@ -1,8 +1,8 @@
 """Render reproducible production-GPU lighting method comparisons.
 
-This tool is deliberately external to the player package. It exercises the
-exact Preview/runtime shader and exact cached analysis products against real
-backgrounds, then writes contact sheets plus palette-independent measurements.
+This development tool renders backgrounds with the shared Preview/game shader
+and cached analysis, then writes contact sheets and palette-independent
+measurements. It is not included in the player package.
 """
 
 from __future__ import annotations
@@ -49,9 +49,8 @@ class Method:
 
 def _methods() -> tuple[Method, ...]:
     base = Calibration()
-    # ``cinematic`` exactly reproduces the user-discovered state that won the
-    # general evaluation: separated sources plus restrained strength, exposure,
-    # and adaptation.
+    # ``cinematic`` combines separated sources with reduced strength,
+    # exposure, and adaptation.
     decomposed = replace(
         base,
         auto_strength=0.88 * 0.72,

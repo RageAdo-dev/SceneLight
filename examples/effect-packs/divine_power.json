@@ -9,7 +9,7 @@
     {
       "id": "lightning_god",
       "name": "Lightning God",
-      "description": "Layered electric aura, turbulent glow, and branching animated discharges.",
+      "description": "Electric glow with branching animated discharges.",
       "preset": "lightning_god",
       "defaults": {
         "discharge": 0.85,
@@ -26,7 +26,7 @@
     {
       "id": "the_legend",
       "name": "The Legend",
-      "description": "An original overwhelming green legendary-power aura with shock pulses and vertical surges.",
+      "description": "Green glow with outward pulses and rising streaks.",
       "preset": "the_legend"
     }
   ]

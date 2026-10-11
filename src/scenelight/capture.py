@@ -507,10 +507,9 @@ def _pygame_alpha_blit(
 ) -> None:
     """Reproduce Pygame 1.9/pygame_sdl2's integer SRCALPHA blit.
 
-    Pillow uses a mathematically cleaner source-over division, but old Ren'Py
-    composites use Pygame's documented 8-bit approximation. The explicit
-    transparent-destination branch and integer equations below match the game
-    engine byte-for-byte, including antialiased overlapping layer edges.
+    Old Ren'Py composites use Pygame's 8-bit approximation, which differs from
+    Pillow's source-over division. Match its integer blend and transparent-
+    destination handling, including antialiased overlapping layer edges.
     """
 
     x, y = position
@@ -1058,7 +1057,7 @@ def _record_capture_outcome(payload: dict, project_root: Path, label: str) -> No
 
 
 def _validate_result(discovery: ProjectDiscovery, result: CaptureResult) -> CaptureResult:
-    """Reject a broken resolver instead of silently installing weak fallbacks."""
+    """Reject unexplained capture omissions; allow reported per-asset skips."""
 
     # A runtime inventory may legitimately contain no background declarations
     # (for example, a video-only or UI-only project). Treat that as an empty
@@ -2035,7 +2034,7 @@ def _merge_parallel_capture_payloads(
     workers: list[dict[str, object]],
     request_forms: dict[str, list[str]],
 ) -> dict[str, object]:
-    """Merge isolated form workers into the ordinary capture-result contract."""
+    """Merge isolated form workers into one capture result."""
 
     merged = dict(master)
     sprites: dict[str, str] = {}
@@ -2927,7 +2926,7 @@ def merge_capture(discovery: ProjectDiscovery, capture: CaptureResult) -> None:
 
 
 def _merge_video_scene_sequences(discovery: ProjectDiscovery) -> None:
-    """Decode authored Movie sources into the same temporal scene contract."""
+    """Decode authored Movie sources into temporal scene records."""
 
     if not discovery.scene_media:
         return

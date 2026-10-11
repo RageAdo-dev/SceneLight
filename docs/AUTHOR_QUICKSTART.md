@@ -69,7 +69,9 @@ init python:
     scenelight.character("hero_sticker", enabled=False)
 ```
 
-The order is defaults → background → scene → character → exact image.
+For ungrouped sprites, the order is defaults → background → scene → character →
+exact image. [Lighting groups](MOD_AUTHOR_API.md#lighting-groups) let several
+sprites share a sampling position and settings for poses such as a hug.
 Use `scenelight.off()` to bypass lighting for a sequence and
 `scenelight.clear_scene()` to restore it. Rules support save/load and rollback.
 
@@ -114,16 +116,17 @@ for composition and bypass examples.
 
 ## Update and check your project
 
-After adding assets, use **For mod developers → Check new assets → Update SceneLight**.
-Newly detected characters follow the saved automatic-inclusion policy. Existing poses can use the generic fallback until their
-own maps are prepared. Updates stop if SceneLight-owned files were edited.
-SceneLight does not continuously monitor your source directory; run this update
-after adding, replacing, or removing assets. Downloading a newer app alone does not
-refresh a game's installed runtime.
+Setup checks the selected project for edits while it stays open. After changes
+are detected, choose **Check changed assets → Update SceneLight**, then restart
+the game. Detection does not rebuild maps or reload a running game. Downloading
+a newer app alone does not update the game's installed runtime.
+
+New characters follow the saved automatic-inclusion policy. Sprites can use
+generic surface geometry until their own maps are prepared. Updates stop if
+SceneLight-owned files were edited. For edits that preserve file names, sizes
+and timestamps, run a manual scan/update; see [update details](INSTALL.md#update).
 
 Before distributing a game, check movement, expression changes, scene transitions,
 custom shaders, unlit UI and save/load/rollback with your own assets.
 
 [Full API reference](MOD_AUTHOR_API.md) · [Installation and removal](INSTALL.md) · [Compatibility](BETA_VALIDATION.md)
-
-For multi-sprite poses, [lighting groups](MOD_AUTHOR_API.md#lighting-groups) share a sampling position and lighting settings. Setup now detects source changes while it stays open; apply the offered update and restart the game to load the prepared data.

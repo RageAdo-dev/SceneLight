@@ -54,7 +54,7 @@
     {
       "id": "chromatic_soul_echo",
       "name": "Chromatic Soul Echo",
-      "description": "Pulls several colored copies of the character out of alignment like separated souls.",
+      "description": "Offsets several colored copies of the character.",
       "source_texture": true,
       "parameters": {
         "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
@@ -68,7 +68,7 @@
     {
       "id": "reality_shredder",
       "name": "Reality Shredder",
-      "description": "Cuts the sprite into independently displaced strips with violent RGB fractures.",
+      "description": "Offsets strips of the sprite and separates their RGB channels.",
       "source_texture": true,
       "parameters": {
         "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
@@ -82,7 +82,7 @@
     {
       "id": "impossible_melt",
       "name": "Impossible Melt",
-      "description": "Turns the lower body into living vertical trails while the face swims out of phase.",
+      "description": "Stretches the lower body into vertical trails and distorts the face.",
       "source_texture": true,
       "parameters": {
         "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },

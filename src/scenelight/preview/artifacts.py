@@ -49,9 +49,8 @@ from .hardware import (
 SCENE_CACHE_VERSION = b"scenelight-gpu-studio-scene-v17-spatial-radiance-basis\0"
 TEMPORAL_CACHE_VERSION = b"scenelight-gpu-studio-temporal-scene-v14-spatial-radiance-basis\0"
 FORM_CACHE_VERSION = f"scenelight-gpu-studio-composited-form-v{FORM_MAP_VERSION}\0".encode()
-# Stable namespace for the v8 derived-map schema. It intentionally does not
-# follow later shader-only edits: scene/form analysis remains reusable when a
-# fragment-stage correction changes but the map encoding does not.
+# Keep derived maps reusable across shader-only edits.
+# Change this namespace when the derived-map format or analysis changes.
 DERIVED_MAP_SCHEMA = bytes.fromhex(
     "7427d63c7a6a7736e59576e487bd6ec2caa69cbb0851218d6c24f1276a6da327"
 )
@@ -210,10 +209,9 @@ class ArtifactCache:
     def prepare_temporal_backend(self) -> HardwarePlan:
         """Initialize the selected exact backend without running throwaway scenes.
 
-        Worker processes are intentionally left lazy: the first submitted work
-        is the user's real look-ahead rather than a synthetic calibration wave.
-        The hardware-derived plan already bounds concurrency by CPU and memory,
-        while CUDA context creation is paid in the background once.
+        Workers start with the first look-ahead request. The hardware plan
+        limits concurrency by CPU and memory; CUDA initializes once in the
+        background.
         """
 
         if self._cuda_available:
@@ -325,12 +323,8 @@ class ArtifactCache:
         root.mkdir(parents=True, exist_ok=True)
         component_threads = self.hardware_plan.component_threads
         preview = _read_preview(root)
-        # Scene-wide fields and position transport are independent exact
-        # products. Build them concurrently so first use is bounded by the
-        # slowest real analysis instead of their sum. No provisional result is
-        # exposed to the view.
-        # These are three independent exact products. A small-memory/low-core
-        # host runs fewer at once; capable hosts still overlap all three.
+        # Run the three independent analyses concurrently within the host's
+        # CPU and memory limits. Display only the completed result.
         with ThreadPoolExecutor(max_workers=min(3, component_threads)) as executor:
             transport_future = executor.submit(
                 _transport_maps_accelerated,

@@ -60,7 +60,7 @@ sandbox for game code.
 Large captures use isolated workers with separate writable state and bounded
 concurrency. Completed forms are journaled by image tag and normalized attribute
 set so interrupted workers can resume. Plan, pixel and protocol versions are
-separate contracts; changing progress text does not invalidate captured pixels.
+tracked separately; changing progress text does not invalidate captured pixels.
 The capture plan keeps stable batch membership if available worker concurrency
 changes on restart. Successful batches are published atomically and validated
 before reuse, including surface-normalization markers and composite dependencies.
@@ -148,9 +148,12 @@ queue. Moving a character does not invoke decoding or scene/form analysis.
 ## Controls and effects
 
 Calibration and independent lighting strength are stored in versioned profiles.
-Author rules apply in this order: defaults, background, scene, character, image.
-The scene-level off switch is a hard bypass. Rule state participates in save/load
-and rollback; graphics resources do not.
+Ungrouped sprites inherit rules in this order: defaults, background, scene,
+character, image. Grouped sprites inherit defaults, background and scene rules,
+then the group's settings and shared sampling position. Individual glow and
+emission rules remain unless the group overrides them; disabled members stay
+excluded. The scene-level off switch bypasses lighting. Rule state participates
+in save/load and rollback; graphics resources do not.
 
 Built-in rain and glitch are optional post-lighting branches. Developer effect
 packs add validated shader parts; the player effects panel and hotkey are disabled.

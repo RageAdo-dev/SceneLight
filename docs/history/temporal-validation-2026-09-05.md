@@ -90,9 +90,9 @@ compared state mismatches or a tested scene has no comparable observations.
 - Fine mouse-wheel deltas accumulate; Home/End in the character-tag entry no
   longer scroll the character list.
 
-## Limits — not a universal-compatibility certification
+## Coverage limits
 
-This proves the named master-layer paths above. It does not certify arbitrary
+These checks cover the named master-layer paths above. They do not cover arbitrary
 screen-layer composites, masked movies, simultaneous differently positioned
 video sources, or all custom displayables on every Ren'Py release/GPU.
 Legacy Animation frames are explicitly inventoried; ATL/Python source-state
@@ -102,6 +102,3 @@ Procedural changes to the pixels of the same source, time-varying shader grades,
 and arbitrary compositing need additional integration coverage.
 Movie light fields are sampled at approximately 8 Hz; the decoder clock selects
 among those samples. This is not per-decoded-frame analysis.
-
-These are documented compatibility boundaries and remaining launch test work,
-not a claim that software can never fail.

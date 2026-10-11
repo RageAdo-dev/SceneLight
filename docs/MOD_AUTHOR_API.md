@@ -11,7 +11,7 @@ calls. Existing story statements and transforms keep their normal syntax.
 
 Select character image tags in Setup. A tag covers its poses and expressions;
 UI and stickers should remain unchecked. Select effect tags such as `fire` when
-you intentionally want them to glow or illuminate characters. To store the selection with a project:
+you want them to glow or illuminate characters. To store the selection with a project:
 
 ```json
 {
@@ -32,8 +32,8 @@ init python:
 Explicit exclusions in **Characters…** take precedence over tag registration.
 Recheck a family and apply the update to enable it again.
 
-After adding assets, use **Check new assets → Update SceneLight**. Existing poses
-can use a generic surface until their own maps are ready. Updates reuse valid
+When Setup detects added assets, use **Check changed assets → Update SceneLight**.
+Existing poses can use a generic surface until their own maps are ready. Updates reuse valid
 analysis and stop if an owned runtime file was changed.
 
 ## Lighting groups
@@ -134,7 +134,7 @@ switching to automatic discovery from manual selection may require analysis.
 The main update window and Activity show why analysis is needed when that occurs.
 
 Changed source files, asset-discovery changes, unknown older metadata or a new
-analysis contract use the regular inventory/build workflow. Unchanged form maps
+analysis version use the regular inventory/build workflow. Unchanged form maps
 and background transport are reused; background scene fields are cached too.
 Those new field caches are populated the first time, then reused on later runs.
 Dynamic script/archive changes can still require a broad runtime inventory pass
@@ -172,9 +172,9 @@ Preview profiles and exported configuration.
 | `scenelight.image(name, **settings)` | One exact registered image name |
 | `scenelight.group(name, members=None, anchor=None, **settings)` | Shared lighting for registered sprite tags; see [groups](#lighting-groups) |
 
-For ungrouped sprites, the first five scopes apply in that order. A more specific rule replaces only the settings it
-contains. Repeated calls at the same scope merge their values. Rule state supports
-Ren'Py save/load and rollback.
+For ungrouped sprites, the first five scopes apply in that order. A more specific
+rule replaces only the settings it contains. Repeated calls at the same scope
+merge their values. Rule state supports Ren'Py save/load and rollback.
 
 ```renpy
 init python:
@@ -311,8 +311,8 @@ master switch disables glow and emitted light as well.
 
 Preview → Adjust → **Sprite glow** and **Cast light** adjust these values for the loaded
 sprite. Check emitted light onto other characters in the mod. Exported profiles
-preserve both sets of controls. For effects
-such as fire, put the settings on the image or tag so other characters do not glow.
+preserve both sets of controls. For effects such as fire, put the settings on the
+image or tag so other characters do not glow.
 
 To change the color you see in Preview, increase **Sprite glow** above zero, then
 use **Choose color** in the Sprite glow group. The picker enables **Custom glow
@@ -363,7 +363,8 @@ sprites. Existing whole-sprite glow/tint and emitted light remain separate.
 Rule ranges: RGB channels, tolerance, and softness are 0–1; strength is 0–10
 and radius is 0–2. `enabled=False` keeps a rule saved but inactive. `radius=0` suppresses the
 halo while brightening the matching artwork. `glow_rules=[]` clears the list at
-that scope. A more specific list replaces the inherited list. **Save profile** and **Export config** preserve these values. In a mod, use
+that scope. A more specific list replaces the inherited list. **Save profile**
+and **Export config** preserve these values. In a mod, use
 `scenelight.character(...)` or `scenelight.image(...)` for independent targets.
 
 ## Shaders and transforms

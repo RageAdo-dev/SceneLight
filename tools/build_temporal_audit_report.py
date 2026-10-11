@@ -83,7 +83,7 @@ def main():
     }
     (root / "results.json").write_text(json.dumps(result, indent=2) + "\n")
     # Each screenshot is the actual game's last presented frame. Preserve
-    # capture timestamps rather than pretending capture ran at a fixed FPS.
+    # capture timestamps to account for variations in capture frame rate.
     frames = sorted((root / verified_dir).glob("video-*.png"))
     concat = ["ffconcat version 1.0"]
     for index, frame in enumerate(frames):

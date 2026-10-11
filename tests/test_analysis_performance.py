@@ -53,8 +53,8 @@ def test_fast_linear_quantile_is_bit_exact_to_numpy() -> None:
 def test_form_map_uint8_linear_lookup_is_bit_exact() -> None:
     values = np.arange(256, dtype=np.uint8)
     # Vector float32 power varies by one ULP with NumPy's AVX-512 dispatch.
-    # Use scalar libm as the independent reference, retaining the approved
-    # float32 input arithmetic and rounding the power result only once.
+    # Use scalar libm as the independent reference. Retain float32 input
+    # arithmetic and round the power result only once.
     expected = []
     for value in values:
         normalized = np.float32(int(value) / 255.0)

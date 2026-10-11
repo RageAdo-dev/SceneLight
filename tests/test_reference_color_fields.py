@@ -1,4 +1,4 @@
-"""Compare accelerated hue support against the protected dense reference math."""
+"""Compare accelerated hue support against the dense reference calculation."""
 
 import cv2
 import numpy as np

@@ -1,4 +1,4 @@
-"""Transactional, ownership-safe SceneLight embedding for mod authors.
+"""Install, update, and remove SceneLight in a mod project.
 
 This module provides the reversible in-place workflow: it adds one previously
 unused namespace, records every added file by hash, and refuses to remove

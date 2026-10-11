@@ -1,4 +1,4 @@
-"""Scene editing on top of the existing exact background/media pipeline."""
+"""Scene editing using the shared background and media pipeline."""
 
 from __future__ import annotations
 

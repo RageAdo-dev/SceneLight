@@ -48,13 +48,24 @@ runtime executables, `lib/`, `module/`, `renpy/` and original `LICENSE.txt`.
 
 ## GitHub distribution
 
-**Build release ZIP** can be run manually without creating a release. A pushed
-`vX.Y.Z` tag runs the same build and creates a **draft prerelease**. Review its
-checksums, CI and validation record before publishing.
+**Build release ZIP** checks the code and builds every package. A pushed
+`vX.Y.Z` tag uploads directly to a **draft prerelease**, without storing a second
+copy as an Actions artifact. An existing release is left unchanged. Review the
+release job as well as CI, the checksums and validation record before publishing.
 
-GitHub Actions downloads expire. Keep the current download link pointed at a
-valid package; use a permanent release asset for public distribution. Public
-visibility and publication remain separate owner decisions.
+Manual runs build and validate without uploading by default. The run summary lists
+package sizes and SHA-256 checksums. To download a manual build, enable **Keep a
+temporary ZIP download for one day** when starting it. That option requires
+available Actions artifact storage; an upload failure still fails the run.
+
+Actions storage quotas do not block the direct tagged-release upload. A full
+quota can still block temporary manual downloads. Existing artifacts keep their
+original expiration dates; the one-day limit applies to new manual uploads.
+See [GitHub's artifact storage documentation](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+
+Use permanent release assets for distribution. Public visibility and publication
+remain separate owner decisions. Re-running an old failed workflow uses its old
+revision; test workflow fixes with a new manual run on the updated branch.
 
 ## Native launcher
 

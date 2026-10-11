@@ -37,9 +37,11 @@ Include:
 - Whether it began after a pose change, transition, resize, fullscreen switch,
   save load, or a longer play session.
 
-A still image cannot establish temporal behavior. A recently reported shimmer
-across multiple characters is still under investigation; earlier pose-map and
-transition fixes do not establish that this report has the same cause.
+If the issue starts after adding scenes or assets, check for pending updates
+in Setup, apply them and restart the game. A tester reported that this cleared
+their shimmer. Version 1.1.0 detects edits while Setup stays open, but that mod
+still needs a confirmation run. If the issue persists after updating, send the
+recording and report; a still image cannot show how the lighting changes over time.
 
 ## Preview changes do not appear in the game
 

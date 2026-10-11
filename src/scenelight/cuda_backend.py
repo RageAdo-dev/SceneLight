@@ -114,7 +114,7 @@ class SharedPreparedBuffer:
     def close(self) -> None:
         self.memory.close()
         # On Windows the mapping disappears when the final handle closes and
-        # ``unlink`` is intentionally a no-op. POSIX needs an explicit unlink.
+        # ``unlink`` is a no-op. POSIX needs an explicit unlink.
         if os.name != "nt":
             self.memory.unlink()
 
@@ -507,7 +507,7 @@ def _detect_components_for_layout(
             creative_fields=creative_fields,
         )
 
-    # ``Placement.clamped`` intentionally makes the bottom transport rows
+    # ``Placement.clamped`` makes the bottom transport rows
     # converge at the supported 1.25 baseline. Those rows are byte-identical
     # inputs to the expensive connected-component classifier. Classify each
     # distinct placement once, then expand the immutable result back to the

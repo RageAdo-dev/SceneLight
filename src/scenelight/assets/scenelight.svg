@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>SceneLight — smooth illuminated S</title>
-  <desc>The original S silhouette with continuous warm-to-cool lighting. No strokes, inset lines, hard lighting bands, or detached highlights.</desc>
+  <desc>An S lit in warm cream and cool blue on a dark rounded tile.</desc>
   <defs>
     <linearGradient id="tile" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#172431" /><stop offset="52%" stop-color="#0d1824" /><stop offset="100%" stop-color="#07101b" />

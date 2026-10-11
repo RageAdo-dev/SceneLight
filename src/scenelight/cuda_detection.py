@@ -23,7 +23,7 @@ class CudaSupport:
 
 
 def driver_devices() -> tuple[int, tuple[str, ...]]:
-    """Ask the CUDA driver for real, CUDA-12-capable devices, not tool markers."""
+    """Query the driver for devices compatible with CUDA 12."""
     try:
         if sys.platform == "win32":
             library = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/nvcuda.dll"

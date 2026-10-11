@@ -1,7 +1,6 @@
 """Benchmark SceneLight's production CUDA transport pipeline.
 
-This intentionally exercises the same cross-background CPU/GPU overlap used
-by ``build_project``. It does not use provisional transport or reduced grids.
+Uses the same CPU/GPU overlap and full transport grids as ``build_project``.
 """
 
 from __future__ import annotations

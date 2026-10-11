@@ -12,9 +12,7 @@ define config.screen_height = 720
 define n = Character("Nova", image="nova")
 image bg light_lab = "images/light_lab.png"
 
-# This is intentionally a real LayeredImage rather than a flat PNG image.
-# It exercises the same target-Ren'Py raw-form resolver used by mods with
-# composited/custom characters, without depending on any DDLC assets.
+# Exercise the LayeredImage resolver with generated character pieces.
 layeredimage nova:
     always "images/nova_base.png"
     group mood:

@@ -189,7 +189,7 @@ class Library:
                 thumb.save(target)
                 entry["thumbnail"] = target.relative_to(self.root).as_posix()
         except OSError:
-            pass  # Videos retain their name/type without pretending to have a still thumbnail.
+            pass  # Videos use their name and type when no still thumbnail is available.
         entries = self.entries()
         entries.append(entry)
         atomic_json(self.index_path, {"version": 1, "entries": entries})
