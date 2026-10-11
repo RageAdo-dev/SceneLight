@@ -3,8 +3,8 @@
 1 ICON "src/scenelight/assets/scenelight.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1, 1, 0, 0
- PRODUCTVERSION 1, 1, 0, 0
+ FILEVERSION 1, 1, 1, 0
+ PRODUCTVERSION 1, 1, 1, 0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -18,12 +18,12 @@ BEGIN
             VALUE "Comments", "https://github.com/RageAdo-dev/SceneLight\0"
             VALUE "CompanyName", "RageAdo-dev\0"
             VALUE "FileDescription", "SceneLight game launcher\0"
-            VALUE "FileVersion", "1.1.0\0"
+            VALUE "FileVersion", "1.1.1\0"
             VALUE "InternalName", "SceneLight\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 RageAdo-dev. MIT licensed.\0"
             VALUE "OriginalFilename", "scenelight-launcher.exe\0"
             VALUE "ProductName", "SceneLight\0"
-            VALUE "ProductVersion", "1.1.0\0"
+            VALUE "ProductVersion", "1.1.1\0"
         END
     END
     BLOCK "VarFileInfo"

@@ -24,7 +24,7 @@ from scenelight.release import (
 
 
 def test_100_is_the_first_public_release() -> None:
-    assert __version__ == "1.1.0"
+    assert __version__ == "1.1.1"
     assert FIRST_PUBLIC_VERSION == "1.0.0"
 
 
@@ -39,7 +39,8 @@ def test_versionless_install_is_explicitly_pre_release() -> None:
 def test_release_relation_handles_rc_upgrade_and_newer_downgrade() -> None:
     assert classify_release("1.0.0-rc.2").kind == "upgrade"
     assert classify_release("1.0.0").kind == "upgrade"
-    assert classify_release("1.1.0").kind == "current"
+    assert classify_release("1.1.0").kind == "upgrade"
+    assert classify_release("1.1.1").kind == "current"
     assert classify_release("1.2.0").kind == "downgrade"
     assert classify_release("old-local-build").kind == "unrecognized"
 

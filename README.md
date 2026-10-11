@@ -4,9 +4,9 @@
 
 Match your characters to the light around them.
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.0)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.1)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
 
-[Ren’Py 7 & 8](docs/COMPATIBILITY.md) · [Version 1.1.0](CHANGELOG.md) · [MIT license](LICENSE)
+[Ren’Py 7 & 8](docs/COMPATIBILITY.md) · [Version 1.1.1](CHANGELOG.md) · [MIT license](LICENSE)
 
 </div>
 
@@ -17,7 +17,7 @@ colors and light sources as they move, with controls for shadows, highlights and
 
 ## Get started
 
-1. Download **SceneLight-v1.1.0-Windows.zip**, extract it, and open **SceneLight.exe**.
+1. Download **SceneLight-v1.1.1-Windows.zip**, extract it, and open **SceneLight.exe**.
 2. Select your game folder, scan it, and choose the characters to light.
 3. Install, wait for completion, and launch the game.
 

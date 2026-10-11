@@ -12,7 +12,7 @@ body:
     attributes:
       label: SceneLight build
       description: Package/release name, and whether you ran Update SceneLight on the game after downloading it.
-      placeholder: "1.1.0, game updated and restarted"
+      placeholder: "1.1.1, game updated and restarted"
     validations:
       required: true
   - type: dropdown

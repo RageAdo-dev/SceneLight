@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
 
 - Updated Python dependencies and GitHub Actions. Fixed Setup checking for outdated component versions after a dependency update.
 - Shortened the guides and removed obsolete development reports from the current documentation.
