@@ -1,4 +1,4 @@
-"""Scene editing using the shared background and media pipeline."""
+"""Workspace prototype; the shipped one-sprite Preview does not use this mixin."""
 
 from __future__ import annotations
 

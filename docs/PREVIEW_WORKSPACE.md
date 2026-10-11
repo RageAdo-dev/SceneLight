@@ -39,11 +39,18 @@ rendering time.
 
 1. Choose **Save profile** or **Export config** to open **Save / export**.
 2. Review **Current values**, the destination and **File preview**.
-3. Choose **Save reviewed profile** or **Write reviewed config**.
+3. Choose **Save profile** or **Export config**.
 4. In Setup, select the project, run **Update SceneLight**, and restart the game.
 
-Profiles store calibration for later builds. Config export writes global lighting
-defaults while retaining existing discovery and per-background/per-sprite rules.
+Preview and Setup load the project’s `scenelight.json`, then its saved calibration
+profile. An explicitly selected config overrides both. **Save / export** lists
+the files in that order; the last file wins for matching settings.
+
+**Save profile** stores calibration for that project. Exporting to the project’s
+`scenelight.json` also updates its existing calibration profile so old defaults
+cannot override the export. Both files appear for review before you save. Existing
+discovery and per-background/per-sprite rules remain intact. Exporting elsewhere
+creates a portable config; select or copy it into the intended project before updating.
 Strength uses the same scale: **78% is 0.78**.
 
 The game may apply additional background, character or player overrides. Press

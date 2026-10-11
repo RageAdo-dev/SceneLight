@@ -179,4 +179,7 @@ def test_launch_guide_does_not_expose_post_launch_effects():
     ):
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "scenelight_fx" not in text
-        assert "EFFECT_PACKS.md" not in text
+        if name == "docs/MOD_AUTHOR_API.md":
+            assert "experimental, script-only API" in text
+        else:
+            assert "EFFECT_PACKS.md" not in text

@@ -61,8 +61,9 @@ def test_modified_or_missing_packaged_launcher_is_rejected(tmp_path, missing):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Authenticode")
 def test_signed_mode_rejects_actual_unsigned_executable(tmp_path):
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError) as error:
         signatures.verify(packages(tmp_path), signed=True)
+    assert "Invalid package signature" in error.value.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows signing workflow")

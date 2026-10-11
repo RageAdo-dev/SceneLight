@@ -65,6 +65,7 @@ def verify(
             script.write_text(
                 """param([string]$Inventory)
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1')
 foreach ($file in (Get-Content -LiteralPath $Inventory -Raw | ConvertFrom-Json)) {
     $signature = Get-AuthenticodeSignature -LiteralPath $file
     if ($signature.Status -ne 'Valid') { throw "Invalid package signature: $file ($($signature.Status))" }
@@ -83,6 +84,8 @@ foreach ($file in (Get-Content -LiteralPath $Inventory -Raw | ConvertFrom-Json))
                 ],
                 check=True,
                 timeout=180,
+                capture_output=True,
+                text=True,
             )
     return records
 

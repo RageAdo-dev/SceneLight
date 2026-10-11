@@ -1,6 +1,7 @@
 param([switch]$RequireSigning)
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ([string]::IsNullOrWhiteSpace($env:SCENELIGHT_CERT_PFX)) {
     if ($RequireSigning) { throw 'Signing is required but WINDOWS_CERT_PFX is missing.' }
