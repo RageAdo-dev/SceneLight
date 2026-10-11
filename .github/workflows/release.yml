@@ -20,6 +20,7 @@ jobs:
     env:
       SCENELIGHT_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
       SCENELIGHT_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      SCENELIGHT_REQUIRE_SIGNING: ${{ vars.REQUIRE_WINDOWS_SIGNING }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,63 +36,11 @@ jobs:
       - run: pytest
       - run: bandit -r src -ll
       - run: python -m pip_audit -r requirements-preview.txt --progress-spinner off
-      - run: python -m build
       - name: Sign the bundled launchers
-        if: env.SCENELIGHT_CERT_PFX != ''
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
-          $pfx = Join-Path $env:RUNNER_TEMP 'scenelight-signing.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SCENELIGHT_CERT_PFX))
-          try {
-            $password = ConvertTo-SecureString -String $env:SCENELIGHT_CERT_PASSWORD -Force -AsPlainText
-            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-            foreach ($exe in @(
-              'src\scenelight\assets\scenelight-desktop.exe',
-              'src\scenelight\assets\scenelight-launcher.exe'
-            )) {
-              $signature = Set-AuthenticodeSignature -FilePath $exe -Certificate $cert `
-                -HashAlgorithm SHA256 -TimestampServer 'http://timestamp.digicert.com'
-              if ($signature.Status -ne 'Valid') {
-                throw "Signing failed for $exe ($($signature.Status))"
-              }
-              Write-Output "Signed $exe"
-            }
-          } finally {
-            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
-          }
-      - name: Sign with Azure Artifact Signing
-        if: env.TRUSTED_SIGNING_ACCOUNT != '' && env.TRUSTED_SIGNING_CERT_PROFILE != ''
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter 'signtool.exe' -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { throw 'signtool.exe was not found; install the Windows SDK first.' }
-          $dlib = if ($env:TRUSTED_SIGNING_DLIB) { Get-Item -LiteralPath $env:TRUSTED_SIGNING_DLIB } else {
-            Get-ChildItem -Path $env:ProgramFiles -Filter 'Azure.CodeSigning.Dlib.dll' -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          }
-          if (-not $dlib) {
-            throw 'Azure.CodeSigning.Dlib.dll was not found. Install the Trusted Signing client tools or set TRUSTED_SIGNING_DLIB.'
-          }
-          $metadata = Join-Path $env:RUNNER_TEMP 'scenelight-signing.json'
-          @{
-            Endpoint = if ($env:TRUSTED_SIGNING_ENDPOINT) { $env:TRUSTED_SIGNING_ENDPOINT } else { 'https://eus.codesigning.azure.net/' }
-            CodeSigningAccountName = $env:TRUSTED_SIGNING_ACCOUNT
-            CertificateProfileName = $env:TRUSTED_SIGNING_CERT_PROFILE
-          } | ConvertTo-Json | Set-Content -LiteralPath $metadata -Encoding utf8
-          foreach ($exe in @(
-            'src\scenelight\assets\scenelight-desktop.exe',
-            'src\scenelight\assets\scenelight-launcher.exe'
-          )) {
-            & $signtool.FullName sign /v /fd SHA256 /tr 'http://timestamp.acs.microsoft.com' /td SHA256 `
-              /dlib $dlib.FullName /dmdf $metadata $exe
-            if ($LASTEXITCODE -ne 0) { throw "Artifact Signing failed for $exe" }
-            $signature = Get-AuthenticodeSignature -FilePath $exe
-            if ($signature.Status -ne 'Valid') { throw "Invalid signature on $exe ($($signature.Status))" }
-            Write-Output "Signed $exe"
-          }
+          .\tools\sign_release.ps1 -RequireSigning:($env:SCENELIGHT_REQUIRE_SIGNING -eq 'true')
+      - run: python -m build
       - name: Build the tested ZIP variants with the verified compatibility runtime
         shell: powershell
         run: |
@@ -105,6 +54,13 @@ jobs:
           python tools/build_online_installer.py "dist/SceneLight-v$version-Windows.zip" --release-tag $tag
           if ($LASTEXITCODE -ne 0) { throw 'Online installer build failed.' }
           .\tools\build_release_zip.ps1 -Source
+      - name: Verify packaged launchers
+        shell: powershell
+        run: |
+          $arguments = @('tools/verify_release_signatures.py')
+          if ($env:SCENELIGHT_CERT_PFX -ne '') { $arguments += '--signed' }
+          python @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged launcher verification failed.' }
       - name: Record package checksums
         shell: powershell
         run: |

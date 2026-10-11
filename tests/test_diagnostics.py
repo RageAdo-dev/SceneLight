@@ -113,3 +113,40 @@ def test_large_inspector_json_is_exported_whole_not_a_broken_tail(tmp_path, monk
     diagnostics.export_report(session.path, destination, game_root=game)
     with zipfile.ZipFile(destination) as archive:
         assert json.loads(archive.read("game/scenelight-inspector.json")) == content
+
+
+def test_nested_and_quoted_credentials_are_absent_from_every_export_member(tmp_path):
+    secrets = ["fake-bearer-329", "fake-key with spaces", "fake-escaped-873", "fake-cookie-654"]
+    headers = {"Authorization": "Bearer " + secrets[0], "X-Request-ID": "keep-this"}
+    payload = {"headers": headers, "items": [{"API_key": secrets[1]}], "Cookie": secrets[3]}
+    session = diagnostics.Session("test", root=tmp_path / "logs")
+    session.event(
+        "request",
+        "Failed request",
+        "error",
+        response=payload,
+        nested=json.dumps({"Authorization": "Bearer " + secrets[2]}),
+    )
+    session.output(json.dumps(payload) + "\n")
+    session.attach_text(
+        "headers", "headers: " + repr(payload) + "\nAuthorization: Bearer " + secrets[0]
+    )
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "scenelight-inspector.json").write_text(json.dumps(payload))
+    destination = tmp_path / "report.zip"
+    diagnostics.export_report(
+        session.path, destination, game_root=game, notes='Authorization="Bearer ' + secrets[0] + '"'
+    )
+    with zipfile.ZipFile(destination) as archive:
+        for name in archive.namelist():
+            text = archive.read(name).decode()
+            assert all(secret not in text for secret in secrets), name
+            if name.endswith(".json"):
+                json.loads(text)
+            if ".jsonl" in name:
+                for line in text.splitlines():
+                    json.loads(line)
+        content = json.loads(archive.read("game/scenelight-inspector.json"))
+        assert content["headers"]["X-Request-ID"] == "keep-this"
+        assert content["headers"]["Authorization"] == "<REDACTED>"
