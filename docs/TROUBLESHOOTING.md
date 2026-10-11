@@ -1,6 +1,6 @@
 # Find and report a problem
 
-[Install and update](INSTALL.md) · [Inspector reference](MOD_AUTHOR_API.md#inspect-an-actual-game-scene) · [Known issues](BETA_VALIDATION.md#known-issues-and-coverage-limits)
+[Install and update](INSTALL.md) · [Inspector reference](MOD_AUTHOR_API.md#inspect-an-actual-game-scene) · [Known issues](COMPATIBILITY.md)
 
 ## Lighting looks wrong in a game
 
@@ -11,8 +11,8 @@
    **Clear all test edits** to undo the whole experiment.
 4. Open **Checks** to add a short description, then choose **Export report**.
 
-The inspector saves a `scenelight-support-*.zip` beside `game/`. It contains a
-readable `report.html`, settings, runtime fingerprints and relevant logs. A
+The inspector saves a `scenelight-support-*.zip` beside `game/` with a readable
+report, settings and logs. A
 screenshot is optional. Story rules and save files are not included. Review the
 ZIP before sharing: project names and user-supplied error text may remain.
 
@@ -37,11 +37,8 @@ Include:
 - Whether it began after a pose change, transition, resize, fullscreen switch,
   save load, or a longer play session.
 
-If the issue starts after adding scenes or assets, check for pending updates
-in Setup, apply them and restart the game. A tester reported that this cleared
-their shimmer. Version 1.1.0 detects edits while Setup stays open, but that mod
-still needs a confirmation run. If the issue persists after updating, send the
-recording and report; a still image cannot show how the lighting changes over time.
+If this begins after adding scenes or assets, apply pending updates in Setup and
+restart the game. If it persists, send the recording and report.
 
 ## Preview changes do not appear in the game
 
@@ -70,7 +67,7 @@ then choose the report export. Include game logs when reporting gameplay issues.
 
 A compatible runtime/settings-only update keeps prepared asset maps. New artwork,
 changed discovery settings or incompatible caches still require preparation.
-[What the speed measurements cover](performance.md#installation-and-update-finalization).
+
 
 ## A missing sprite or background is reported
 

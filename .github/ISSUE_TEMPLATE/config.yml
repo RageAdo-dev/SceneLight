@@ -2,7 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Find and report a problem
     url: https://github.com/RageAdo-dev/SceneLight/blob/main/docs/TROUBLESHOOTING.md
-    about: Inspector, settings overrides, progress stages and useful report exports.
-  - name: Compatibility and validation notes
-    url: https://github.com/RageAdo-dev/SceneLight/blob/main/docs/BETA_VALIDATION.md
-    about: Known limits, tested engines and hardware results before reporting a bug.
+    about: Use the inspector or Activity to diagnose a problem.
+  - name: Compatibility
+    url: https://github.com/RageAdo-dev/SceneLight/blob/main/docs/COMPATIBILITY.md
+    about: Supported engines, graphics requirements and limitations.

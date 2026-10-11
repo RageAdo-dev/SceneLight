@@ -107,7 +107,7 @@ if ($Source) {
         "pyproject.toml", "README.md", "requirements.txt",
         "requirements-preview.txt", "SECURITY.md", "scenelight_sdk.py",
         "scenelight_setup.pyw", "scenelight_preview.pyw",
-        "THIRD_PARTY_NOTICES.md", "VALIDATION.md", "VALIDATION_RESULTS.md"
+        "THIRD_PARTY_NOTICES.md"
     )
     foreach ($item in $items) {
         Copy-Item -LiteralPath (Join-Path $root $item) `
@@ -119,7 +119,7 @@ if ($Source) {
         -Destination (Join-Path $packageRoot "SceneLight.exe")
     foreach ($item in @(
         "SceneLight.bat", "scenelight.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
-        "CONTRIBUTING.md", "SECURITY.md", "VALIDATION.md", "VALIDATION_RESULTS.md", "CHANGELOG.md"
+        "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md"
     )) {
         Copy-Item -LiteralPath (Join-Path $root $item) -Destination $packageRoot -Force
     }

@@ -73,4 +73,4 @@ a guarantee that every scene will produce the desired artistic result.
 
 Automated tests also cover threshold continuity, near-tied hue sectors, exact
 live/prepared replay, still/video agreement, immediate flashes and cuts, and the
-two-frame playback cache bound. See [current validation](BETA_VALIDATION.md).
+two-frame playback cache bound. See [testing checklist](TESTING.md).

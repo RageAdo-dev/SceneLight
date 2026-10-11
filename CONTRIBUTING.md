@@ -26,7 +26,7 @@ python -m build
 ```
 
 Add focused regression coverage and explain what changed, why, and how it was
-verified. Renderer changes also need the relevant [Ren'Py and image comparisons](VALIDATION.md).
+verified. Renderer changes also need the relevant [Ren'Py and image comparisons](docs/TESTING.md).
 Keep useful assertions and security checks intact; record any check that could
 not run.
 

@@ -2,7 +2,7 @@
 
 SceneLight reuses prepared movie lighting and sprite maps, and avoids repeated
 shader work. These optimizations retain lighting resolution, detail and timing.
-See [prepared playback](prepared-playback.md) and [older-hardware results](BETA_VALIDATION.md#playback-and-hardware).
+See [prepared playback](prepared-playback.md) and [hardware requirements](COMPATIBILITY.md).
 
 ## Installation and update finalization
 

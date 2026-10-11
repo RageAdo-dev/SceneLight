@@ -711,7 +711,7 @@ _WORKFLOW = (
         "Test the game you will distribute, including its lighting files.",
         "Include the installed game/scenelight_runtime/ files in your Ren'Py build. Keep your own story rules. Check custom build/archive exclusions so generated runtime files and maps are not omitted.",
         "Extract the built game into a fresh folder and launch it. Check movement, expression changes, transitions, skipping, resizing, UI, custom shaders, save/load, and rollback.",
-        "Test on your target GPUs and Ren'Py version. CUDA only accelerates preparation; players do not need CUDA for lighting. See the bundled docs/BETA_VALIDATION.md for tested coverage and limits.",
+        "Check your mod on its target GPUs and Ren'Py version. CUDA is optional. See docs/COMPATIBILITY.md for requirements and limitations.",
         "The full offline documentation is included in the download's docs folder: AUTHOR_QUICKSTART.md and MOD_AUTHOR_API.md.",
         keywords="ship release export build distribute package test offline documentation requirements GPU CUDA",
     ),

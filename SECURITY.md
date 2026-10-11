@@ -45,4 +45,4 @@ sensitive details in a public issue. Include the SceneLight and Ren'Py versions,
 OS, affected operation and a minimal reproduction using original assets.
 Ordinary non-sensitive hardening issues can use the normal issue tracker.
 
-[Validation process](VALIDATION.md) · [Dependency and artwork notices](THIRD_PARTY_NOTICES.md)
+[Validation process](docs/TESTING.md) · [Dependency and artwork notices](THIRD_PARTY_NOTICES.md)

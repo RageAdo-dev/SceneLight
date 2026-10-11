@@ -32,9 +32,14 @@ init python:
 Explicit exclusions in **Characters…** take precedence over tag registration.
 Recheck a family and apply the update to enable it again.
 
+To include newly discovered characters automatically, set
+`"auto_include_new_characters": true`. Use `"excluded_character_tags": ["sticker"]`
+for persistent exclusions. Choices saved in Setup take precedence over the config.
+
+
 When Setup detects added assets, use **Check changed assets → Update SceneLight**.
-Existing poses can use a generic surface until their own maps are ready. Updates reuse valid
-analysis and stop if an owned runtime file was changed.
+New poses can use a generic surface until their maps are prepared. Restart the game
+after updating. Updates stop if a SceneLight-owned runtime file was edited.
 
 ## Lighting groups
 
@@ -75,93 +80,6 @@ new games. Story calls, save/load and rollback preserve the current group state.
 The inspector shows membership, shared position and applied setting sources.
 
 ## Scopes and precedence
-
-### Inspect an actual game scene
-
-Press **Shift+F9**, or call `$ scenelight.inspector()`. Select a visible sprite.
-In SceneLight Setup, select the project and open **Settings → Advanced → Include
-in-game inspector**, then **Apply to project**. Turning it off removes the inspector
-source, helper and compiled script from the selected installation; neither the
-shortcut nor the API opens a panel after restarting the game. Turning it on adds
-the tool back. This does not change lighting, rebuild asset maps or change saved
-player preferences. The choice survives both code-only and full asset updates.
-For a new project, Apply saves the choice for its next installation. The default
-remains enabled. A different/older runtime may need a normal SceneLight update
-before the current inspector can be enabled. Exclude it before building a mod
-release if players should not have the debugging tool.
-
-**Applied settings** shows each effective value and its winning source.
-**All sources** includes values overridden by a later scope, the installed profile,
-saved player master, last drawn strength, map availability and detected external
-color grading, including nested lighting passes. Rules created by this runtime
-also record their script filename and line. Older saved rules may lack that
-location until the relevant script call executes again.
-A transition can retain a frozen earlier state; that is identified
-separately from current rules.
-
-Drag a numeric value's slider for live adjustment, or use **Edit** to enter an
-exact number. Both apply a temporary test value only to the selected background/tag/image.
-Master edits affect all sprites temporarily. Original story rules and persistent
-preferences are untouched. **Reset** restores one value; **Clear all test edits**
-restores the complete original state. Closing the panel keeps edits active with a
-visible badge. New game, load or restart clears them.
-
-**Checks** lists observed conflicts, missing exact sprite maps, external grading,
-disabled lighting and differing master/author values. Add reproduction notes there.
-
-**Export report** now writes one `scenelight-support-*.zip` beside `game/` with
-readable `report.html`, settings and provenance JSON, exact runtime hashes,
-installation metadata, engine logs, notes and any recorded samples. It includes a
-screenshot only when selected in Checks. It does not include scripts, saves or
-source artwork. A `scenelight-inspector.json` copy remains available for
-**Settings → Activity → Include game logs… → Export report…**.
-`scenelight.inspect()` returns the same diagnostic data; pass a tag such as
-`scenelight.inspect("hero")` to select one character.
-
-### Updating large projects
-
-Compatible SceneLight code updates verify authored inputs and the existing
-installation, then replace only changed runtime code. They do not capture sprites,
-analyze backgrounds, copy the map collection or reinstall the game. A recovery
-journal restores interrupted code replacements on the next update. Concurrent
-updates to the same project are refused.
-
-Lighting/profile edits and selection changes among already prepared character
-families use a settings-only update when asset-discovery inputs and source files
-are unchanged. Existing maps stay in place, and per-background calibration is
-updated for static and animated scenes. Newly selected unprepared families or
-switching to automatic discovery from manual selection may require analysis.
-The main update window and Activity show why analysis is needed when that occurs.
-
-Changed source files, asset-discovery changes, unknown older metadata or a new
-analysis version use the regular inventory/build workflow. Unchanged form maps
-and background transport are reused; background scene fields are cached too.
-Those new field caches are populated the first time, then reused on later runs.
-Dynamic script/archive changes can still require a broad runtime inventory pass
-because one definition can alter thousands of expressions. Source hashing and
-integrity checks still take time on large projects. Activity records why an update
-took its route and the build report includes cache counts.
-
-### Control a background's color cast
-
-```renpy
-init python:
-    scenelight.background("lake", light_color="#4080FF",
-        light_color_amount=-0.5, light_color_tolerance=0.25)
-```
-
-This reduces the influence of blue light on characters without editing the
-background image or selecting blue pixels in the character's artwork. The hex
-color chooses the target hue; tolerance includes nearby shades with a soft edge.
-Amount ranges from **-1** (neutralize matching light color) through **0** (unchanged)
-to **+1** (increase its color). The incoming light's luminance is retained. Grays
-have no color cast to adjust. This does not change sprite glow or light emitted
-by other sprites. The same control is in Preview's **Adjust → Light color**.
-
-The shorthand sets `light_color_red`, `light_color_green` and `light_color_blue`
-(each 0–1). `light_color_amount` is -1–1; `light_color_tolerance` is 0–1. These
-settings also work at the other existing lighting scopes and round-trip through
-Preview profiles and exported configuration.
 
 | Call | Applies to |
 | --- | --- |
@@ -241,6 +159,55 @@ supplies another value. Mode aliases are `combined`/`realistic` for Physical and
 
 An authored `strength` replaces the saved Preview strength at its matching scope.
 The player's persistent master strength remains multiplicative.
+
+## Control a background's color cast
+
+```renpy
+init python:
+    scenelight.background("lake", light_color="#4080FF",
+        light_color_amount=-0.5, light_color_tolerance=0.25)
+```
+
+This reduces the influence of blue light on characters without editing the
+background image or selecting blue pixels in the character's artwork. The hex
+color chooses the target hue; tolerance includes nearby shades with a soft edge.
+Amount ranges from **-1** (neutralize matching light color) through **0** (unchanged)
+to **+1** (increase its color). The incoming light's luminance is retained. Grays
+have no color cast to adjust. This does not change sprite glow or light emitted
+by other sprites. The same control is in Preview's **Adjust → Light color**.
+
+The shorthand sets `light_color_red`, `light_color_green` and `light_color_blue`
+(each 0–1). `light_color_amount` is -1–1; `light_color_tolerance` is 0–1. These
+settings also work at the other existing lighting scopes and round-trip through
+Preview profiles and exported configuration.
+
+## Inspect an actual game scene
+
+Press **Shift+F9** or call `$ scenelight.inspector()` with a sprite visible.
+Select the sprite, then use **Applied settings** for effective values and
+**All sources** for the rules supplying them. The inspector also identifies
+missing maps, external grading and frozen transition state.
+
+Use sliders or **Edit** to try temporary values. **Reset** clears one edit;
+**Clear all test edits** clears them all. Closing the panel keeps edits active.
+New game, loading or restarting clears them. To keep a change, add it to your
+project config or script rules.
+
+**Export report** saves a support ZIP beside `game/`. For a walkthrough, see
+[troubleshooting](TROUBLESHOOTING.md). `scenelight.inspect()` returns the diagnostic
+data directly; pass a tag, such as `scenelight.inspect("hero")`, to inspect one character.
+
+Include or remove the tool through **Settings → Advanced → Include in-game
+inspector → Apply to project**, then restart the game. Removing it removes the
+shortcut too. Older installations may need a normal update first.
+
+## Updating projects
+
+Run **Update SceneLight** after changing source assets or saved Preview settings,
+then restart the game. Compatible code/settings updates keep prepared maps.
+New artwork or changed discovery rules may require analysis; dynamic scripts
+and archives can require a wider scan because one definition affects many images.
+Activity shows the current work and why preparation is needed.
 
 ## Settings
 
@@ -390,4 +357,4 @@ layer's UI; keep UI on a separate layer when appropriate.
 Custom code that replaces scene-list internals or ignores its child texture needs
 its own compatibility check.
 
-[Compatibility](BETA_VALIDATION.md)
+[Compatibility](COMPATIBILITY.md)

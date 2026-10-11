@@ -1,33 +1,16 @@
 # Documentation
 
-## Using SceneLight
+| I want to… | Guide |
+| --- | --- |
+| Install, update or remove SceneLight | [Installation](INSTALL.md) |
+| Adjust lighting, glow and exports | [Preview](PREVIEW_WORKSPACE.md) |
+| Add lighting to my mod | [Author quickstart](AUTHOR_QUICKSTART.md) |
+| Look up a command or setting | [API reference](MOD_AUTHOR_API.md) |
+| Diagnose a problem | [Troubleshooting](TROUBLESHOOTING.md) |
+| Check requirements and limitations | [Compatibility](COMPATIBILITY.md) |
+| See the results | [Gallery](GALLERY.md) |
+| Understand the lighting | [How it works](HOW_IT_WORKS.md) |
 
-- [Installation, Preview, updates and removal](INSTALL.md)
-- [Preview controls, glow, exports, and bug reports](PREVIEW_WORKSPACE.md)
-- [Visual gallery](GALLERY.md)
-- [Troubleshooting and useful bug reports](TROUBLESHOOTING.md)
-- [How the lighting and surface maps work](HOW_IT_WORKS.md)
-- [Compatibility and hardware results](BETA_VALIDATION.md)
-
-## Making a game
-
-- [Author quickstart](AUTHOR_QUICKSTART.md)
-- [Lighting API](MOD_AUTHOR_API.md)
-
-## Technical reference
-
-- [Architecture](ARCHITECTURE.md)
-- [Rendering status](REALTIME_IMPLEMENTATION_STATUS.md)
-- [Real-time rendering design](REALTIME_RENDERING_PLAN.md)
-- [Prepared movie playback](prepared-playback.md)
-- [Live light continuity](live-continuity.md)
-- [Performance measurements](performance.md)
-
-## Maintaining SceneLight
-
-- [Contributing](../CONTRIBUTING.md)
-- [Validation](../VALIDATION.md) and [results](../VALIDATION_RESULTS.md)
-- [Fresh Windows checks](FRESH_MACHINE_VALIDATION.md)
-- [Release checklist](RELEASING.md)
-- [Security](../SECURITY.md)
-- [Historical development records](history/README.md)
+For contributors: [development setup](../CONTRIBUTING.md),
+[architecture](ARCHITECTURE.md), [testing](TESTING.md),
+[performance](performance.md), and [releasing](RELEASING.md).

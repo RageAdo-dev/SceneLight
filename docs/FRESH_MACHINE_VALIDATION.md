@@ -46,4 +46,4 @@ Retain package checksums, dependency audit output, source hashes, renderer detai
 timings and original-fixture screenshots. Record failed and skipped checks.
 Review logs for private paths or other sensitive data before sharing them.
 
-[Validation matrix](../VALIDATION.md) · [Release checklist](RELEASING.md)
+[Validation matrix](TESTING.md) · [Release checklist](RELEASING.md)

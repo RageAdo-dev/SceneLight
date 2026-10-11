@@ -159,7 +159,7 @@ Built-in rain and glitch are optional post-lighting branches. Developer effect
 packs add validated shader parts; the player effects panel and hotkey are disabled.
 See the [lighting API](MOD_AUTHOR_API.md) and [effect-pack reference](EFFECT_PACKS.md).
 
-[Performance](performance.md) · [Validation](BETA_VALIDATION.md) · [Design history](history/README.md)
+[Performance](performance.md) · [Testing](TESTING.md)
 
 ## Progress for long operations
 

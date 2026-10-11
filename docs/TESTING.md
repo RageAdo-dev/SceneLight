@@ -1,8 +1,7 @@
 # Validation
 
-Run these checks for changes that affect installation, rendering or distribution.
-The [results page](VALIDATION_RESULTS.md) records completed coverage; this checklist
-does not imply that every target has passed for the current change.
+For maintainers. Run the checks relevant to the changed behavior and record failures
+or skipped coverage. Keep fixture assets and machine-specific reports outside the repository.
 
 ## Integration matrix
 
@@ -84,7 +83,7 @@ existing scene/sprite rules, and exercise a changed, invalid and unwritable
 destination. Loaded precision must survive edits to unrelated controls. Keep
 large config reads out of the live edit path while the review page is hidden.
 
-1. Run the commands in [Contributing](CONTRIBUTING.md), including the dependency audit.
+1. Run the commands in [Contributing](../CONTRIBUTING.md), including the dependency audit.
 2. Install the built archive into a temporary Python environment.
 3. Scan, install, verify and remove a synthetic project. Compare source hashes before and after.
 4. Redirect `SCENELIGHT_COMPONENT_ROOT` into the test directory and confirm dependencies do not change global Python.
@@ -92,7 +91,7 @@ large config reads out of the live edit path while the review page is hidden.
 6. Verify checksums and exercise launcher paths containing spaces, percent signs and environment-variable-like text.
 7. Remove the temporary component environment after testing. Record cleanup or verification steps that could not complete.
 
-Before public distribution, complete the [fresh Windows checks](docs/FRESH_MACHINE_VALIDATION.md).
+Before public distribution, complete the [fresh Windows checks](FRESH_MACHINE_VALIDATION.md).
 Keep physical GPU validation separate from virtual-machine compatibility checks.
 Audit the exact base, Preview, packaging and optional CUDA dependency sets.
 
@@ -105,3 +104,10 @@ separate checks against their intended sprites and renderer.
 
 Keep private fixtures, saves and captures outside the repository. Record engine,
 GPU, source identity, method and limitations alongside each result.
+
+## Earlier measurements
+
+Old investigation reports and design plans are retained in
+[Git history](https://github.com/RageAdo-dev/SceneLight/tree/fb26d4b7e106177a738cb99aa4db8bfa91bb4a26/docs/history).
+They describe the versions tested at the time. Use current CI and a new integration
+run when validating a release.

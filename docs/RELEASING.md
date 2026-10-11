@@ -5,7 +5,7 @@ approves public distribution.
 
 ## Validate
 
-- Run [the development checks](../CONTRIBUTING.md) and [integration matrix](../VALIDATION.md).
+- Run [the development checks](../CONTRIBUTING.md) and [integration matrix](TESTING.md).
 - Complete the [fresh Windows procedure](FRESH_MACHINE_VALIDATION.md) from the built archive.
 - Exercise updates from a versionless installation and a current installation.
   Verify recovery and reuse of unchanged analysis.
@@ -66,6 +66,19 @@ See [GitHub's artifact storage documentation](https://docs.github.com/en/billing
 Use permanent release assets for distribution. Public visibility and publication
 remain separate owner decisions. Re-running an old failed workflow uses its old
 revision; test workflow fixes with a new manual run on the updated branch.
+
+## Online installer
+
+Build the complete ZIP first, then run:
+
+```text
+python tools/build_online_installer.py dist/SceneLight-v1.1.0-Windows.zip --release-tag <tag>
+```
+
+Publish both ZIPs under that tag. The online installer pins the complete package’s
+hash, so rebuild it whenever the payload changes. It cannot authenticate to private
+GitHub assets; give private testers the complete Windows ZIP. The release workflow
+builds both variants.
 
 ## Native launcher
 
@@ -138,4 +151,4 @@ Windows package. Keep prerelease status until the intended release checks and
 tester runs are complete. History rewrites are a separate maintenance operation
 and require an explicit request and a recoverable backup.
 
-[Compatibility results](BETA_VALIDATION.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
+[Compatibility results](COMPATIBILITY.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
