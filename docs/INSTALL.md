@@ -3,7 +3,6 @@
 [Download SceneLight for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.1).
 Extract **SceneLight-v1.1.1-Windows.zip** and open **SceneLight.exe**.
 You do not need administrator access or a separate Python installation.
-Private downloads require repository access or a copy from the maintainer.
 
 Keep a backup of your game and saves before installing.
 Check [compatibility](COMPATIBILITY.md) if you are unsure about your game or graphics hardware.

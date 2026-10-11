@@ -1,5 +1,5 @@
 name: Bug report
-description: Something rendered wrongly, crashed, or performed badly.
+description: Report a lighting, installation or performance problem.
 title: "[Bug] "
 labels: ["bug"]
 body:
@@ -10,8 +10,8 @@ body:
   - type: input
     id: build
     attributes:
-      label: SceneLight build
-      description: Package/release name, and whether you ran Update SceneLight on the game after downloading it.
+      label: SceneLight version
+      description: Include whether you updated the game and restarted it.
       placeholder: "1.1.1, game updated and restarted"
     validations:
       required: true

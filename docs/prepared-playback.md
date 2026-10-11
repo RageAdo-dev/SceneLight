@@ -9,9 +9,9 @@ continuity. Resolution, light count, transport, calibration and shadows are unch
 
 The resulting `.slframes` archive stores losslessly compressed copies of the
 four shader inputs, including the transport metadata row. It costs 189,440 bytes
-per frame before compression. A tested five-second, 24 fps Backrooms movie used
-about 5 MiB on disk. Playback retains two decoded lighting frames and a bounded
-pool of graphics textures; it does not load the whole movie's lighting into RAM.
+per frame before compression; compressed size depends on the scene. Playback
+retains two decoded lighting frames and a bounded pool of graphics textures;
+it does not load the whole movie's lighting into RAM.
 
 The Preview pairs lighting with the decoder's exact frame index. Ren'Py's movie
 clock can disagree with the displayed frame, so the native runtime identifies the
@@ -48,5 +48,3 @@ reports how to repair them before preparing movies.
 
 The sprite shader also skips unused form-lighting work on transparent canvas
 pixels. The alpha threshold is unchanged, and later shader parts still execute.
-This optimization was checked against the previous shader with complete rendered-pixel comparisons on NVIDIA and the
-2011 iMac's AMD graphics hardware.

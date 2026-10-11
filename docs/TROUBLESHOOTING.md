@@ -12,9 +12,9 @@
 4. Open **Checks** to add a short description, then choose **Export report**.
 
 The inspector saves a `scenelight-support-*.zip` beside `game/` with a readable
-report, settings and logs. A
-screenshot is optional. Story rules and save files are not included. Review the
-ZIP before sharing: project names and user-supplied error text may remain.
+report, settings and logs, with an optional screenshot. Story rules and save files
+are not included. Review the ZIP before sharing: project names and user-supplied
+error text may remain.
 
 Inspector edits are temporary. New game, loading and restarting clear them;
 closing the panel alone keeps them active. To keep a lighting choice permanently,
@@ -48,8 +48,8 @@ restart the game. If it persists, send the recording and report.
 4. Check **All sources** in the inspector for background, scene, character, image
    or player overrides that take precedence over the exported defaults.
 
-Compare the same sprite, background, placement and settings. **78% is 0.78**;
-strength is not inverted. The inspector shows the final effective value, including
+Compare the same sprite, background, placement and settings. A Preview strength
+of 78% corresponds to `strength=0.78`. The inspector shows the final value, including
 the player master multiplier. Inspector test edits do not automatically become
 Preview defaults or permanent project rules.
 
@@ -67,7 +67,6 @@ then choose the report export. Include game logs when reporting gameplay issues.
 
 A compatible runtime/settings-only update keeps prepared asset maps. New artwork,
 changed discovery settings or incompatible caches still require preparation.
-
 
 ## A missing sprite or background is reported
 

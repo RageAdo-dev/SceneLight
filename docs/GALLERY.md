@@ -31,7 +31,7 @@ The same sprite and placement, without and with SceneLight:
 
 Groups share a lighting position and settings. [Add a group](AUTHOR_QUICKSTART.md#light-separate-sprites-together).
 
-## Glow and reviewed exports
+## Glow and exports
 
 ![Sprite glow controls](media/preview-glow.png)
 

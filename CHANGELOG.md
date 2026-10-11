@@ -2,13 +2,12 @@
 
 ## 1.1.1
 
-- Updated Python dependencies and GitHub Actions. Fixed Setup checking for outdated component versions after a dependency update.
-- Shortened the guides and removed obsolete development reports from the current documentation.
-- Tagged releases upload directly to GitHub Releases. Optional Actions downloads expire after one day.
+- Fixed Setup incorrectly asking for older components after an update.
+- Updated bundled components and clarified the installation and lighting guides.
 
 ## 1.1.0
 
-- Added lighting groups so separate sprites can share settings and a lighting position. Groups support moving or fixed anchors, save/load, and rollback.
+- Added lighting groups so separate sprites can share settings and a lighting position.
 - Added group details to the in-game inspector.
 - Setup now detects project edits while it stays open and offers **Check changed assets → Update SceneLight**. Restart the game after updating.
 
@@ -25,7 +24,7 @@
 ### Preview and diagnostics
 
 - Preview with draggable placement, lighting and glow controls, and Original/Split comparisons.
-- Reviewed profile/config exports and PNG, GIF or video output at up to 4K.
+- Settings review before saving profiles or configs, plus PNG, GIF and video exports at up to 4K.
 - Optional **Shift+F9** inspector with sliders, exact edits, rule sources and report export.
 - Persistent Activity logs with progress, skipped assets and support reports.
 

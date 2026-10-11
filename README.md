@@ -25,7 +25,7 @@ Players can add SceneLight to a game or create a separate copy. Mod developers c
 install the API in their project and control lighting from their scripts.
 The Windows package includes everything needed to start; no Python setup is required.
 
-## Adjust it your way
+## Preview and controls
 
 ![Preview with lighting controls beside the character](docs/media/preview-workspace.png)
 

@@ -340,9 +340,9 @@ An outer `show ... at` model shader receives SceneLight's lit character. A shade
 inside an image declaration runs first, making its result SceneLight's input.
 Use `mesh True` to give a model shader its own rendering pass.
 
-The [Make Visual Novels! shader pack](https://makevisualnovels.itch.io/make-visual-novels-rspv1)
-was validated with this ordering on Ren'Py 7.8.7 and 8.5.2. That is historical
-composition coverage, not a recommendation to install the leaking 7.8.7 runtime.
+For example, apply a transform from the
+[Make Visual Novels! shader pack](https://makevisualnovels.itch.io/make-visual-novels-rspv1)
+after SceneLight:
 
 ```renpy
 show hero happy at left, IntenseAberate

@@ -1,7 +1,6 @@
 # Release checklist
 
-For maintainers. Keep the repository and artifacts private until the owner
-approves public distribution.
+For maintainers building and publishing a SceneLight release.
 
 ## Validate
 
@@ -48,24 +47,13 @@ runtime executables, `lib/`, `module/`, `renpy/` and original `LICENSE.txt`.
 
 ## GitHub distribution
 
-**Build release ZIP** checks the code and builds every package. A pushed
-`vX.Y.Z` tag uploads directly to a **draft prerelease**, without storing a second
-copy as an Actions artifact. An existing release is left unchanged. Review the
-release job as well as CI, the checksums and validation record before publishing.
+Pushing a `vX.Y.Z` tag runs the release workflow and creates a draft prerelease
+with the packages and checksums. Existing releases are left unchanged.
+Review the downloads and release notes before publishing.
 
-Manual runs build and validate without uploading by default. The run summary lists
-package sizes and SHA-256 checksums. To download a manual build, enable **Keep a
-temporary ZIP download for one day** when starting it. That option requires
-available Actions artifact storage; an upload failure still fails the run.
-
-Actions storage quotas do not block the direct tagged-release upload. A full
-quota can still block temporary manual downloads. Existing artifacts keep their
-original expiration dates; the one-day limit applies to new manual uploads.
-See [GitHub's artifact storage documentation](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
-
-Use permanent release assets for distribution. Public visibility and publication
-remain separate owner decisions. Re-running an old failed workflow uses its old
-revision; test workflow fixes with a new manual run on the updated branch.
+Manual runs build without uploading unless **Keep a temporary ZIP download for
+one day** is selected. Temporary downloads use Actions storage; tagged releases
+upload directly to GitHub Releases.
 
 ## Online installer
 
@@ -76,9 +64,8 @@ python tools/build_online_installer.py dist/SceneLight-v1.1.1-Windows.zip --rele
 ```
 
 Publish both ZIPs under that tag. The online installer pins the complete package’s
-hash, so rebuild it whenever the payload changes. It cannot authenticate to private
-GitHub assets; give private testers the complete Windows ZIP. The release workflow
-builds both variants.
+hash, so rebuild it whenever the payload changes. It requires publicly accessible
+release assets. Use the complete Windows ZIP for private distribution.
 
 ## Native launcher
 
@@ -138,17 +125,12 @@ the workflow searches for the dlib and stops with an explanation if it is
 missing. Microsoft documents the client tools and the required Windows SDK
 version in [Sign files with Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/how-to-signing-integrations).
 
-## Going public
+## Before publishing
 
-Keep the repository private until the owner authorizes changing visibility.
-Before publication, review current files and Git history for credentials, private
-assets and local diagnostic data. Keep the artwork credits and third-party
-licenses with the package. Documentation examples use the credited Ren’Py tutorial
-artwork; tester game assets must not be included.
+Review the files and Git history for credentials, private game assets, saves and
+local diagnostic data. Retain artwork credits and third-party licenses.
 
-Publish the tested ZIP and its SHA-256 together. A tag alone is not a downloadable
-Windows package. Keep prerelease status until the intended release checks and
-tester runs are complete. History rewrites are a separate maintenance operation
-and require an explicit request and a recoverable backup.
+Publish the Windows ZIP and its SHA-256 file together. Keep a release marked as a
+prerelease while its release checks or game testing are incomplete.
 
-[Compatibility results](COMPATIBILITY.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
+[Compatibility](COMPATIBILITY.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)

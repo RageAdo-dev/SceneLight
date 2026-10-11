@@ -27,13 +27,5 @@ Preview displays one sprite. Cast-light settings can be exported there, but thei
 effect on other characters must be checked in-game. Custom shaders and transforms
 may also need [composition adjustments](MOD_AUTHOR_API.md#shaders-and-transforms).
 
-## Tested coverage and limits
-
-The 1.1.0 package was checked in Ren’Py 7.7.1 and 8.5.2 for player and developer
-updates, save loading, and lighting groups. Current physical GPU checks used an
-NVIDIA RTX 4090. An older build was checked on an AMD Radeon HD 6700M; the current
-package still needs fresh AMD and Intel hardware checks.
-
-These checks do not establish compatibility with every mod, driver or full
-playthrough. [Report a problem](TROUBLESHOOTING.md) with your versions and a short
-reproduction. Maintainers can use the [testing checklist](TESTING.md).
+Graphics support depends on the game and driver. If something fails, include your
+Ren’Py version and graphics hardware in a [bug report](TROUBLESHOOTING.md).

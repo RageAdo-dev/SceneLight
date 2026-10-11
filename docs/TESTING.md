@@ -28,7 +28,7 @@ an excluded character, and a real save at a hard gameplay checkpoint. It checks 
 unchanged update, adds one sprite/background, verifies cache reuse and untouched
 maps/settings/save bytes, loads the earlier save, and checks that playing does not
 cause another rebuild. `RESULT.json` records measurements and coverage. These are
-small-fixture timings, not estimates for a tester's full-size mod.
+small-fixture timings, not estimates for a large mod.
 
 Keep native source-backed `.rpyc` files during updates: Ren'Py uses their prior AST
 to preserve save statement identities. Analyzer-created bytecode must not replace
@@ -104,10 +104,3 @@ separate checks against their intended sprites and renderer.
 
 Keep private fixtures, saves and captures outside the repository. Record engine,
 GPU, source identity, method and limitations alongside each result.
-
-## Earlier measurements
-
-Old investigation reports and design plans are retained in
-[Git history](https://github.com/RageAdo-dev/SceneLight/tree/fb26d4b7e106177a738cb99aa4db8bfa91bb4a26/docs/history).
-They describe the versions tested at the time. Use current CI and a new integration
-run when validating a release.
