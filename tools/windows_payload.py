@@ -46,6 +46,9 @@ ONLINE_FILES = "https://github.com/RageAdo-dev/SceneLight/blob/main/"
 
 def filesystem_path(path: Path) -> Path:
     """Qt's generated asset names exceed MAX_PATH in ordinary staging paths."""
+    if os.name == "nt":
+        # Extended Windows paths do not interpret parent-directory segments.
+        path = Path(os.path.normpath(path))
     path = path.resolve()
     if os.name != "nt" or str(path).startswith("\\\\?\\"):
         return path
