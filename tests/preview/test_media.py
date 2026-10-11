@@ -312,3 +312,45 @@ def test_video_change_scan_keeps_indices_across_timestamp_gaps(tmp_path: Path) -
         assert clip.temporal_cut_indices() == (5, 6)
     finally:
         clip.close()
+
+
+@pytest.mark.parametrize("transient", [False, True])
+def test_exact_video_decode_retries_requested_frame_without_substituting_zero(tmp_path, transient):
+    class Capture:
+        def __init__(self):
+            self.position = 0
+            self.failed = False
+            self.seeks = []
+
+        def set(self, _property, value):
+            self.position = int(value)
+            self.seeks.append(self.position)
+            return True
+
+        def read(self):
+            index = self.position
+            self.position += 1
+            if index == 5 and (not transient or not self.failed):
+                self.failed = True
+                return False, None
+            return True, np.full((2, 2, 3), index, np.uint8)
+
+    capture = Capture()
+    clip = MediaClip.__new__(MediaClip)
+    clip._capture = capture
+    clip._video_frame = None
+    clip._video_index = -1
+    clip.kind, clip.frame_count, clip.fps = "video", 10, 1
+    clip.source = tmp_path / "damaged.mp4"
+    if transient:
+        frame = clip.frame_by_index(5)
+        assert frame.index == 5
+        np.testing.assert_array_equal(frame.rgba[..., :3], 5)
+    else:
+        with pytest.raises(ValueError, match="Video frame 5"):
+            clip.frame_by_index(5)
+        assert clip._video_frame is None
+        first = clip.frame_by_index(0)
+        assert first.index == 0
+        np.testing.assert_array_equal(first.rgba[..., :3], 0)
+    assert capture.seeks[:2] == [5, 5]

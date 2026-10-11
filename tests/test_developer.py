@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,84 @@ def _projects(tmp_path: Path) -> tuple[Path, Path]:
     (runtime_data / "manifest.json").write_text('{"version": 5}\n', encoding="utf-8")
     (runtime_data / "transport_atlas.png").write_bytes(b"transport")
     return project, managed
+
+
+@pytest.fixture(autouse=True)
+def isolated_developer_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local-appdata"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming-appdata"))
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed-root"))
+
+
+@pytest.mark.parametrize("external", [False, True])
+def test_owned_file_link_is_refused_before_removing_authored_content(tmp_path, external):
+    project, managed = _projects(tmp_path)
+    embed_from_managed(project, managed)
+    victim = (tmp_path if external else project / "game") / "original.png"
+    victim.write_bytes(b"transport")
+    atlas = project / EMBED_ROOT / "transport_atlas.png"
+    atlas.unlink()
+    try:
+        atlas.symlink_to(victim)
+    except OSError as error:
+        pytest.skip(f"File symlinks unavailable: {error}")
+    for action in (developer_status, remove_embedded, preflight_refresh_destination):
+        with pytest.raises(RuntimeError, match="symbolic link|reparse point"):
+            action(project)
+        assert victim.read_bytes() == b"transport"
+        assert (project / EMBED_ROOT / "bootstrap.rpy").is_file()
+        assert (project / MANIFEST_NAME).is_file()
+
+
+@pytest.mark.parametrize("component", ["game", "game/scenelight_runtime"])
+@pytest.mark.parametrize("junction", [False, True])
+def test_linked_parent_is_refused_before_any_removal(tmp_path, component, junction):
+    if junction and os.name != "nt":
+        pytest.skip("Windows junction case")
+    project, managed = _projects(tmp_path)
+    embed_from_managed(project, managed)
+    link = project / component
+    target = tmp_path / "authored-directory"
+    link.rename(target)
+    if junction:
+        subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"Directory symlinks unavailable: {error}")
+    before = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    try:
+        with pytest.raises(RuntimeError, match="symbolic link|reparse point"):
+            remove_embedded(project)
+        assert {
+            p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()
+        } == before
+        assert (project / MANIFEST_NAME).is_file()
+    finally:
+        if junction:
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+def test_fresh_install_refuses_linked_game_directory(tmp_path):
+    project, managed = _projects(tmp_path)
+    game = project / "game"
+    target = tmp_path / "authored-game"
+    game.rename(target)
+    try:
+        game.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Directory symlinks unavailable: {error}")
+    with pytest.raises(RuntimeError, match="symbolic link|reparse point"):
+        embed_from_managed(project, managed)
+    assert not (target / "scenelight_runtime").exists()
+    assert (target / "script.rpy").is_file()
 
 
 def test_developer_embed_and_remove_touch_only_owned_namespace(tmp_path: Path, monkeypatch) -> None:

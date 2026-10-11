@@ -16,7 +16,10 @@ Keep a backup of your game and saves before installing.
 1. Select the folder containing your game.
 2. Scan and review the character checklist.
 3. Choose **Add to this game** or **Create separate copy**.
-4. Wait for the completion message, then launch the game normally.
+4. Wait for the completion message. With **Add to this game**, use the game’s usual executable. With **Create separate copy**, use **Open game folder** on the completion screen and launch that copy; your original shortcut still opens the unmodified game.
+
+For a source project without a game executable, open the prepared project through
+the matching Ren’Py SDK. Use Ren’Py 7 for Python 2 projects and Ren’Py 8 for Python 3.
 
 For your own mod, choose **For mod developers** and follow the
 [author quickstart](AUTHOR_QUICKSTART.md).

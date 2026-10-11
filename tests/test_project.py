@@ -66,7 +66,7 @@ def test_positioned_runtime_sprite_composes_with_renderer_alpha(tmp_path: Path) 
         renderer_alpha=True,
     ).compose()
 
-    assert list(sprite.getdata()) == [(20, 40, 60, 64), (174, 41, 74, 254)]
+    assert list(sprite.get_flattened_data()) == [(20, 40, 60, 64), (174, 41, 74, 254)]
 
 
 def test_discovers_generic_character_and_scene(tmp_path: Path) -> None:

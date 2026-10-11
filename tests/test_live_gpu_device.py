@@ -3,6 +3,7 @@ from scenelight.runtime.live_gpu import FLOAT, RG32F, RGBA8, Device
 
 class Driver:
     def __init__(self):
+        self.es = False
         self.calls = []
 
     def generate(self, kind):

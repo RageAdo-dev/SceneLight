@@ -21,7 +21,7 @@ init python:
     scenelight.image("hero happy", rim_strength=0.8)
 ```
 
-Strength uses 0–1: **78% in Preview is `strength=0.78`**. For a sequence:
+Authored strength ranges from 0 to 2; 1 is normal strength: **78% in Preview is `strength=0.78`**. For a sequence:
 
 ```renpy
 label evening:

@@ -351,7 +351,53 @@ def read_console(path: Path, *, query: str = "", limit: int = 1500) -> str:
     return "".join(lines)
 
 
+_SECRET_KEYS = {
+    "authorization",
+    "proxyauthorization",
+    "token",
+    "accesstoken",
+    "refreshtoken",
+    "password",
+    "passwd",
+    "apikey",
+    "secret",
+    "clientsecret",
+    "cookie",
+    "setcookie",
+}
+_SECRET_NAME = r"(?:authorization|proxy[_-]?authorization|(?:access[_-]?|refresh[_-]?)?token|password|passwd|api[_-]?key|(?:client[_-]?)?secret|(?:set[_-]?)?cookie)"
+
+
+def _redact_value(value):
+    if isinstance(value, dict):
+        return {
+            key: "<REDACTED>"
+            if re.sub(r"[^a-z0-9]", "", key.casefold()) in _SECRET_KEYS
+            else _redact_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, str):
+        return redact(value)
+    return value
+
+
 def redact(text: str) -> str:
+    # Parse structured records before the text fallback so quoted credentials,
+    # nested headers and JSON encoded inside a string are handled as whole values.
+    try:
+        value = json.loads(text)
+    except (ValueError, RecursionError):
+        pass
+    else:
+        if isinstance(value, (dict, list)):
+            return json.dumps(_redact_value(value), ensure_ascii=False)
+    if "\n" in text:
+        return "".join(
+            redact(line.rstrip("\r\n")) + line[len(line.rstrip("\r\n")) :]
+            for line in text.splitlines(keepends=True)
+        )
     home = str(Path.home())
     for value in {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}:
         text = re.sub(re.escape(value), "<USER>", text, flags=re.I)
@@ -359,7 +405,20 @@ def redact(text: str) -> str:
         r"(?i)([A-Z]:[\\/](?:Users|Documents and Settings)[\\/])[^\\/\s\"']+", r"\1<USER>", text
     )
     text = re.sub(r"(?i)(/(?:home|Users)/)[^/\s\"']+", r"\1<USER>", text)
-    text = re.sub(r"(?i)(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,\"']+", r"\1<REDACTED>", text)
+    for quote in ('"', "'"):
+        text = re.sub(
+            rf"(?i)((?:[\"']?{_SECRET_NAME}[\"']?)\s*[:=]\s*){quote}(?:\\.|[^{quote}\\])*{quote}",
+            rf"\g<1>{quote}<REDACTED>{quote}",
+            text,
+        )
+    text = re.sub(
+        rf"(?i)(\\[\"']{_SECRET_NAME}\\[\"']\s*[:=]\s*\\[\"']).*",
+        r"\g<1><REDACTED>",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(authorization\s*[:=]\s*)(?:bearer\s+|basic\s+)?[^\s,\"']+", r"\1<REDACTED>", text
+    )
     text = re.sub(
         r"(?i)((?:token|password|api[_-]?key|secret)[\"']?\s*[:=]\s*[\"']?)[^\s,\"'&]+",
         r"\1<REDACTED>",
@@ -420,7 +479,11 @@ def export_report(
                     ("[Earlier content omitted]\n" if size > SEGMENT_BYTES else "") + raw
                 )
     summary = json.loads(files.get("session.json", "{}"))
-    errors = [row for row in read_events(session_path, limit=5000) if row.get("level") == "error"]
+    errors = [
+        _redact_value(row)
+        for row in read_events(session_path, limit=5000)
+        if row.get("level") == "error"
+    ]
     files["SUMMARY.txt"] = redact(
         f"SceneLight support report · {session_path.name}\nStatus: {summary.get('status', 'unknown')}\n"
         f"Operation: {summary.get('operation', summary.get('area', 'unknown'))}\n"
@@ -430,7 +493,7 @@ def export_report(
         + "\n\nLogs are bounded; rotated older events may be omitted. Running means no completion was recorded (still running or interrupted).\n"
         + "Personal home paths and common credentials are redacted. Review before sharing; project and image names remain. No assets or saves are included.\n"
     )
-    rows = read_events(session_path, limit=20000)
+    rows = [_redact_value(row) for row in read_events(session_path, limit=20000)]
     entries = "".join(
         "<details data-level='"
         + html.escape(str(row.get("level", "info")), quote=True)

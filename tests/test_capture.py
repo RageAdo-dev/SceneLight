@@ -1227,7 +1227,7 @@ def test_surface_fast_path_is_normalized_to_renderer_alpha_semantics(tmp_path: P
     _normalize_surface_captures(tmp_path, payload)
 
     with Image.open(capture) as normalized:
-        assert list(normalized.convert("RGBA").getdata()) == [
+        assert list(normalized.convert("RGBA").get_flattened_data()) == [
             (100, 50, 25, 64),
             (9, 19, 29, 254),
         ]
@@ -1304,7 +1304,7 @@ def test_raw_rgba_checkpoint_is_normalized_to_the_same_png(tmp_path: Path) -> No
     _normalize_surface_captures(tmp_path, payload)
 
     with Image.open(capture) as normalized:
-        assert list(normalized.convert("RGBA").getdata()) == [
+        assert list(normalized.convert("RGBA").get_flattened_data()) == [
             (100, 50, 25, 64),
             (9, 19, 29, 254),
         ]
@@ -1339,7 +1339,7 @@ def test_static_composite_manifest_materializes_exact_renderer_pixels(tmp_path: 
     _materialize_composite_captures(tmp_path, payload)
 
     with Image.open(destination) as materialized:
-        assert list(materialized.convert("RGBA").getdata()) == [
+        assert list(materialized.convert("RGBA").get_flattened_data()) == [
             (111, 31, 65, 223),
             (9, 19, 29, 254),
         ]

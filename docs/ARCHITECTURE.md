@@ -141,7 +141,9 @@ Authored `mesh True` transforms remain separate rendering passes. An outer
 declaration is part of the input to SceneLight. Transition snapshots are retained
 on the GPU rather than encoded as screenshots.
 
-Preview compiles the production shader in Qt's OpenGL context. It offers Original,
+Ren’Py and Preview load the same shader strings from `runtime/shader_data.py`.
+Preview hashes shader inputs, so unrelated script changes do not change shader
+identity. Preview compiles the production shader in Qt's OpenGL context. It offers Original,
 Relit and Split views; Ren'Py uses Relit. Media decoding runs on a bounded worker
 queue. Moving a character does not invoke decoding or scene/form analysis.
 
@@ -155,8 +157,9 @@ emission rules remain unless the group overrides them; disabled members stay
 excluded. The scene-level off switch bypasses lighting. Rule state participates
 in save/load and rollback; graphics resources do not.
 
-Built-in rain and glitch are optional post-lighting branches. Developer effect
-packs add validated shader parts; the player effects panel and hotkey are disabled.
+Rain, glitch, and developer effect packs are experimental, script-only features,
+outside the supported lighting API. Packs add validated shader parts; the player
+effects panel and hotkey are disabled.
 See the [lighting API](MOD_AUTHOR_API.md) and the
 [experimental effect-pack reference online](https://github.com/RageAdo-dev/SceneLight/blob/main/docs/EFFECT_PACKS.md).
 
@@ -176,3 +179,10 @@ Progress output is throttled for large inventories. File operations keep their
 existing metadata, ignore rules, verification, and transactional rollback behavior.
 Future stages must be registered in `progress.STAGE_LABELS` and covered by parser,
 slow-operation, and failure-path checks.
+
+Setup keeps dependency inspection, progress parsing, and character-selection
+policy in `setup_dependencies.py`, `setup_progress.py`, and `setup_selection.py`.
+The Tk controller owns UI events and worker lifetimes.
+
+The current Preview edits one sprite. Workspace/library modules are prototypes;
+`MainWindow` does not use the workspace mixin.

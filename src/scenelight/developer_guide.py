@@ -623,7 +623,7 @@ _SETTINGS += (
         "glow_rules",
         "Add independent color glow rules to one character or exact image. Matching uses the original artwork, not the scene's lighting color. Nearby shades match smoothly; transparent pixels cannot become sources.",
         "Each rule has a name, enabled switch, RGB color (0–1 per channel), strength (0–10), radius (0–2), tolerance (0–1), and softness (0–1). Tolerance widens the color range; softness feathers its edge. Zero radius keeps the glow inside the artwork.",
-        "Preview → Calibrate → Color glow offers Add, Duplicate, Remove, and live sliders for the loaded sprite. Save profile or Export config retains these settings; use the API for per-character or per-image targets. Rules add together; more active rules take more rendering time.",
+        "Preview → Adjust → Color glow offers Add, Duplicate, Remove, and live sliders for the loaded sprite. Save profile or Export config retains these settings; use the API for per-character or per-image targets. Rules add together; more active rules take more rendering time.",
         "Use glow_rules=[] to clear the rules for that target. This replaces the inherited list; other lighting controls and other sprites stay independent. Whole-sprite glow and light cast onto neighbors are separate controls.",
         example="""
             init python:
@@ -665,7 +665,7 @@ _WORKFLOW = (
         "Choose characters and discover new ones",
         "Reopen Characters… beside the game folder in either Setup mode.",
         "Characters… refreshes discovery before showing the checklist. Automatically include new characters on scan / update is on for new projects. Unchecked families stay excluded. Turn it off to keep only your chosen tags. Existing manual selections stay manual.",
-        "For an installed project, Apply selection & update prepares the changed selection. After adding or replacing game assets, run Scan/Update; SceneLight does not watch the project folder continuously. The update keeps your lighting profile and saves.",
+        "For an installed project, Apply selection & update prepares the changed selection. After adding or replacing game assets, run Scan/Update; While idle, Setup checks the selected project every five seconds and waits for two matching observations before showing changes. Choose Check changed assets → Update SceneLight, then restart the game. The update keeps your lighting profile and saves.",
         "Place scenelight.json beside game/, not inside it. Each tag covers its expressions and poses. Merge these keys into an existing configuration instead of replacing its other settings.",
         example="""
             {
@@ -700,7 +700,7 @@ _WORKFLOW = (
         WORKFLOW,
         "Add assets or update",
         "Prepare new art through the existing developer workflow.",
-        "Choose For mod developers → Check new assets → Update SceneLight. Review new character tags. Existing poses may use generic surface geometry until their matching maps are prepared.",
+        "Choose For mod developers → Check changed assets → Update SceneLight. Review new character tags. Existing poses may use generic surface geometry until their matching maps are prepared.",
         "Updates reuse valid analysis. If a SceneLight-owned runtime file was edited, the update stops so the change is not overwritten. Put your story rules in your own .rpy files.",
         keywords="update refresh new assets expressions pose maps regenerate modified files",
     ),
@@ -748,7 +748,7 @@ _INSPECTOR = (
         "Reduce or increase one background color",
         "Select a hex color and adjust its influence on sprites.",
         "light_color accepts #RRGGBB. light_color_amount runs from -1 (neutralize matching light color) through 0 (unchanged) to +1 (stronger color). light_color_tolerance widens the soft hue match. Light luminance is retained; this is separate from exposure or glow.",
-        "Use this per background, or the existing scene, character and image scopes. Preview has the same controls in Calibrate → Background color.",
+        "Use this per background, or the existing scene, character and image scopes. Preview has the same controls in Adjust → Light color.",
         example='init python:\n    scenelight.background("lake", light_color="#4080FF", light_color_amount=-0.5, light_color_tolerance=0.25)',
         placement=INIT,
         keywords="background blue hex tint color cast more less",

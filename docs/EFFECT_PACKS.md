@@ -1,7 +1,8 @@
 # Developer effect packs
 
-> Post-launch development reference. Rain, glitch, and custom effect packs are
-> deferred to a later update and are not part of the launch feature guide.
+> Experimental, script-only API. The runtime can load effect packs, but they
+> are outside the supported lighting API. The effects panel and its shortcut
+> are disabled. Test packs in your target engine and renderer before shipping.
 
 Add custom GPU effects with JSON packs and the `scenelight_fx` API. Packs are
 controlled from your game's scripts; the player effects panel and hotkey are
@@ -50,7 +51,7 @@ Test custom packs with your project's sprites, transforms and target renderer.
 
 ## Format
 
-Identifiers start with a lowercase letter or underscore and contain at most 48
+Identifiers start with a lowercase letter and contain at most 48
 lowercase letters, numbers or underscores. Parameters support
 `float`, `vec2`, `vec3` and `vec4`. Every effect needs a float `intensity` with a
 zero default. Shader parameters use the `u__` prefix; Ren'Py assigns their namespace.

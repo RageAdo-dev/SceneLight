@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions and help
+    url: https://github.com/RageAdo-dev/SceneLight/discussions/categories/q-a
+    about: Ask about setup, lighting controls or mod integration.
+  - name: Security reports
+    url: https://github.com/RageAdo-dev/SceneLight/security/policy
+    about: Read the security reporting instructions before sharing sensitive details.
   - name: Find and report a problem
     url: https://github.com/RageAdo-dev/SceneLight/blob/main/docs/TROUBLESHOOTING.md
     about: Use the inspector or Activity to diagnose a problem.

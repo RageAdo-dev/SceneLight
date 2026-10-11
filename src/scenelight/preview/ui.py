@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,7 +44,6 @@ from ..calibration import (
     Calibration,
     CalibrationProfile,
     lighting_mode_preset,
-    load_profile,
     profile_path,
 )
 from ..prepared import engine_identity, source_identity
@@ -59,6 +58,7 @@ from .calibration_dialog import CalibrationEditor
 from .exporter import GIFWriter, MP4Writer, composite_gif_timeline, export_extension
 from .gpu_view import SceneLightGPUView
 from .media import MediaClip, MediaFrame, environment_wrap
+from .media_open import open_media
 from .playback import VideoPlayback
 from .settings_export import SettingsExportPage
 from .temporal import TemporalSceneFrame, interpolated_scene, scene_blend
@@ -122,6 +122,7 @@ class _WorkerSignals(QObject):
     temporalReady = Signal(int, int, object)
     temporalComplete = Signal(int, object, object)
     failed = Signal(str, str)
+    mediaFailed = Signal(str, int, str, str)
 
 
 class MainWindow(QMainWindow):
@@ -136,10 +137,15 @@ class MainWindow(QMainWindow):
         self._project_root = project_root.expanduser().resolve() if project_root else None
         self._profile_path = profile_path(self._project_root) if self._project_root else None
         profile_error = None
+        self._settings_sources = ()
         try:
+            from ..configuration import resolve_project_settings
+
+            settings = resolve_project_settings(self._project_root) if self._project_root else None
+            self._settings_sources = settings.sources if settings is not None else ()
             self._calibration_profile = (
-                load_profile(self._profile_path)
-                if self._profile_path is not None
+                CalibrationProfile.from_payload(settings.values)
+                if settings is not None
                 else CalibrationProfile()
             )
         except (OSError, ValueError) as error:
@@ -176,6 +182,7 @@ class MainWindow(QMainWindow):
         self._signals.temporalReady.connect(self._on_temporal_ready)
         self._signals.temporalComplete.connect(self._on_temporal_complete)
         self._signals.failed.connect(self._on_failed)
+        self._signals.mediaFailed.connect(self._on_media_failed)
         self._scene_generation = 0
         self._form_generation = 0
         self._background_path: Path | None = None
@@ -321,6 +328,7 @@ class MainWindow(QMainWindow):
             self._current_profile(),
             self._profile_path,
             self._project_root / "scenelight.json" if self._project_root else None,
+            sources=self._settings_sources,
         )
         self._settings_export.saved.connect(self._settings_saved)
         self._settings_export.editRequested.connect(self._open_calibration)
@@ -405,7 +413,7 @@ class MainWindow(QMainWindow):
     def _settings_saved(self, destination: str, mode: str) -> None:
         if mode == "profile":
             self._profile_path = Path(destination)
-        self.statusBar().showMessage(f"Reviewed {mode} saved to {destination}")
+        self.statusBar().showMessage(f"Saved {mode} to {destination}")
 
     @staticmethod
     def _slider(minimum: int, maximum: int, value: int, callback) -> QSlider:
@@ -461,9 +469,15 @@ class MainWindow(QMainWindow):
 
     def _load_background(self, path: Path) -> None:
         diagnostics.event("preview.background", "Opening background", path=str(path))
+        media = None
         try:
-            media = MediaClip(path, self._cache.root / "media")
+            candidate = open_media(path, self._cache.root / "media", self, factory=MediaClip)
+            if candidate is None:
+                return
+            media, first_frame = candidate
         except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
+            if media is not None:
+                media.close()
             self._on_failed("Background media", str(error))
             return
         self._stop_preparation()
@@ -473,7 +487,6 @@ class MainWindow(QMainWindow):
             self._background_media.close()
         self._background_media = media
         self._background_animation_epoch = time.perf_counter()
-        first_frame = media.frame_at(0.0)
         self._view.clear_scene()
         self._gpu_live_background = self._view.live_analysis_supported
         self._view.set_live_analysis_enabled(self._gpu_live_background)
@@ -669,9 +682,14 @@ class MainWindow(QMainWindow):
             session = diagnostics.current_session()
             if session is not None:
                 session.exception("preview.background", error)
-            self._signals.failed.emit("Background analysis", str(error))
+            self._signals.mediaFailed.emit("scene", generation, "Background analysis", str(error))
             return
         self._signals.sceneReady.emit(generation, path, artifacts, artifacts.metadata)
+
+    def _on_media_failed(self, kind: str, generation: int, title: str, message: str) -> None:
+        current = self._scene_generation if kind == "scene" else self._form_generation
+        if generation == current:
+            self._on_failed(title, message)
 
     def _on_scene_ready(
         self, generation: int, path: Path, artifacts: SceneArtifacts, metadata: dict
@@ -710,23 +728,49 @@ class MainWindow(QMainWindow):
         """Start future-frame analysis only after the first visible frame is ready."""
         if self._temporal_future is not None or self._temporal_cancel.is_set():
             return
+        cancelled = self._temporal_cancel
         self._temporal_future = self._temporal_executor.submit(
             self._warm_temporal_scenes,
             generation,
             media.source,
             self._cache.root / "media",
-            self._temporal_cancel,
+            cancelled,
         )
         self._temporal_future.add_done_callback(
-            lambda completed: self._temporal_finished(generation, completed)
+            lambda completed: self._temporal_finished(generation, completed, cancelled)
         )
 
-    def _temporal_finished(self, generation: int, future) -> None:
+    def _temporal_finished(self, generation: int, future, cancelled=None) -> None:
+        if future.cancelled() or (cancelled is not None and cancelled.is_set()):
+            return
         try:
             future.result()
         except Exception as error:  # noqa: BLE001 - worker failures must reach the GUI.
             if generation == self._scene_generation:
-                self._signals.failed.emit("Animated background analysis", str(error))
+                self._signals.mediaFailed.emit(
+                    "scene", generation, "Animated background analysis", str(error)
+                )
+
+    def _resume_background_analysis(self) -> None:
+        """Retire export's cancelled worker before queuing preview work again."""
+        self._temporal_cancel.set()
+        if self._temporal_future is not None:
+            self._temporal_future.cancel()
+        self._temporal_future = None
+        self._temporal_cancel = threading.Event()
+        media = self._background_media
+        if media is None or self._gpu_live_background:
+            return
+        self._scene_generation += 1
+        generation = self._scene_generation
+        if self._scene_artifacts is None:
+            path = media.reference_path
+            future = self._scene_executor.submit(self._cache.scene, path)
+            future.add_done_callback(
+                lambda completed: self._scene_finished(generation, path, completed)
+            )
+        elif media.animated:
+            self._start_temporal_analysis(generation, media)
 
     @staticmethod
     def _scene_frame_from_artifacts(artifacts: SceneArtifacts) -> TemporalSceneFrame:
@@ -1006,9 +1050,15 @@ class MainWindow(QMainWindow):
 
     def _load_sprite(self, path: Path) -> None:
         diagnostics.event("preview.sprite", "Opening sprite", path=str(path))
+        media = None
         try:
-            media = MediaClip(path, self._cache.root / "media")
+            candidate = open_media(path, self._cache.root / "media", self, factory=MediaClip)
+            if candidate is None:
+                return
+            media, first_frame = candidate
         except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
+            if media is not None:
+                media.close()
             self._on_failed("Sprite media", str(error))
             return
         if media.kind == "video":
@@ -1023,7 +1073,6 @@ class MainWindow(QMainWindow):
         self._sprite_media = media
         self._sprite_animation_epoch = time.perf_counter()
         self._sprite_animation_ready = not media.animated
-        first_frame = media.frame_at(0.0)
         self._view.clear_sprite()
         self._view.set_sprite_frame(first_frame.rgba)
         self._form_generation += 1
@@ -1054,7 +1103,7 @@ class MainWindow(QMainWindow):
             session = diagnostics.current_session()
             if session is not None:
                 session.exception("preview.form", error)
-            self._signals.failed.emit("Sprite analysis", str(error))
+            self._signals.mediaFailed.emit("form", generation, "Sprite analysis", str(error))
             return
         self._signals.formReady.emit(generation, path, artifacts, artifacts.metadata)
 
@@ -1359,6 +1408,17 @@ class MainWindow(QMainWindow):
             )
             return
         extension = export_extension(media.kind, sprite_media.kind)
+        if (
+            extension == ".png"
+            and self._scene_artifacts is None
+            and not (self._gpu_live_background and self._view._live_analysis_enabled)
+        ):
+            QMessageBox.information(
+                self,
+                "Preparing background",
+                "Wait for background lighting to finish before exporting.",
+            )
+            return
         suggested = self._background_path.with_name(
             f"{self._background_path.stem}_{self._sprite_path.stem}_gpu_relit{extension}"
         )
@@ -1453,13 +1513,17 @@ class MainWindow(QMainWindow):
                     "Movie lighting is not ready; reopen the background to prepare it before exporting"
                 )
             if self._temporal_future is not None:
-                warmed_anchors, built = _wait_for_export_future(
-                    self._temporal_future,
-                    progress,
-                    export_cancel,
-                )
-                self._temporal_anchors = warmed_anchors
-                self._temporal_scenes.update(built)
+                try:
+                    warmed_anchors, built = _wait_for_export_future(
+                        self._temporal_future,
+                        progress,
+                        export_cancel,
+                    )
+                except CancelledError:
+                    pass
+                else:
+                    self._temporal_anchors = warmed_anchors
+                    self._temporal_scenes.update(built)
             background = MediaClip(self._background_path, self._cache.root / "media")
             sprite = MediaClip(self._sprite_path, self._cache.root / "media")
             _export_checkpoint(progress, export_cancel)
@@ -1635,6 +1699,7 @@ class MainWindow(QMainWindow):
                 first = self._sprite_media.frame_by_index(0)
                 self._view.set_sprite_frame(first.rgba, self._form_artifacts_by_frame.get(0))
             self._exporting_animation = False
+            self._resume_background_analysis()
             self._restart_background_animation()
             self._restart_sprite_animation()
             self._animation_timer.start()

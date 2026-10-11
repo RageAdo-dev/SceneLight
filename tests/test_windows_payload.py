@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -204,6 +205,18 @@ def test_packaged_guides_link_omitted_contributor_files_online(tmp_path):
     assert not (package / "docs/TESTING.md").exists()
     assert (source / "docs/README.md").read_text() == guide
     assert "blob/main/docs/TESTING.md#security)" in (package / "SECURITY.md").read_text()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path semantics")
+def test_extended_paths_resolve_parent_directory_links(tmp_path):
+    policy = _policy()
+    (tmp_path / "docs").mkdir()
+    target = tmp_path / "CONTRIBUTING.md"
+    target.write_text("Contributor guide")
+    linked = policy.filesystem_path(tmp_path) / "docs" / ".." / target.name
+    resolved = policy.filesystem_path(linked)
+    assert resolved == policy.filesystem_path(target)
+    assert resolved.read_text() == "Contributor guide"
 
 
 def test_windows_release_uses_filters_for_fresh_and_reused_runtimes():

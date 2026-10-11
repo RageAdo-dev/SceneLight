@@ -46,6 +46,10 @@ ONLINE_FILES = "https://github.com/RageAdo-dev/SceneLight/blob/main/"
 
 def filesystem_path(path: Path) -> Path:
     """Qt's generated asset names exceed MAX_PATH in ordinary staging paths."""
+    if os.name == "nt":
+        # Extended Windows paths do not interpret parent-directory segments.
+        drive, tail = os.path.splitdrive(path)
+        path = Path(drive + os.path.normpath(tail))
     path = path.resolve()
     if os.name != "nt" or str(path).startswith("\\\\?\\"):
         return path
@@ -161,7 +165,7 @@ def package_docs(repository: Path, package: Path) -> None:
             parsed = urlsplit(url)
             if parsed.scheme or parsed.netloc or not parsed.path:
                 return match.group(0)
-            target = (original.parent / unquote(parsed.path)).resolve()
+            target = filesystem_path(original.parent / unquote(parsed.path))
             if repository not in target.parents or not target.is_file():
                 return match.group(0)
             relative = target.relative_to(repository)

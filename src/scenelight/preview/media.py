@@ -9,15 +9,18 @@ import os
 import subprocess
 import tempfile
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 import cv2
 import numpy as np
 from PIL import Image, ImageSequence
 
 from ..source_types import VIDEO_SOURCE_SUFFIXES
+from .cache_lock import cache_lock
 
 ANIMATED_IMAGE_EXTENSIONS = {".gif", ".apng", ".webp"}
 # Pillow also reports MPO auxiliary images and TIFF pages as multiple frames
@@ -85,10 +88,11 @@ def _verified_video_frame_count(source: Path, declared: int, fps: float) -> int:
         probe.release()
 
 
-def _digest(path: Path) -> str:
+def _digest(path: Path, checkpoint=lambda: None) -> str:
     digest = hashlib.sha256(MEDIA_CACHE_VERSION)
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
+            checkpoint()
             digest.update(block)
     return digest.hexdigest()
 
@@ -132,14 +136,23 @@ class MediaClip:
     frame directory.
     """
 
-    def __init__(self, source: Path, cache_root: Path):
+    def __init__(
+        self,
+        source: Path,
+        cache_root: Path,
+        *,
+        cancelled: Event | None = None,
+        progress: Callable[[str, int, int], None] | None = None,
+    ):
+        self._cancelled = cancelled
+        self._progress = progress
         self.source = source.resolve(strict=True)
         self.cache_root = cache_root.resolve()
         self.cache_root.mkdir(parents=True, exist_ok=True)
         self.identity = (
             _video_identity(self.source)
             if self.source.suffix.lower() in VIDEO_EXTENSIONS
-            else _digest(self.source)
+            else _digest(self.source, self._checkpoint)
         )
         self.kind = "static"
         self.frame_paths: tuple[Path, ...] = (self.source,)
@@ -159,6 +172,15 @@ class MediaClip:
         self._video_change_cache: tuple[int, ...] | None = None
         self._open()
 
+    def _checkpoint(self):
+        if self._cancelled is not None and self._cancelled.is_set():
+            raise CancelledError()
+
+    def _report(self, message, current, total):
+        self._checkpoint()
+        if self._progress is not None:
+            self._progress(message, current, total)
+
     @property
     def animated(self) -> bool:
         return self.frame_count > 1
@@ -177,6 +199,10 @@ class MediaClip:
 
     def _open_animated_image(self) -> None:
         root = self.cache_root / self.identity
+        with cache_lock(root, self._checkpoint):
+            self._extract_animated_image(root)
+
+    def _extract_animated_image(self, root: Path) -> None:
         marker = root / "media.json"
         with Image.open(self.source) as image:
             # APNG may include a still poster which is not part of the loop.
@@ -207,6 +233,7 @@ class MediaClip:
             durations: list[int] = []
             with Image.open(self.source) as image:
                 for index, frame in enumerate(ImageSequence.Iterator(image)):
+                    self._report("Opening animation", index, image.n_frames)
                     if skip_poster and index == 0:
                         continue
                     name = f"frame_{len(names):06d}.png"
@@ -365,7 +392,9 @@ class MediaClip:
         # that tiny forward jump can cost hundreds of milliseconds on an MP4;
         # grabbing the intervening decoded frames preserves the exact target
         # frame and keeps 60 fps playback smooth.
-        if 1 < forward_gap <= max(2, round(self.fps * 2.0)):
+        if self._video_frame is None:
+            self._capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+        elif 1 < forward_gap <= max(2, round(self.fps * 2.0)):
             reached = True
             while self._video_index + 1 < index:
                 if not self._capture.grab():
@@ -379,10 +408,11 @@ class MediaClip:
             self._capture.set(cv2.CAP_PROP_POS_FRAMES, index)
         ok, bgr = self._capture.read()
         if not ok or bgr is None:
-            self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self._capture.set(cv2.CAP_PROP_POS_FRAMES, index)
             ok, bgr = self._capture.read()
-            index = 0
         if not ok or bgr is None:
+            self._video_index = -1
+            self._video_frame = None
             raise ValueError(f"Video frame {index} could not be decoded: {self.source}")
         self._video_index = index
         self._video_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)

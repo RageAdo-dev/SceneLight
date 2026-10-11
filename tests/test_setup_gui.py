@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import scenelight.setup_gui as setup_gui
+from scenelight import setup_dependencies
 from scenelight.calibration import profile_path
 from scenelight.developer import DeveloperStatus
 from scenelight.setup_gui import (
@@ -630,12 +631,12 @@ def test_player_components_do_not_make_the_optional_preview_appear_installed(mon
 
     def package_version(name):
         if name not in installed:
-            raise setup_gui.PackageNotFoundError(name)
+            raise setup_dependencies.PackageNotFoundError(name)
         return installed[name]
 
-    monkeypatch.setattr(setup_gui, "version", package_version)
+    monkeypatch.setattr(setup_dependencies, "version", package_version)
     monkeypatch.setattr(
-        setup_gui.importlib.util,
+        setup_dependencies.importlib.util,
         "find_spec",
         lambda name: None if name in {"OpenGL", "PySide6.QtOpenGLWidgets"} else object(),
     )
@@ -649,12 +650,12 @@ def test_player_components_do_not_make_the_optional_preview_appear_installed(mon
 def test_missing_parent_of_preview_module_is_reported_as_missing(monkeypatch):
     from scenelight import setup_gui
 
-    monkeypatch.setattr(setup_gui, "version", lambda name: "6.9.2")
+    monkeypatch.setattr(setup_dependencies, "version", lambda name: "6.9.2")
 
     def missing_parent(name):
         raise ModuleNotFoundError("No module named PySide6")
 
-    monkeypatch.setattr(setup_gui.importlib.util, "find_spec", missing_parent)
+    monkeypatch.setattr(setup_dependencies.importlib.util, "find_spec", missing_parent)
     assert setup_gui._missing_modules({"PySide6.QtOpenGLWidgets": "PySide6==6.9.2"}) == [
         "PySide6==6.9.2"
     ]
@@ -663,8 +664,8 @@ def test_missing_parent_of_preview_module_is_reported_as_missing(monkeypatch):
 @pytest.mark.skipif(os.name != "nt", reason="Windows GUI/console interpreter pair")
 def test_gui_interpreter_checks_its_console_packages_without_spawning(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_gui.sys, "executable", str(tmp_path / "pythonw.exe"))
-    monkeypatch.setattr(setup_gui, "version", lambda name: "2.1.3")
-    monkeypatch.setattr(setup_gui.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(setup_dependencies, "version", lambda name: "2.1.3")
+    monkeypatch.setattr(setup_dependencies.importlib.util, "find_spec", lambda name: object())
 
     def forbidden(*args, **kwargs):
         pytest.fail("Opening a bundled menu must not spawn an interpreter")
@@ -741,7 +742,7 @@ def test_dependency_state_reports_every_exact_missing_version_for_new_environmen
     assert statuses[0] == ("NumPy 2.2.6", False)
     assert len(statuses) == len(set(PREVIEW_DEPENDENCIES.values()))
     assert state.verified_count == 0
-    assert state.verification_summary == "0 of 8 components verified"
+    assert state.verification_summary == "0 of 8 components checked"
 
 
 def test_verification_summary_matches_rows_including_runtime_and_optional_cuda(
@@ -757,7 +758,7 @@ def test_verification_summary_matches_rows_including_runtime_and_optional_cuda(
         assert len(state.component_statuses) == expected
         assert all(ready for _, ready in state.component_statuses)
         assert state.verified_count == expected
-        assert state.verification_summary == f"{expected} components verified."
+        assert state.verification_summary == f"{expected} components checked."
 
 
 def test_missing_preview_binding_marks_shared_package_once(tmp_path, monkeypatch):
@@ -771,7 +772,7 @@ def test_missing_preview_binding_marks_shared_package_once(tmp_path, monkeypatch
     assert state.required.count(qt) == 1
     assert state.missing == (qt,)
     assert state.verified_count == 7
-    assert state.verification_summary == "7 of 8 components verified"
+    assert state.verification_summary == "7 of 8 components checked"
     assert dict(state.component_statuses)["PySide6-Essentials 6.11.2"] is False
 
 
@@ -1356,7 +1357,8 @@ def test_automatic_selection_keeps_exclusions_and_can_be_frozen(tmp_path, monkey
     assert restored["excluded_character_tags"] == ["guest"]
 
 
-def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
+@pytest.mark.parametrize("close_window", [False, True])
+def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path, close_window):
     monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
     event = threading.Event()
 
@@ -1366,6 +1368,7 @@ def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
     widget = SimpleNamespace(set=noop, configure=noop, grid=noop, start=noop, stop=noop)
     app = SimpleNamespace(
         _running=False,
+        _process=None,
         _cancel_requested=event,
         _refresh_project_state=noop,
         operation_var=widget,
@@ -1375,25 +1378,43 @@ def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
         _append_log=noop,
         _events=queue.Queue(),
         project_var=SimpleNamespace(get=lambda: str(tmp_path / "game")),
+        _close_character_review_window=noop,
+        destroy=noop,
     )
     process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: -1, pid=12345)
 
+    spawned = []
+
     def spawn(*args, **kwargs):
-        event.set()  # UI cancelled while the OS was creating the child.
+        spawned.append(args)
+        if close_window:
+            setup_gui.SceneLightSetup._close(app)
+        else:
+            event.set()  # UI cancelled while the OS was creating the child.
         return process
 
     killed = []
+    monkeypatch.setattr(setup_gui.messagebox, "askyesno", lambda *a, **kw: True)
     monkeypatch.setattr(setup_gui.subprocess, "Popen", spawn)
     monkeypatch.setattr(setup_gui, "terminate_process_tree", killed.append)
     monkeypatch.setattr(
         setup_gui.threading, "Thread", lambda target, **kw: SimpleNamespace(start=target)
     )
-    setup_gui.SceneLightSetup._start_operation(app, "scan", ["fake-command"])
+    setup_gui.SceneLightSetup._start_operation(app, "scan", [["fake-command"], ["second-command"]])
     assert killed == [process]
+    assert len(spawned) == 1
     messages = list(app._events.queue)
     assert messages[-1][0] == "done"
     assert messages[-1][2] == 130
     assert messages[-1][-1] is True
+
+
+def test_declining_close_leaves_running_operation_untouched(monkeypatch):
+    event = threading.Event()
+    app = SimpleNamespace(_running=True, _cancel_requested=event)
+    monkeypatch.setattr(setup_gui.messagebox, "askyesno", lambda *a, **kw: False)
+    setup_gui.SceneLightSetup._close(app)
+    assert not event.is_set()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree cancellation integration")

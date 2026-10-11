@@ -265,7 +265,7 @@ def renderer_fixture():
         BindTexture=lambda *args: None,
         CopyTexSubImage2D=lambda *args: copies.append(args),
     )
-    device = SimpleNamespace(gl=gl, bind_targets=lambda *args: None)
+    device = SimpleNamespace(gl=gl, bind_targets=lambda *args: None, close=lambda: None)
     outputs = dict(zip(("irradiance", "emitter", "wrap", "transport"), range(1, 5)))
     analysis = SimpleNamespace(device=device, evaluate=lambda *args, **kwargs: outputs)
     gpu = SimpleNamespace(
@@ -277,6 +277,22 @@ def renderer_fixture():
         display=SimpleNamespace(draw=draw, log=SimpleNamespace(write=errors.append)),
     )
     return Renderer(gpu, api, None), draw, analysis, copies, errors
+
+
+@pytest.mark.parametrize("new_context", [False, True])
+def test_drawable_reset_closes_only_resources_from_the_current_context(new_context):
+    renderer, draw, analysis, _, _ = renderer_fixture()
+    renderer._drawable_changed()
+    renderer.analysis = analysis
+    closed = []
+    analysis.device.close = lambda: closed.append(True)
+    if new_context:
+        draw.texture_loader = object()
+    else:
+        draw.drawable_size = (1500, 860)
+    assert renderer._drawable_changed()
+    assert closed == ([] if new_context else [True])
+    assert renderer.analysis is None
 
 
 @pytest.mark.parametrize("modern", [False, True])

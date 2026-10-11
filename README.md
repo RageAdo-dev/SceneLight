@@ -13,6 +13,8 @@
 SceneLight adds background lighting to Ren’Py sprites. Characters respond to nearby
 colors and light sources as they move, with controls for shadows, highlights and glow.
 
+SceneLight is completely free. A credit or link back in your game or mod is always appreciated.
+
 ## Download
 
 | Download | Details |

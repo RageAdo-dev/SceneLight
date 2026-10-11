@@ -101,29 +101,20 @@ publisher; it does not guarantee that Windows will suppress reputation warnings.
 Choose a signing provider and verify its current requirements before purchasing.
 Sign before producing the final checksums.
 
-To sign in CI, add two repository secrets and the workflow signs both launchers
-before the ZIP is assembled and fails the build if the signature is not valid:
+CI supports a PFX certificate. Add these repository secrets:
 
 - `WINDOWS_CERT_PFX` — the `.pfx` file, base64 encoded.
 - `WINDOWS_CERT_PASSWORD` — its password.
 
-That path only applies to certificates you can import as a `.pfx`. For Azure
-Artifact Signing, set these instead and the workflow shells out to `signtool`
-with the Artifact Signing dlib:
+Set the repository variable `REQUIRE_WINDOWS_SIGNING` to `true` to reject builds
+without a certificate. With that variable unset and no certificate supplied,
+CI builds unsigned packages. The workflow does not configure Azure Artifact Signing.
 
-- `TRUSTED_SIGNING_ACCOUNT` — the Artifact Signing account name.
-- `TRUSTED_SIGNING_CERT_PROFILE` — the certificate profile name.
-- `TRUSTED_SIGNING_ENDPOINT` — optional; defaults to
-  `https://eus.codesigning.azure.net/`.
-- `TRUSTED_SIGNING_DLIB` — optional path to `Azure.CodeSigning.Dlib.dll` when it
-  is not installed under `Program Files`.
-- `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` — a service
-  principal with the Trusted Signing Certificate Profile Signer role.
-
-Install the Trusted Signing client tools on the runner before the signing step;
-the workflow searches for the dlib and stops with an explanation if it is
-missing. Microsoft documents the client tools and the required Windows SDK
-version in [Sign files with Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/how-to-signing-integrations).
+Both launchers are signed before building the wheel, source archive, and Windows
+ZIPs. The online installer uses the launcher's exact bytes from the offline ZIP.
+After packaging, CI extracts each SceneLight launcher, compares it with the signing
+input, and, for signed builds, checks its Authenticode signature. Package checksums
+are recorded only after these checks pass.
 
 ## Before publishing
 

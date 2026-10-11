@@ -19,17 +19,14 @@ import time
 import tkinter as tk
 from collections import deque
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, diagnostics
 from .branding import ICON_PATH, ICON_PNG, set_process_identity
-from .calibration import profile_path
 from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility_root
 from .cuda_detection import CudaSupport, detect_cuda_support
 from .developer import DeveloperStatus, developer_status
-from .progress import STAGE_LABELS
 from .project_watch import ProjectWatch, source_metadata
 from .release import (
     ReleaseRelation,
@@ -37,6 +34,31 @@ from .release import (
     release_content_sha256_from_manifest,
     release_version_from_manifest,
 )
+from .setup_dependencies import BASE_DEPENDENCIES as BASE_DEPENDENCIES
+from .setup_dependencies import BASE_REQUIREMENTS as BASE_REQUIREMENTS
+from .setup_dependencies import CUDA_REQUIREMENT as CUDA_REQUIREMENT
+from .setup_dependencies import DEPENDENCIES as DEPENDENCIES
+from .setup_dependencies import DEPENDENCY_LABELS as DEPENDENCY_LABELS
+from .setup_dependencies import PACKAGING_REQUIREMENTS as PACKAGING_REQUIREMENTS
+from .setup_dependencies import PREVIEW_DEPENDENCIES as PREVIEW_DEPENDENCIES
+from .setup_dependencies import _missing_modules as _missing_modules
+from .setup_progress import _PROGRESS_PATTERNS as _PROGRESS_PATTERNS
+from .setup_progress import COMPONENT_OUTPUT_LABELS as COMPONENT_OUTPUT_LABELS
+from .setup_progress import ComponentProgress as ComponentProgress
+from .setup_progress import ProgressUpdate as ProgressUpdate
+from .setup_progress import _component_output_name as _component_output_name
+from .setup_progress import component_command_status as component_command_status
+from .setup_progress import format_duration as format_duration
+from .setup_progress import format_progress_status as format_progress_status
+from .setup_progress import parse_component_progress as parse_component_progress
+from .setup_progress import parse_progress as parse_progress
+from .setup_progress import parse_runtime_progress as parse_runtime_progress
+from .setup_progress import progress_moves_forward as progress_moves_forward
+from .setup_selection import character_review_candidates as character_review_candidates
+from .setup_selection import character_review_mode as character_review_mode
+from .setup_selection import character_review_required as character_review_required
+from .setup_selection import character_review_selected_tags as character_review_selected_tags
+from .setup_selection import save_character_selection as save_character_selection
 from .setup_theme import soft_controls
 from .sidecar import (
     find_native_executable,
@@ -51,38 +73,6 @@ PREVIEW_LAUNCHER = SOURCE_ROOT / "scenelight_preview.pyw"
 REQUIREMENTS = SOURCE_ROOT / "requirements.txt"
 PREVIEW_REQUIREMENTS = SOURCE_ROOT / "requirements-preview.txt"
 OFFLINE_WHEELHOUSE = SOURCE_ROOT / "wheelhouse"
-DEPENDENCIES = {
-    "numpy": "NumPy",
-    "cv2": "OpenCV",
-    "PIL": "Pillow",
-}
-BASE_REQUIREMENTS = (
-    "numpy==2.2.6",
-    "opencv-python-headless==5.0.0.93",
-    "Pillow==12.3.0",
-    "psutil==7.2.2",
-    "PySide6-Essentials==6.11.2",
-    "imageio-ffmpeg==0.6.0",
-)
-PACKAGING_REQUIREMENTS = (
-    "pip==26.2.1",
-    "setuptools==84.0.0",
-    "wheel==0.48.0",
-)
-BASE_DEPENDENCIES = {
-    "numpy": BASE_REQUIREMENTS[0],
-    "cv2": BASE_REQUIREMENTS[1],
-    "PIL": BASE_REQUIREMENTS[2],
-    "psutil": BASE_REQUIREMENTS[3],
-    "PySide6": BASE_REQUIREMENTS[4],
-    "imageio_ffmpeg": BASE_REQUIREMENTS[5],
-}
-CUDA_REQUIREMENT = "cupy-cuda12x==14.2.0"
-PREVIEW_DEPENDENCIES = {
-    **BASE_DEPENDENCIES,
-    "PySide6.QtOpenGLWidgets": "PySide6-Essentials==6.11.2",
-    "OpenGL": "PyOpenGL==3.1.10",
-}
 
 
 def terminate_process_tree(process: subprocess.Popen[str]) -> None:
@@ -102,33 +92,6 @@ def terminate_process_tree(process: subprocess.Popen[str]) -> None:
         if result.returncode == 0 or process.poll() is not None:
             return
     process.terminate()
-
-
-DEPENDENCY_LABELS = {
-    "numpy": "NumPy",
-    "opencv-python-headless": "OpenCV",
-    "Pillow": "Pillow",
-    "PySide6": "PySide6",
-    "PyOpenGL": "PyOpenGL",
-    "psutil": "psutil",
-    "imageio-ffmpeg": "imageio-ffmpeg",
-    "cupy-cuda12x": "CuPy CUDA 12",
-    "pip": "pip",
-    "setuptools": "setuptools",
-    "wheel": "wheel",
-}
-COMPONENT_OUTPUT_LABELS = {
-    **DEPENDENCY_LABELS,
-    "pyside6-addons": "PySide6 Addons",
-    "pyside6-essentials": "PySide6 Essentials",
-    "shiboken6": "Shiboken6",
-    "packaging": "Packaging",
-    "scipy": "SciPy",
-    "networkx": "NetworkX",
-    "imageio": "imageio",
-    "tifffile": "tifffile",
-    "lazy-loader": "lazy-loader",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,23 +188,6 @@ class ProjectInspection:
 
 
 @dataclass(frozen=True, slots=True)
-class ProgressUpdate:
-    phase: str
-    label: str
-    current: int
-    total: int
-    item: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class ComponentProgress:
-    message: str
-    current: float | None = None
-    total: float | None = None
-    active_download: str = ""
-
-
-@dataclass(frozen=True, slots=True)
 class DependencyState:
     python_executable: Path
     runtime_ready: bool
@@ -264,8 +210,8 @@ class DependencyState:
     def verification_summary(self) -> str:
         total = len(self.component_statuses)
         if self.ready:
-            return f"{total} components verified."
-        return f"{self.verified_count} of {total} components verified"
+            return f"{total} components checked."
+        return f"{self.verified_count} of {total} components checked"
 
 
 def normalize_project_path(value: str | os.PathLike[str], *, find_nested: bool = True) -> Path:
@@ -402,80 +348,6 @@ def operation_environment(
     environment["PYTHONPATH"] = os.pathsep.join(entries)
     environment.update({"PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
     return environment
-
-
-def _missing_modules(
-    dependencies: dict[str, str], python_executable: Path | None = None
-) -> list[str]:
-    program = Path(python_executable or sys.executable)
-    target = program.resolve()
-    active = Path(sys.executable).resolve()
-    # Windows' GUI and console executables in the same environment share their
-    # packages. Treating pythonw.exe as a different environment spawned a new
-    # interpreter (and blocked Tk) whenever Settings refreshed its component list.
-    same_environment = target == active or (
-        os.name == "nt"
-        and target.parent == active.parent
-        and {target.name.lower(), active.name.lower()} <= {"python.exe", "pythonw.exe"}
-    )
-    if same_environment:
-        missing: list[str] = []
-        for module, requirement in dependencies.items():
-            distribution, separator, expected = requirement.partition("==")
-            try:
-                installed = version(distribution)
-            except PackageNotFoundError:
-                installed = ""
-            try:
-                available = importlib.util.find_spec(module) is not None
-            except (ModuleNotFoundError, ValueError):
-                available = False
-            if not available or not separator or installed != expected:
-                missing.append(requirement)
-        return missing
-    if not program.is_file():
-        return list(dependencies.values())
-    probe = """import importlib.metadata
-import importlib.util
-import json
-import sys
-
-pairs = list(zip(sys.argv[1::2], sys.argv[2::2]))
-missing = []
-for module, requirement in pairs:
-    distribution, separator, expected = requirement.partition("==")
-    try:
-        installed = importlib.metadata.version(distribution)
-    except importlib.metadata.PackageNotFoundError:
-        installed = ""
-    try:
-        available = importlib.util.find_spec(module) is not None
-    except (ModuleNotFoundError, ValueError):
-        available = False
-    if not available or not separator or installed != expected:
-        missing.append(module)
-print(json.dumps(missing))
-"""
-    arguments = [value for item in dependencies.items() for value in item]
-    try:
-        result = subprocess.run(
-            [str(program), "-c", probe, *arguments],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-            check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        missing_modules = json.loads(result.stdout) if result.returncode == 0 else None
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        missing_modules = None
-    if not isinstance(missing_modules, list):
-        return list(dependencies.values())
-    return [
-        requirement for module, requirement in dependencies.items() if module in missing_modules
-    ]
 
 
 def missing_dependencies(python_executable: Path | None = None) -> list[str]:
@@ -729,266 +601,6 @@ def skipped_asset_notice(result: dict[str, object]) -> str:
     return f" {len(skipped)} sprite form(s) were skipped; see Activity for the names and reasons."
 
 
-_PROGRESS_PATTERNS = (
-    (
-        re.compile(r"SceneLight scan files\s+(\d+)/(\d+):\s*(.*)"),
-        "scan-files",
-        "Reading game files",
-    ),
-    (
-        re.compile(r"SceneLight scan\s+(\d+)/(\d+):\s*(.*)"),
-        "scan",
-        "Scanning game",
-    ),
-    (
-        re.compile(r"compatibility download\s+(\d+)/(\d+):\s*(.*)"),
-        "compatibility-download",
-        "Downloading verified legacy support",
-    ),
-    (
-        re.compile(r"SceneLight preflight\s+(\d+)/(\d+):\s*(.*)"),
-        "preflight",
-        "Testing the game runtime",
-    ),
-    (
-        re.compile(r"SceneLight resolver planned\s+(\d+)\s+canonical forms"),
-        "resolver",
-        "Resolving dynamic sprite forms",
-    ),
-    (
-        re.compile(r"SceneLight resolver background\s+(\d+)/(\d+)"),
-        "resolver-backgrounds",
-        "Capturing dynamic backgrounds",
-    ),
-    (
-        re.compile(r"SceneLight story inventory\s+(\d+)/(\d+)"),
-        "resolver-inventory",
-        "Reading the story",
-    ),
-    (
-        re.compile(r"SceneLight image families\s+(\d+)/(\d+)"),
-        "resolver-families",
-        "Finding character families",
-    ),
-    (
-        re.compile(r"SceneLight character geometry\s+(\d+)/(\d+)"),
-        "resolver-geometry",
-        "Checking character artwork",
-    ),
-    (
-        re.compile(r"SceneLight image catalog\s+(\d+)/(\d+)"),
-        "resolver-catalog",
-        "Building the image catalog",
-    ),
-    (
-        re.compile(r"SceneLight resolver plan\s+(\d+)/(\d+)"),
-        "resolver-plan",
-        "Planning character appearances",
-    ),
-    (
-        re.compile(r"SceneLight restored\s+(\d+)/(\d+)\s+completed sprite forms"),
-        "resolver-restore",
-        "Restoring completed sprite captures",
-    ),
-    (
-        re.compile(r"SceneLight resolver resume\s+(\d+)/(\d+)"),
-        "resolver-resume",
-        "Starting the next safe capture batch",
-    ),
-    (
-        re.compile(r"SceneLight checkpoint scan\s+(\d+)/(\d+)"),
-        "resolver-checkpoints",
-        "Checking saved sprite captures",
-    ),
-    (
-        re.compile(r"SceneLight capture work\s+(\d+)/(\d+):\s*(.*)"),
-        "resolver-work",
-        "Saving sprite captures",
-    ),
-    (
-        re.compile(r"SceneLight parallel forms\s+(\d+)/(\d+):\s*(.*)"),
-        "resolver-parallel",
-        "Processing sprite forms (captures and skips)",
-    ),
-    (
-        re.compile(r"SceneLight worker copies\s+(\d+)/(\d+):\s*(.*)"),
-        "resolver-workers",
-        "Preparing parallel capture workers",
-    ),
-    (
-        re.compile(r"SceneLight worker cleanup\s+(\d+)/(\d+):\s*(.*)"),
-        "resolver-worker-cleanup",
-        "Releasing parallel capture workers",
-    ),
-    (
-        re.compile(r"SceneLight worker\s+(\d+)/(\d+):\s*(.*)"),
-        "resolver-worker-retry",
-        "Retrying a capture worker",
-    ),
-    (
-        re.compile(r"SceneLight resolver form\s+(\d+)/(\d+)"),
-        "resolver",
-        "Resolving dynamic sprite forms",
-    ),
-    (
-        re.compile(r"transport\s+(\d+)/(\d+):\s*(.*)"),
-        "transport",
-        "Analyzing background lighting",
-    ),
-    (
-        re.compile(r"scene\s+(\d+)/(\d+):\s*(.*)"),
-        "scene",
-        "Packing background lighting",
-    ),
-    (
-        re.compile(r"form inventory\s+(\d+)/(\d+):\s*(.*)"),
-        "form-inventory",
-        "Checking sprite forms",
-    ),
-    (
-        re.compile(r"surface normalization\s+(\d+)/(\d+):\s*(.*)"),
-        "surface-normalization",
-        "Preparing captured sprite pixels",
-    ),
-    (
-        re.compile(r"surface deduplication\s+(\d+)/(\d+):\s*(.*)"),
-        "surface-deduplication",
-        "Finding identical sprite captures",
-    ),
-    (
-        re.compile(r"composite assembly\s+(\d+)/(\d+):\s*(.*)"),
-        "composite-assembly",
-        "Building layered sprite captures",
-    ),
-    (
-        re.compile(r"form\s+(\d+)/(\d+):\s*(.*)"),
-        "form",
-        "Building unique sprite surface maps",
-    ),
-)
-
-
-def parse_progress(line: str) -> ProgressUpdate | None:
-    """Extract any long-running SceneLight phase from streamed CLI output."""
-
-    stage = re.search(r"SceneLight stage ([a-z-]+) (\d+)/(\d+):\s*(.*)", line)
-    if stage is not None:
-        phase, current, total, item = stage.groups()
-        if phase not in STAGE_LABELS or (int(total) and int(current) > int(total)):
-            return None
-        return ProgressUpdate("stage-" + phase, STAGE_LABELS[phase], int(current), int(total), item)
-    for pattern, phase, label in _PROGRESS_PATTERNS:
-        match = pattern.search(line)
-        if match is None:
-            continue
-        groups = match.groups()
-        if phase == "resolver" and len(groups) == 1:
-            current, total, item = 0, int(groups[0]), "planning canonical forms"
-        else:
-            current, total = int(groups[0]), int(groups[1])
-            item = groups[2].strip() if len(groups) > 2 else ""
-        if total <= 0 or current < 0 or current > total:
-            return None
-        return ProgressUpdate(phase, label, current, total, item)
-    return None
-
-
-def _component_output_name(value: str) -> str:
-    token = Path(value.strip().strip("'\"")).name
-    token = re.sub(r"\.(?:whl|zip|tar\.gz|metadata)$", "", token, flags=re.IGNORECASE)
-    distribution = re.split(r"-(?=\d)", token, maxsplit=1)[0]
-    normalized = distribution.replace("_", "-").lower()
-    return COMPONENT_OUTPUT_LABELS.get(normalized, distribution.replace("_", " "))
-
-
-def parse_component_progress(
-    line: str,
-    active_download: str = "",
-) -> ComponentProgress | None:
-    """Turn pip/venv output into concise live installer status."""
-
-    clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line).strip()
-    if not clean:
-        return None
-
-    download = re.search(
-        r"Downloading\s+([^\s(]+)(?:\s+\(([\d.]+)\s*(kB|MB|GB)\))?",
-        clean,
-        flags=re.IGNORECASE,
-    )
-    if download is not None:
-        name = _component_output_name(download.group(1))
-        size = download.group(2)
-        unit = download.group(3)
-        detail = f" ({size} {unit})" if size and unit else ""
-        return ComponentProgress(
-            f"Downloading {name}{detail}…",
-            0.0 if size else None,
-            float(size) if size else None,
-            name,
-        )
-
-    transfer = re.search(r"([\d.]+)/([\d.]+)\s*(kB|MB|GB)", clean, flags=re.IGNORECASE)
-    if transfer is not None:
-        current = float(transfer.group(1))
-        total = float(transfer.group(2))
-        unit = transfer.group(3)
-        name = active_download or "components"
-        return ComponentProgress(
-            f"Downloading {name} — {transfer.group(1)} of {transfer.group(2)} {unit}…",
-            current,
-            total,
-            name,
-        )
-
-    collecting = re.search(r"^Collecting\s+([^\s<(=]+)", clean, flags=re.IGNORECASE)
-    if collecting is not None:
-        name = _component_output_name(collecting.group(1))
-        return ComponentProgress(f"Preparing {name}…", active_download=active_download)
-
-    satisfied = re.search(
-        r"^Requirement already satisfied:\s+([^\s<(=]+)", clean, flags=re.IGNORECASE
-    )
-    if satisfied is not None:
-        name = _component_output_name(satisfied.group(1))
-        return ComponentProgress(f"Verified {name}.", active_download=active_download)
-
-    installing = re.search(r"^Installing collected packages:\s*(.*)", clean, flags=re.IGNORECASE)
-    if installing is not None:
-        packages = [item.strip() for item in installing.group(1).split(",") if item.strip()]
-        count = len(packages)
-        noun = "component" if count == 1 else "components"
-        return ComponentProgress(
-            f"Installing {count} {noun}…",
-            92.0,
-            100.0,
-            active_download,
-        )
-
-    if clean.lower().startswith("successfully installed"):
-        return ComponentProgress(
-            "Components installed. Verifying exact versions…",
-            98.0,
-            100.0,
-            active_download,
-        )
-
-    if clean.lower().startswith(("error:", "failed to")):
-        return ComponentProgress("Component setup encountered an error.")
-    return None
-
-
-def component_command_status(command: list[str], current: int, total: int) -> str:
-    """Describe a component setup subprocess without exposing its command line."""
-
-    lowered = [item.lower() for item in command]
-    if lowered[1:3] == ["-m", "venv"]:
-        return f"Step {current} of {total}: Creating the SceneLight runtime…"
-    if "pip" in lowered and all(item in command for item in PACKAGING_REQUIREMENTS):
-        return f"Step {current} of {total}: Preparing the component installer…"
-    return f"Step {current} of {total}: Downloading and installing SceneLight components…"
-
-
 def operation_copy(operation: str) -> tuple[str, str, str]:
     """Return the title, explanation, and initial status for a live operation."""
 
@@ -1064,73 +676,6 @@ def operation_copy(operation: str) -> tuple[str, str, str]:
     )
 
 
-def parse_runtime_progress(line: str) -> tuple[int, int] | None:
-    """Extract dynamic-asset progress emitted by the Ren'Py resolver."""
-
-    progress = parse_progress(line)
-    if progress is None or progress.phase != "resolver":
-        return None
-    return progress.current, progress.total
-
-
-def format_duration(seconds: float) -> str:
-    value = max(0, int(round(seconds)))
-    hours, remainder = divmod(value, 3600)
-    minutes, seconds_value = divmod(remainder, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m"
-    if minutes:
-        return f"{minutes}m {seconds_value:02d}s"
-    return f"{seconds_value}s"
-
-
-def format_progress_status(
-    progress: ProgressUpdate,
-    *,
-    elapsed_seconds: float,
-    completed_since_start: int,
-) -> str:
-    """Format progress with elapsed time and an estimated time remaining."""
-
-    if progress.total == 0:
-        count = f" — {progress.current:,} files processed" if progress.current else ""
-        parts = [progress.label + count, f"elapsed {format_duration(elapsed_seconds)}"]
-        if progress.item:
-            parts.append(progress.item[:100])
-        return "  •  ".join(parts)
-    percent = 100.0 * progress.current / progress.total
-    parts = [
-        f"{progress.label} — {progress.current:,} of {progress.total:,} ({percent:.1f}%)",
-        f"elapsed {format_duration(elapsed_seconds)}",
-    ]
-    if progress.current < progress.total:
-        if elapsed_seconds >= 0.5 and completed_since_start > 0:
-            remaining = progress.total - progress.current
-            eta = remaining * elapsed_seconds / completed_since_start
-            parts.append(f"about {format_duration(eta)} left")
-        else:
-            parts.append("estimating time remaining")
-    if progress.phase.startswith("stage-") and progress.item and progress.item != "Complete":
-        parts.append(progress.item[:100])
-    return "  •  ".join(parts)
-
-
-def progress_moves_forward(
-    progress: ProgressUpdate,
-    *,
-    previous_phase: str | None,
-    previous_current: int,
-    previous_total: int,
-) -> bool:
-    """Reject only a repeated backend's catch-up updates for the same plan."""
-
-    return (
-        progress.phase != previous_phase
-        or progress.total != previous_total
-        or progress.current >= previous_current
-    )
-
-
 def describe_scan(payload: dict[str, object]) -> str:
     scenes = payload.get("scenes", {})
     sprites = payload.get("sprites", {})
@@ -1148,130 +693,12 @@ def describe_scan(payload: dict[str, object]) -> str:
     )
 
 
-def character_review_candidates(payload: dict[str, object]) -> dict[str, str | None]:
-    """Decode scan candidates without trusting arbitrary payload types."""
-
-    raw = payload.get("character_candidates", {})
-    if not isinstance(raw, dict):
-        return {}
-    candidates: dict[str, str | None] = {}
-    for raw_tag, raw_preview in raw.items():
-        parts = str(raw_tag).strip().lower().split()
-        if not parts or not re.fullmatch(r"[a-z0-9_]+", parts[0]):
-            continue
-        tag = parts[0]
-        candidates[tag] = str(raw_preview) if isinstance(raw_preview, str) else None
-    return dict(sorted(candidates.items()))
-
-
-def character_review_mode(payload: dict[str, object]) -> str:
-    """Keep existing choices; new installations include detected characters."""
-
-    auto_include = payload.get("auto_include_new_characters")
-    if isinstance(auto_include, bool):
-        return "automatic" if auto_include else "manual"
-    mode = payload.get("character_selection")
-    if isinstance(mode, str) and mode in {"manual", "automatic"}:
-        return mode
-    return "automatic" if mode is None else "manual"
-
-
-def character_review_selected_tags(payload: dict[str, object]) -> set[str]:
-    """Use one selection rule for visible checks and persisted update policy."""
-
-    def tags(key: str) -> set[str]:
-        values = payload.get(key, [])
-        return (
-            {str(value).strip().lower() for value in values} if isinstance(values, list) else set()
-        )
-
-    chosen = tags("explicit_character_tags")
-    if character_review_mode(payload) == "automatic":
-        chosen.update(tags("suggested_character_tags") | tags("character_tags"))
-    return chosen - tags("excluded_character_tags")
-
-
-def character_review_required(
-    payload: dict[str, object], *, installed: bool, force: bool = False
-) -> bool:
-    """Require deliberate review for first install or newly suggested families."""
-
-    if force or not installed:
-        return True
-    if character_review_mode(payload) == "automatic":
-        return False
-    explicit = payload.get("explicit_character_tags", [])
-    suggested = payload.get("suggested_character_tags", payload.get("character_tags", []))
-    explicit_tags = (
-        {str(tag).strip().lower() for tag in explicit if isinstance(tag, str) and str(tag).strip()}
-        if isinstance(explicit, list)
-        else set()
-    )
-    suggested_tags = (
-        {str(tag).strip().lower() for tag in suggested if isinstance(tag, str) and str(tag).strip()}
-        if isinstance(suggested, list)
-        else set()
-    )
-    excluded = payload.get("excluded_character_tags", [])
-    excluded_tags = set(excluded) if isinstance(excluded, list) else set()
-    return bool(suggested_tags - explicit_tags - excluded_tags)
-
-
 def thumbnail_subsample_factor(width: int, height: int, limit: int = 72) -> int:
     """Return an integer Tk subsample factor that fits inside ``limit`` pixels."""
 
     if limit <= 0:
         raise ValueError("Thumbnail limit must be positive.")
     return max(1, (max(1, width) + limit - 1) // limit, (max(1, height) + limit - 1) // limit)
-
-
-def save_character_selection(
-    project_root: Path,
-    mode: str,
-    tags: list[str],
-    *,
-    candidates: list[str] | None = None,
-) -> Path:
-    """Save an authoritative per-user selection outside the chosen game."""
-
-    normalized_mode = mode.strip().lower()
-    if normalized_mode not in {"manual", "automatic"}:
-        raise ValueError("Character selection mode must be manual or automatic")
-    normalized_tags: list[str] = []
-    for raw in tags:
-        parts = raw.strip().lower().split()
-        if parts and re.fullmatch(r"[a-z0-9_]+", parts[0]):
-            normalized_tags.append(parts[0])
-    normalized_tags = sorted(set(normalized_tags))
-    destination = profile_path(project_root)
-    payload: dict[str, object] = {}
-    project_config = project_root / "scenelight.json"
-    if project_config.is_file():
-        configured = json.loads(project_config.read_text(encoding="utf-8"))
-        if isinstance(configured, dict) and "excluded_character_tags" in configured:
-            payload["excluded_character_tags"] = configured["excluded_character_tags"]
-    if destination.is_file():
-        loaded = json.loads(destination.read_text(encoding="utf-8"))
-        if not isinstance(loaded, dict):
-            raise ValueError("The existing SceneLight profile is not a JSON object")
-        payload.update(loaded)
-    payload["character_selection"] = normalized_mode
-    payload["auto_include_new_characters"] = normalized_mode == "automatic"
-    payload["character_tags"] = normalized_tags
-    prior_exclusions = payload.get("excluded_character_tags", [])
-    prior_exclusions = prior_exclusions if isinstance(prior_exclusions, list) else []
-    excluded = set()
-    for value in [*prior_exclusions, *(candidates or [])]:
-        parts = str(value).strip().lower().split()
-        if parts and re.fullmatch(r"[a-z0-9_]+", parts[0]):
-            excluded.add(parts[0])
-    excluded.difference_update(normalized_tags)
-    payload["excluded_character_tags"] = sorted(excluded)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, destination)
-    return destination
 
 
 def installed_managed_launcher(project_root: Path) -> Path | None:
@@ -1355,6 +782,13 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
 
     project_root = selection.root
     try:
+        from .developer_transaction import JOURNAL, recover
+
+        if (project_root / JOURNAL).exists():
+            from .updates import operation_lock
+
+            with operation_lock(project_root):
+                recover(project_root)
         reserved_namespace = (project_root / "game" / "scenelight_runtime").exists()
         managed_root = managed_project_root(project_root)
         managed_install_present = (managed_root / ".scenelight_install.json").is_file()
@@ -2172,7 +1606,7 @@ class SceneLightSetup(tk.Tk):
             ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0))
             ttk.Label(
                 advanced_tab,
-                text="Required components · individually verified",
+                text="Required components · installed versions checked",
                 style="CardTitle.TLabel",
             ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 5))
             requirements_view = tk.Frame(advanced_tab, background="#12161c")
@@ -4447,9 +3881,10 @@ class SceneLightSetup(tk.Tk):
             icon="warning",
         ):
             return
-        if self._process is not None:
-            self._cancel_requested.set()
-            terminate_process_tree(self._process)
+        self._cancel_requested.set()
+        process = self._process
+        if process is not None:
+            threading.Thread(target=terminate_process_tree, args=(process,), daemon=True).start()
         self._close_character_review_window()
         self.destroy()
 

@@ -21,6 +21,8 @@ Renderer changes need image comparisons as well as numerical and timing checks.
 and the supplied Ren'Py executable; capture and rendering are not mocked. Supply
 `--package`, `--sdk`, a new `--output` directory and `--mode player` or `developer`.
 Run both modes against supported Ren'Py versions before a release affecting updates.
+`--lifecycle` also checks actual rollback, removal, preservation of authored files
+and saves, and a native launch after removal.
 `--python` can explicitly select a development interpreter while investigating a fix.
 
 It creates a disposable project with static and layered sprites, custom lighting,
@@ -34,6 +36,24 @@ Keep native source-backed `.rpyc` files during updates: Ren'Py uses their prior 
 to preserve save statement identities. Analyzer-created bytecode must not replace
 the playback copy. A save file surviving byte-for-byte is not sufficient proof;
 the loaded gameplay state and resume point must also be checked.
+
+## Desktop GL and GLES checks
+
+The graphics CI matrix uses Mesa EGL with desktop OpenGL and OpenGL ES separately.
+It requires the field-parity, compute and resize-lifetime cases to execute; missing
+contexts and unexpected skips fail the job. These software-renderer results do
+not replace testing on physical graphics hardware.
+
+On Linux with Mesa EGL installed:
+
+```sh
+EGL_PLATFORM=surfaceless PYOPENGL_PLATFORM=egl LIBGL_ALWAYS_SOFTWARE=1 \
+SCENELIGHT_TEST_EGL=1 SCENELIGHT_TEST_GL=gles SCENELIGHT_REQUIRE_GPU=1 \
+pytest tests/test_live_gpu.py -rA
+```
+
+Repeat with `SCENELIGHT_TEST_GL=desktop`. On Windows, run the same test file with
+the native graphics context and record the adapter and driver.
 
 ## Package checks
 

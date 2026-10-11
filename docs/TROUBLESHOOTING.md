@@ -42,7 +42,10 @@ restart the game. If it persists, send the recording and report.
 ## Preview changes do not appear in the game
 
 1. Open **Save / export** and review **Current values**, the destination and **File preview**.
-2. Choose **Write reviewed config** for the intended project, or save its profile.
+2. Choose **Export config** for the intended project, or save its profile.
+   Check the **Settings loaded from** list. Project config loads first, then its
+   saved profile, then any explicitly selected config. Exporting to the project
+   config updates its saved profile too; exporting elsewhere does not.
 3. Select that project in Setup, run **Update SceneLight**, then restart the game.
 4. Check **All sources** in the inspector for background, scene, character, image
    or player overrides that take precedence over the exported defaults.

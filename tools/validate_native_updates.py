@@ -16,6 +16,7 @@ parser.add_argument("--sdk", type=Path, required=True)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--mode", choices=["developer", "player"], required=True)
 parser.add_argument("--python", type=Path)
+parser.add_argument("--lifecycle", action="store_true", help="Also test rollback and removal")
 args = parser.parse_args()
 root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=False)
@@ -26,6 +27,8 @@ images.mkdir(parents=True)
 (root / "temp").mkdir()
 environment = dict(
     os.environ,
+    LOCALAPPDATA=str(root / "state/local"),
+    APPDATA=str(root / "state/roaming"),
     SCENELIGHT_MANAGED_ROOT=str(root / "state/projects"),
     TEMP=str(root / "temp"),
     TMP=str(root / "temp"),
@@ -89,6 +92,7 @@ init 1005 python:
     def qa_write_result():
         value = {"progress":qa_progress,"report":scenelight.inspect(),
             "loaded":bool(getattr(renpy.display,"_qa_reloaded",False)),
+            "setup_count":getattr(renpy.display,"_qa_setup_count",0),
             "renpy":renpy.version()}
         with open(qa_os.environ["SL_RELEASE_RESULT"],"w") as stream:
             qa_json.dump(value,stream,indent=2)
@@ -97,7 +101,7 @@ init 1005 python:
             stream.write(value + "\\n")
 screen main_menu():
     if qa_os.environ.get("SL_RELEASE_PROBE"):
-        timer 0.1 action Start("qa_probe")
+        timer 0.1 action Start("qa_" + qa_os.environ["SL_RELEASE_PROBE"] if qa_os.environ["SL_RELEASE_PROBE"] in ("rollback", "vanilla") else "qa_probe")
     else:
         textbutton "Start" action Start()
 label qa_probe:
@@ -124,12 +128,42 @@ label qa_probe:
     $ renpy.quit(relaunch=False,status=0)
 label start:
     if qa_os.environ.get("SL_RELEASE_PROBE"):
+        if qa_os.environ["SL_RELEASE_PROBE"] == "rollback":
+            jump qa_rollback
+        if qa_os.environ["SL_RELEASE_PROBE"] == "vanilla":
+            jump qa_vanilla
         jump qa_probe
     scene bg room
     show hero idle
     show companion idle
     "Update rehearsal."
     return
+screen qa_auto_advance():
+    timer 0.1 repeat True action Function(renpy.end_interaction, True)
+label qa_rollback:
+    scene bg room
+    show hero idle
+    $ renpy.display._qa_setup_count = getattr(renpy.display, "_qa_setup_count", 0) + 1
+    $ qa_progress = 11
+    $ scenelight.image("hero idle", strength=0.4)
+    show screen qa_auto_advance
+    "Original lighting checkpoint."
+    if getattr(renpy.display, "_qa_did_rollback", False):
+        $ qa_write_result()
+        $ renpy.quit(relaunch=False, status=0)
+    $ qa_progress = 99
+    $ scenelight.image("hero idle", strength=0.9)
+    "Changed lighting checkpoint."
+    $ renpy.display._qa_did_rollback = True
+    $ renpy.rollback(force=True, checkpoints=1, greedy=False)
+label qa_vanilla:
+    scene bg room
+    show hero idle
+    $ renpy.pause(0.2, hard=True)
+    python:
+        with open(qa_os.environ["SL_RELEASE_RESULT"], "w") as stream:
+            qa_json.dump({"runtime_removed": "scenelight" not in globals(), "renpy": renpy.version()}, stream)
+    $ renpy.quit(relaunch=False, status=0)
 """,
     encoding="utf-8",
 )
@@ -291,5 +325,59 @@ result = {
     "real_save_loaded": True,
     "unchanged_maps_preserved": len(map_hashes),
 }
+if args.lifecycle:
+    output = root / "native-rollback.json"
+    run(
+        "native-rollback",
+        [args.sdk, installed],
+        env=dict(
+            environment,
+            SL_RELEASE_PROBE="rollback",
+            SL_RELEASE_RESULT=str(output),
+            RENPY_SKIP_MAIN_MENU="1",
+        ),
+        timeout=45,
+    )
+    value = json.loads(output.read_text())
+    assert value["progress"] == 11, value
+    assert value["setup_count"] == 1, "Rollback replayed setup instead of restoring state"
+    hero = next(s for s in value["report"]["sprites"] if s["image"] == "hero idle")
+    assert abs(hero["values"]["strength"] - 0.4) < 1e-6, hero
+    authored = {
+        str(p): digest(p) for p in [game / "script.rpy", *images.glob("*.png"), config, marker]
+    }
+    run(
+        "remove",
+        [
+            python,
+            "-m",
+            "scenelight.cli",
+            "unembed" if args.mode == "developer" else "remove",
+            "--project",
+            project,
+        ],
+    )
+    assert all(digest(Path(path)) == value for path, value in authored.items())
+    assert not (project / "game/scenelight_runtime").exists()
+    if args.mode == "developer":
+        assert all(digest(installed / name) == value for name, value in save_hashes.items())
+    else:
+        assert not installed.exists()
+    output = root / "native-after-removal.json"
+    run(
+        "native-after-removal",
+        [args.sdk, project],
+        env=dict(
+            environment,
+            SL_RELEASE_PROBE="vanilla",
+            SL_RELEASE_RESULT=str(output),
+            RENPY_SKIP_MAIN_MENU="1",
+        ),
+        timeout=45,
+    )
+    assert json.loads(output.read_text())["runtime_removed"]
+    result.update(
+        rollback_restored_lighting=True, removal_preserved_source=True, vanilla_game_launched=True
+    )
 (root / "RESULT.json").write_text(json.dumps(result, indent=2))
 print(json.dumps(result, indent=2), flush=True)

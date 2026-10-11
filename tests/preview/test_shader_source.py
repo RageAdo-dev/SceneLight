@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from scenelight.preview.core import runtime_source_path
 from scenelight.preview.shader_source import fragment_source, production_shader_sha256
+from scenelight.runtime.shader_data import SHADERS
+
+
+def test_shader_identity_comes_from_shared_shader_content(monkeypatch):
+    before = production_shader_sha256()
+    # No read or parse of the Ren'Py script is needed to compile or identify GLSL.
+    monkeypatch.setattr("scenelight.preview.shader_source.runtime_source_path", lambda: None)
+    assert production_shader_sha256() == before
+    monkeypatch.setitem(SHADERS, "fragment_350", SHADERS["fragment_350"] + "\n// shader revision\n")
+    assert production_shader_sha256() != before
 
 
 def test_gpu_wrapper_uses_production_runtime_source() -> None:

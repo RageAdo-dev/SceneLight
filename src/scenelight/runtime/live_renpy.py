@@ -86,6 +86,8 @@ class Renderer(object):
         new_context = loader is not self.loader
         if not new_context and drawable == self.drawable:
             return False
+        if not new_context and self.analysis is not None:
+            self.analysis.device.close()
         # A destroyed GL context already owns reclamation of its objects.
         # Never delete old numeric GL names in a replacement context.
         self.loader = loader

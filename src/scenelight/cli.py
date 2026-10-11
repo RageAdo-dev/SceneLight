@@ -1121,6 +1121,9 @@ def _main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command in {"install", "attach", "embed", "refresh", "remove", "unembed", "inspector"}:
         with operation_lock(args.project):
+            from .developer_transaction import recover
+
+            recover(args.project.expanduser().resolve())
             return _dispatch(argv)
     return _dispatch(argv)
 

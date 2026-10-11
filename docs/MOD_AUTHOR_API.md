@@ -302,11 +302,13 @@ $ scenelight.image("magic glowing", glow_strength=0.8, glow_color_mix=1.0,
 Setting `glow_color_mix=0` restores artwork colors. A zero `glow_strength`
 disables self glow regardless of the chosen color.
 
-Rain, glitch, and custom effect packs remain deferred until after launch.
+Rain, glitch, and custom effect packs use an experimental, script-only API,
+outside the supported lighting API. The effects panel and its shortcut are
+disabled. See [Effect packs](EFFECT_PACKS.md) before using them.
 
 ### Glow selected colors on a sprite
 
-Use **Calibrate → Color glow** on the loaded Preview sprite. Add as many color
+Use **Adjust → Color glow** on the loaded Preview sprite. Add as many color
 rules as needed, choose an artwork color, and adjust **Color range** to include similar
 shades. **Soft edges** feathers the match, **Glow strength** controls brightness, and
 **Halo spread** controls its reach. Each rule can be disabled, duplicated, or removed.
