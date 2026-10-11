@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
-SHELL = shutil.which("pwsh") or shutil.which("powershell")
+SHELLS = list(
+    dict.fromkeys(path for name in ("pwsh", "powershell") if (path := shutil.which(name)))
+)
+SHELL = SHELLS[0] if SHELLS else None
 
 
 def _step(name: str) -> str:
@@ -41,9 +44,12 @@ def test_tagged_release_does_not_use_temporary_artifact_storage():
 
 
 @pytest.mark.skipif(SHELL is None, reason="PowerShell is required for release upload checks")
-@pytest.mark.parametrize("exists,upload_exit", [(True, 0), (False, 0), (False, 1)])
+@pytest.mark.parametrize("shell", SHELLS or [None])
+@pytest.mark.parametrize(
+    "exists,upload_exit,lookup_exit", [(True, 0, 0), (False, 0, 0), (False, 1, 0), (False, 0, 1)]
+)
 def test_release_upload_preserves_existing_assets_and_reports_failures(
-    tmp_path, monkeypatch, exists, upload_exit
+    tmp_path, monkeypatch, exists, upload_exit, lookup_exit, shell
 ):
     monkeypatch.setenv("RELEASE_TAG", "v1.1.0")
     monkeypatch.setenv("TEST_GH_CALLS", str(tmp_path / "calls.json"))
@@ -53,22 +59,24 @@ $script:Calls = @()
 function gh {
     $script:Calls += ,@($args)
     ConvertTo-Json -InputObject $script:Calls -Depth 4 | Set-Content -LiteralPath $env:TEST_GH_CALLS
-    if ($args[1] -eq 'view') {
-        $global:LASTEXITCODE = VIEW_EXIT
-        if ($global:LASTEXITCODE -eq 0) { '{"tagName":"v1.1.0"}' }
+    if ($args[1] -eq 'list') {
+        $global:LASTEXITCODE = LOOKUP_EXIT
+        'RELEASE_LIST'
     } else {
         $global:LASTEXITCODE = UPLOAD_EXIT
     }
 }
 """
-    stub = stub.replace("VIEW_EXIT", "0" if exists else "1").replace(
-        "UPLOAD_EXIT", str(upload_exit)
+    stub = (
+        stub.replace("LOOKUP_EXIT", str(lookup_exit))
+        .replace("RELEASE_LIST", '[{"tagName":"v1.1.0"}]' if exists else "[]")
+        .replace("UPLOAD_EXIT", str(upload_exit))
     )
     script = tmp_path / "publish.ps1"
     script.write_text(stub + _script("Create draft release for tag"), encoding="utf-8")
     result = subprocess.run(
         [
-            SHELL,
+            shell,
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
@@ -81,8 +89,12 @@ function gh {
         timeout=30,
     )
     calls = json.loads((tmp_path / "calls.json").read_text(encoding="utf-8-sig"))
-    assert calls[0][:3] == ["release", "view", "v1.1.0"]
-    if exists:
+    assert list(map(str, calls[0][:4])) == ["release", "list", "--limit", "1000"]
+    if lookup_exit:
+        assert result.returncode != 0
+        assert "Release lookup failed" in result.stderr
+        assert len(calls) == 1
+    elif exists:
         assert result.returncode == 0, result.stderr
         assert len(calls) == 1
     else:

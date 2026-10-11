@@ -128,8 +128,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $existing = gh release view "$env:RELEASE_TAG" --json tagName 2>$null
-          if ($LASTEXITCODE -eq 0 -and $existing) {
+          $releases = gh release list --limit 1000 --json tagName
+          if ($LASTEXITCODE -ne 0) { throw 'Release lookup failed.' }
+          $existing = @($releases | ConvertFrom-Json) | Where-Object { $_.tagName -eq $env:RELEASE_TAG }
+          if ($existing) {
             Write-Output "A release for $env:RELEASE_TAG already exists; leaving it untouched."
             exit 0
           }
