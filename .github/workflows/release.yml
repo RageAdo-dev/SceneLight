@@ -2,6 +2,11 @@ name: Build release ZIP
 
 on:
   workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: "Keep a temporary ZIP download for one day (requires available Actions storage)"
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 
@@ -100,19 +105,24 @@ jobs:
           python tools/build_online_installer.py "dist/SceneLight-v$version-Windows.zip" --release-tag $tag
           if ($LASTEXITCODE -ne 0) { throw 'Online installer build failed.' }
           .\tools\build_release_zip.ps1 -Source
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: SceneLight-Windows
-          path: |
-            dist/SceneLight-v*-Windows.zip
-            dist/SceneLight-v*-Windows.zip.sha256
-            dist/SceneLight-v*-Windows-online.zip
-            dist/SceneLight-v*-Windows-online.zip.sha256
-            dist/SceneLight-v*-Windows-source.zip
-            dist/SceneLight-v*-Windows-source.zip.sha256
-            dist/scenelight_renpy-*.whl
-            dist/scenelight_renpy-*.tar.gz
-      - if: startsWith(github.ref, 'refs/tags/')
+      - name: Record package checksums
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          "## Built packages" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "| File | Bytes | SHA-256 |" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "| --- | ---: | --- |" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          Get-ChildItem -LiteralPath 'dist' -File | Sort-Object Name | ForEach-Object {
+            $digest = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "| $($_.Name) | $($_.Length) | $digest |" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+      - name: Explain build-only result
+        if: github.event_name == 'workflow_dispatch' && !inputs.upload_artifact
+        shell: powershell
+        run: |
+          "Build and validation only. No package was uploaded. Enable the temporary download option when starting a manual run if Actions storage is available. Tagged releases upload directly to the release page." | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Create draft release for tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -134,3 +144,21 @@ jobs:
             dist/scenelight_renpy-*.tar.gz `
             --generate-notes --draft --prerelease --verify-tag `
             --title "SceneLight $env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
+      - name: Upload temporary download
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SceneLight-Windows
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            dist/SceneLight-v*-Windows.zip
+            dist/SceneLight-v*-Windows.zip.sha256
+            dist/SceneLight-v*-Windows-online.zip
+            dist/SceneLight-v*-Windows-online.zip.sha256
+            dist/SceneLight-v*-Windows-source.zip
+            dist/SceneLight-v*-Windows-source.zip.sha256
+            dist/scenelight_renpy-*.whl
+            dist/scenelight_renpy-*.tar.gz
