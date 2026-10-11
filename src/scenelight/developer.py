@@ -270,7 +270,7 @@ def _save_compat_asset() -> Path:
 
 
 def _save_compat_manifest(project_root: Path) -> dict[str, object] | None:
-    path = project_root / SAVE_COMPAT_MANIFEST_NAME
+    path = _plain_project_path(project_root, Path(SAVE_COMPAT_MANIFEST_NAME))
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -291,9 +291,7 @@ def _preflight_save_compat_bridge(project_root: Path) -> tuple[Path, Path, str]:
     if not asset.is_file():
         raise FileNotFoundError("SceneLight's save-compatibility component is missing.")
     expected_hash = _sha256(asset)
-    destination = (project_root / SAVE_COMPAT_PATH).resolve()
-    if project_root not in destination.parents:
-        raise RuntimeError("SceneLight save-compatibility path escapes the project.")
+    destination = _plain_project_path(project_root, SAVE_COMPAT_PATH)
     if destination.exists() and (
         not destination.is_file() or _sha256(destination) != expected_hash
     ):
@@ -344,7 +342,7 @@ def _install_save_compat_bridge(
 
 
 def _manifest(project_root: Path) -> dict[str, object] | None:
-    path = project_root / MANIFEST_NAME
+    path = _plain_project_path(project_root, Path(MANIFEST_NAME))
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -358,6 +356,30 @@ def _manifest(project_root: Path) -> dict[str, object] | None:
     return payload
 
 
+def _plain_project_path(
+    project_root: Path, relative: Path, *, checked: set[Path] | None = None
+) -> Path:
+    """Keep ownership lexical and reject links before reading or changing owned files."""
+    if relative.is_absolute() or relative.drive or ".." in relative.parts or not relative.parts:
+        raise RuntimeError(f"Unsafe path in SceneLight developer manifest: {relative}")
+    checked = checked if checked is not None else set()
+    destination = project_root
+    for part in relative.parts:
+        destination = destination / part
+        if destination in checked:
+            continue
+        try:
+            info = destination.lstat()
+        except FileNotFoundError:
+            continue
+        if stat_mode.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RuntimeError(
+                f"SceneLight refuses a symbolic link or Windows reparse point: {relative}"
+            )
+        checked.add(destination)
+    return destination
+
+
 def _owned_paths(project_root: Path, manifest: dict[str, object]) -> dict[str, Path]:
     version = manifest.get("version")
     if version not in {1, 2, 3}:
@@ -369,22 +391,12 @@ def _owned_paths(project_root: Path, manifest: dict[str, object]) -> dict[str, P
         raise RuntimeError("SceneLight developer ownership manifest has no files.")
 
     result: dict[str, Path] = {}
-    resolved_parents: dict[Path, Path] = {}
+    checked: set[Path] = set()
     for key, expected_hash in files.items():
         if not isinstance(key, str) or not isinstance(expected_hash, str):
             raise RuntimeError("SceneLight developer ownership manifest contains invalid entries.")
         relative = Path(key)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise RuntimeError(f"Unsafe path in SceneLight developer manifest: {key}")
-        parent = resolved_parents.get(relative.parent)
-        if parent is None:
-            parent = (project_root / relative.parent).resolve()
-            resolved_parents[relative.parent] = parent
-        destination = parent / relative.name
-        if destination.is_symlink():
-            destination = destination.resolve()
-        if project_root not in destination.parents:
-            raise RuntimeError(f"Path escapes the selected project: {key}")
+        destination = _plain_project_path(project_root, relative, checked=checked)
         in_namespace = relative.parts[: len(EMBED_ROOT.parts)] == EMBED_ROOT.parts
         legacy_launcher = version == 2 and relative == Path(LEGACY_LAUNCHER_NAME)
         native_launcher = manifest.get("native_launcher") if version == 3 else None
@@ -441,7 +453,9 @@ def developer_status(
     unowned: list[str] = []
     embed_root = project_root / EMBED_ROOT
     if embed_root.is_dir():
+        checked: set[Path] = set()
         for path in embed_root.rglob("*"):
+            _plain_project_path(project_root, path.relative_to(project_root), checked=checked)
             if not path.is_file():
                 continue
             relative = path.relative_to(project_root).as_posix()
@@ -649,6 +663,7 @@ def preflight_embed_destination(project: Path) -> None:
     """Refuse an occupied in-place namespace before analysis starts."""
 
     project_root = project.expanduser().resolve()
+    _plain_project_path(project_root, EMBED_ROOT)
     if _manifest(project_root) is not None:
         raise FileExistsError(
             "SceneLight is already embedded. Remove the existing clean integration before refreshing it."
@@ -668,6 +683,7 @@ def preflight_refresh_destination(
     """Require a current, fully owned direct install before expensive analysis."""
 
     project_root = project.expanduser().resolve()
+    _plain_project_path(project_root, EMBED_ROOT)
     manifest = _manifest(project_root)
     if manifest is None:
         raise FileNotFoundError("SceneLight is not embedded in this project yet.")
