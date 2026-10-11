@@ -103,8 +103,8 @@ Sign before producing the final checksums.
 
 CI supports a PFX certificate. Add these repository secrets:
 
-- `WINDOWS_CERT_PFX` — the `.pfx` file, base64 encoded.
-- `WINDOWS_CERT_PASSWORD` — its password.
+- `WINDOWS_CERT_PFX` â€” the `.pfx` file, base64 encoded.
+- `WINDOWS_CERT_PASSWORD` â€” its password.
 
 Set the repository variable `REQUIRE_WINDOWS_SIGNING` to `true` to reject builds
 without a certificate. With that variable unset and no certificate supplied,
