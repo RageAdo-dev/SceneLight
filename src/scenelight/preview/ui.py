@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -720,18 +720,21 @@ class MainWindow(QMainWindow):
         """Start future-frame analysis only after the first visible frame is ready."""
         if self._temporal_future is not None or self._temporal_cancel.is_set():
             return
+        cancelled = self._temporal_cancel
         self._temporal_future = self._temporal_executor.submit(
             self._warm_temporal_scenes,
             generation,
             media.source,
             self._cache.root / "media",
-            self._temporal_cancel,
+            cancelled,
         )
         self._temporal_future.add_done_callback(
-            lambda completed: self._temporal_finished(generation, completed)
+            lambda completed: self._temporal_finished(generation, completed, cancelled)
         )
 
-    def _temporal_finished(self, generation: int, future) -> None:
+    def _temporal_finished(self, generation: int, future, cancelled=None) -> None:
+        if future.cancelled() or (cancelled is not None and cancelled.is_set()):
+            return
         try:
             future.result()
         except Exception as error:  # noqa: BLE001 - worker failures must reach the GUI.
@@ -739,6 +742,27 @@ class MainWindow(QMainWindow):
                 self._signals.mediaFailed.emit(
                     "scene", generation, "Animated background analysis", str(error)
                 )
+
+    def _resume_background_analysis(self) -> None:
+        """Retire export's cancelled worker before queuing preview work again."""
+        self._temporal_cancel.set()
+        if self._temporal_future is not None:
+            self._temporal_future.cancel()
+        self._temporal_future = None
+        self._temporal_cancel = threading.Event()
+        media = self._background_media
+        if media is None or self._gpu_live_background:
+            return
+        self._scene_generation += 1
+        generation = self._scene_generation
+        if self._scene_artifacts is None:
+            path = media.reference_path
+            future = self._scene_executor.submit(self._cache.scene, path)
+            future.add_done_callback(
+                lambda completed: self._scene_finished(generation, path, completed)
+            )
+        elif media.animated:
+            self._start_temporal_analysis(generation, media)
 
     @staticmethod
     def _scene_frame_from_artifacts(artifacts: SceneArtifacts) -> TemporalSceneFrame:
@@ -1374,6 +1398,17 @@ class MainWindow(QMainWindow):
             )
             return
         extension = export_extension(media.kind, sprite_media.kind)
+        if (
+            extension == ".png"
+            and self._scene_artifacts is None
+            and not (self._gpu_live_background and self._view._live_analysis_enabled)
+        ):
+            QMessageBox.information(
+                self,
+                "Preparing background",
+                "Wait for background lighting to finish before exporting.",
+            )
+            return
         suggested = self._background_path.with_name(
             f"{self._background_path.stem}_{self._sprite_path.stem}_gpu_relit{extension}"
         )
@@ -1468,13 +1503,17 @@ class MainWindow(QMainWindow):
                     "Movie lighting is not ready; reopen the background to prepare it before exporting"
                 )
             if self._temporal_future is not None:
-                warmed_anchors, built = _wait_for_export_future(
-                    self._temporal_future,
-                    progress,
-                    export_cancel,
-                )
-                self._temporal_anchors = warmed_anchors
-                self._temporal_scenes.update(built)
+                try:
+                    warmed_anchors, built = _wait_for_export_future(
+                        self._temporal_future,
+                        progress,
+                        export_cancel,
+                    )
+                except CancelledError:
+                    pass
+                else:
+                    self._temporal_anchors = warmed_anchors
+                    self._temporal_scenes.update(built)
             background = MediaClip(self._background_path, self._cache.root / "media")
             sprite = MediaClip(self._sprite_path, self._cache.root / "media")
             _export_checkpoint(progress, export_cancel)
@@ -1650,6 +1689,7 @@ class MainWindow(QMainWindow):
                 first = self._sprite_media.frame_by_index(0)
                 self._view.set_sprite_frame(first.rgba, self._form_artifacts_by_frame.get(0))
             self._exporting_animation = False
+            self._resume_background_analysis()
             self._restart_background_animation()
             self._restart_sprite_animation()
             self._animation_timer.start()
