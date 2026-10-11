@@ -2,8 +2,8 @@
 
 | Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows-online.zip) | Downloads the app on first launch (230 MB). |
-| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows.zip) | 230 MB. App and required components included. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.1/SceneLight-v1.0.1-Windows-online.zip) | Downloads the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.1/SceneLight-v1.0.1-Windows.zip) | 230 MB. App and required components included. |
 
 Extract the ZIP and open **SceneLight.exe**. No administrator access or separate
 Python installation is needed.
@@ -16,10 +16,11 @@ Keep a backup of your game and saves before installing.
 1. Select the folder containing your game.
 2. Scan and review the character checklist.
 3. Choose **Add to this game** or **Create separate copy**.
-4. Wait for the completion message. With **Add to this game**, use the game’s usual executable. With **Create separate copy**, use **Open game folder** on the completion screen and launch that copy; your original shortcut still opens the unmodified game.
+4. Wait for the completion message. With **Add to this game**, choose **Play installed game** or use the game’s usual executable. With **Create separate copy**, choose **Launch existing SceneLight copy**; your original shortcut still opens the unmodified game.
 
-For a source project without a game executable, open the prepared project through
-the matching Ren’Py SDK. Use Ren’Py 7 for Python 2 projects and Ren’Py 8 for Python 3.
+If Setup shows **Open game folder** for a source project without an executable,
+open that project through the matching Ren’Py SDK. Use Ren’Py 7 for Python 2
+projects and Ren’Py 8 for Python 3.
 
 For your own mod, choose **For mod developers** and follow the
 [author quickstart](AUTHOR_QUICKSTART.md).

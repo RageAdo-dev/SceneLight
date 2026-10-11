@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from scenelight import __version__
 from scenelight.calibration import profile_path
 from scenelight.developer import (
     EMBED_ROOT,
@@ -130,13 +131,13 @@ def test_developer_embed_and_remove_touch_only_owned_namespace(tmp_path: Path, m
     assert (project / EMBED_ROOT / "REMOVE-SCENELIGHT.txt").is_file()
     assert (project / MANIFEST_NAME).is_file()
     manifest = json.loads((project / MANIFEST_NAME).read_text(encoding="utf-8"))
-    assert manifest["scenelight_version"] == "1.0.0"
-    assert manifest["release"]["product_version"] == "1.0.0"
+    assert manifest["scenelight_version"] == __version__
+    assert manifest["release"]["product_version"] == __version__
     assert len(manifest["release"]["content_sha256"]) == 64
     assert all(str(tmp_path) not in str(value) for value in manifest.values())
     status = developer_status(project)
     assert status.clean
-    assert status.installed_version == "1.0.0"
+    assert status.installed_version == __version__
     assert status.installed_content_sha256 == manifest["release"]["content_sha256"]
     analysis_cache = analysis_cache_root(project)
     analysis_cache.mkdir(parents=True)
@@ -266,7 +267,7 @@ def test_verified_refresh_migrates_versionless_pre_release_manifest(tmp_path: Pa
 
     status = developer_status(project)
     assert status.clean
-    assert status.installed_version == "1.0.0"
+    assert status.installed_version == __version__
     migrated = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert migrated["release"]["sprite_form_version"] == 9
 

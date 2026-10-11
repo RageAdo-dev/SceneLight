@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import subprocess
+import sys
+import textwrap
 import zipfile
 from pathlib import Path
 
@@ -124,3 +128,86 @@ def test_https_download_streams_with_explicit_context(
 def test_compatibility_download_rejects_non_https(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="HTTPS"):
         _download_https("http://example.invalid/runtime.zip", tmp_path / "runtime.zip")
+
+
+def test_two_projects_share_one_runtime_install(tmp_path: Path) -> None:
+    archive = tmp_path / "runtime.zip"
+    digest = _runtime_archive(archive)
+    script = tmp_path / "install.py"
+    script.write_text(
+        textwrap.dedent("""\
+            import shutil
+            import sys
+            import time
+            from pathlib import Path
+            from scenelight import compatibility
+            from scenelight.updates import operation_lock
+
+            root, project, digest = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+            compatibility.RENPY_SHA256 = digest
+
+            def download(url, destination):
+                (root / (project + ".downloaded")).touch()
+                time.sleep(0.4)
+                shutil.copyfile(root / "runtime.zip", destination)
+
+            compatibility._download_https = download
+            with operation_lock(root / project):
+                (root / (project + ".ready")).touch()
+                deadline = time.monotonic() + 10
+                while len(list(root.glob("*.ready"))) != 2:
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                executable = compatibility.install_compatibility_runtime()
+                assert executable.read_bytes() == b"test"
+        """),
+        encoding="utf-8",
+    )
+    environment = {
+        **os.environ,
+        "SCENELIGHT_MANAGED_ROOT": str(tmp_path / "managed" / "projects"),
+        "SCENELIGHT_COMPATIBILITY_ROOT": str(tmp_path / "cache" / "runtime"),
+    }
+    processes = [
+        subprocess.Popen(
+            [sys.executable, str(script), str(tmp_path), project, digest],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environment,
+        )
+        for project in ("one", "two")
+    ]
+    try:
+        for process in processes:
+            output, error = process.communicate(timeout=30)
+            assert process.returncode == 0, output + error
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+    assert len(list(tmp_path.glob("*.downloaded"))) == 1
+    assert not list((tmp_path / "cache").rglob("*.download"))
+
+
+@pytest.mark.parametrize("failure", ["network", "hash"])
+def test_failed_runtime_download_cleans_partial_and_can_retry(tmp_path, monkeypatch, failure):
+    archive = tmp_path / "runtime.zip"
+    digest = _runtime_archive(archive)
+    monkeypatch.setenv("SCENELIGHT_COMPATIBILITY_ROOT", str(tmp_path / "cache" / "runtime"))
+    monkeypatch.setattr(compatibility, "RENPY_SHA256", digest)
+
+    def fail(url, destination):
+        destination.write_bytes(b"incomplete")
+        if failure == "network":
+            raise OSError("Connection interrupted")
+
+    monkeypatch.setattr(compatibility, "_download_https", fail)
+    with pytest.raises((OSError, ValueError)):
+        compatibility.install_compatibility_runtime()
+    assert not list((tmp_path / "cache").rglob("*.download"))
+    monkeypatch.setattr(
+        compatibility, "_download_https", lambda url, dest: dest.write_bytes(archive.read_bytes())
+    )
+    assert compatibility.install_compatibility_runtime().read_bytes() == b"test"

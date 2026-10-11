@@ -644,13 +644,7 @@ def _write_shared_prepared_scene(
         if packed is not None:
             del packed
         memory.close()
-        # A worker merely borrows the parent-owned allocation. On POSIX,
-        # unregister that borrowed handle so its resource tracker cannot
-        # unlink the parent's still-live block when the worker exits.
-        if os.name != "nt":
-            from multiprocessing import resource_tracker
-
-            resource_tracker.unregister(memory._name, "shared_memory")  # noqa: SLF001
+        # Related workers share the parent's tracker; only the owner unlinks.
     return SharedPreparedSceneInfo(
         buffer=spec,
         global_mean=prepared.global_mean,

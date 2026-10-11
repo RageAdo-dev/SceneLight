@@ -665,7 +665,7 @@ _WORKFLOW = (
         "Choose characters and discover new ones",
         "Reopen Characters… beside the game folder in either Setup mode.",
         "Characters… refreshes discovery before showing the checklist. Automatically include new characters on scan / update is on for new projects. Unchecked families stay excluded. Turn it off to keep only your chosen tags. Existing manual selections stay manual.",
-        "For an installed project, Apply selection & update prepares the changed selection. After adding or replacing game assets, run Scan/Update; While idle, Setup checks the selected project every five seconds and waits for two matching observations before showing changes. Choose Check changed assets → Update SceneLight, then restart the game. The update keeps your lighting profile and saves.",
+        "For an installed project, Apply selection & update prepares the changed selection. After adding or replacing game assets, run Scan/Update. While idle, Setup checks the selected project every five seconds and waits for two matching observations before showing changes. Choose Check changed assets → Update SceneLight, then restart the game. The update keeps your lighting profile and saves.",
         "Place scenelight.json beside game/, not inside it. Each tag covers its expressions and poses. Merge these keys into an existing configuration instead of replacing its other settings.",
         example="""
             {

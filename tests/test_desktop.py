@@ -22,7 +22,7 @@ def test_launcher_version_resource_matches_the_packaged_version():
     module = _launcher_builder()
     version = module.package_version()
     assert version == __import__("scenelight").__version__
-    assert module.version_quad(version) == (1, 0, 0, 0)
+    assert module.version_quad(version) == (1, 0, 1, 0)
     checked_in = module.RESOURCE.read_text(encoding="utf-8").splitlines()
     assert checked_in == module.resource_text(version).splitlines()
     native = module.NATIVE_RESOURCE.read_text(encoding="utf-8").splitlines()

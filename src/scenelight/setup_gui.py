@@ -918,6 +918,9 @@ class SceneLightSetup(tk.Tk):
         self.project_path_var = tk.StringVar(value="Choose a folder to continue")
         self._events: queue.Queue[tuple[object, ...]] = queue.Queue()
         self._process: subprocess.Popen[str] | None = None
+        self._operation_thread: threading.Thread | None = None
+        self._termination_thread: threading.Thread | None = None
+        self._closing = False
         self._cancel_requested = threading.Event()
         self._running = False
         self._active_operation: str | None = None
@@ -3331,15 +3334,16 @@ class SceneLightSetup(tk.Tk):
             self.cancel_operation_button.configure(state="disabled", text="Cancelling…")
         process = self._process
         if process is not None:
-            threading.Thread(
+            self._termination_thread = threading.Thread(
                 target=terminate_process_tree,
                 args=(process,),
                 name="scenelight-cancel-operation",
-                daemon=True,
-            ).start()
+                daemon=False,
+            )
+            self._termination_thread.start()
 
     def _start_operation(self, operation: str, command: list[str] | list[list[str]]) -> None:
-        if self._running:
+        if self._running or getattr(self, "_closing", False):
             return
         commands = normalize_command_batch(command)
         self._cancel_requested.clear()
@@ -3476,7 +3480,11 @@ class SceneLightSetup(tk.Tk):
                 )
             )
 
-        threading.Thread(target=worker, name=f"scenelight-{operation}", daemon=True).start()
+        # Shutdown must wait for Popen and its post-start cancellation check.
+        self._operation_thread = threading.Thread(
+            target=worker, name=f"scenelight-{operation}", daemon=False
+        )
+        self._operation_thread.start()
 
     def _command_started(
         self,
@@ -3875,16 +3883,26 @@ class SceneLightSetup(tk.Tk):
         self._start_operation("launch", self._command("launch"))
 
     def _close(self) -> None:
+        if getattr(self, "_closing", False):
+            return
         if self._running and not messagebox.askyesno(
             "Operation still running",
             "SceneLight is still working. Closing now can interrupt analysis. Close anyway?",
             icon="warning",
         ):
             return
+        self._closing = True
         self._cancel_requested.set()
         process = self._process
-        if process is not None:
-            threading.Thread(target=terminate_process_tree, args=(process,), daemon=True).start()
+        termination = getattr(self, "_termination_thread", None)
+        if process is not None and (termination is None or not termination.is_alive()):
+            self._termination_thread = threading.Thread(
+                target=terminate_process_tree,
+                args=(process,),
+                name="scenelight-close-operation",
+                daemon=False,
+            )
+            self._termination_thread.start()
         self._close_character_review_window()
         self.destroy()
 

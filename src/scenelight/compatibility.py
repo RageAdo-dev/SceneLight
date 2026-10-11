@@ -11,6 +11,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from .cache_lock import cache_lock
+
 # The 7.8.7 binaries lose Texture's finalizer and leak every uploaded frame.
 # Keep Python 2 compatibility on the last runtime validated by the memory audit.
 RENPY_VERSION = "7.7.1"
@@ -169,21 +171,27 @@ def install_compatibility_runtime() -> Path:
     downloads = root.parent / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
     archive = downloads / f"renpy-{RENPY_VERSION}-sdk.zip"
-    if not archive.is_file() or _sha256(archive) != RENPY_SHA256:
-        partial = archive.with_suffix(".zip.download")
-        partial.unlink(missing_ok=True)
-        print(f"Downloading Ren'Py {RENPY_VERSION} compatibility runtime...", flush=True)
-        try:
-            _download_https(RENPY_URL, partial)
-        except Exception:
-            partial.unlink(missing_ok=True)
-            raise
-        if _sha256(partial) != RENPY_SHA256:
-            partial.unlink(missing_ok=True)
-            raise ValueError("The Ren'Py download failed its SHA-256 verification.")
-        partial.replace(archive)
-    print("Verifying and installing compatibility runtime...", flush=True)
-    executable = _install_from_archive(archive, root, RENPY_SHA256)
+    with cache_lock(archive):
+        existing = cached_renpy_executable()
+        if existing is not None:
+            print(f"Compatibility runtime already verified: {existing}", flush=True)
+            return existing
+        if not archive.is_file() or _sha256(archive) != RENPY_SHA256:
+            descriptor, name = tempfile.mkstemp(
+                prefix=archive.name + ".", suffix=".download", dir=downloads
+            )
+            os.close(descriptor)
+            partial = Path(name)
+            print(f"Downloading Ren'Py {RENPY_VERSION} compatibility runtime...", flush=True)
+            try:
+                _download_https(RENPY_URL, partial)
+                if _sha256(partial) != RENPY_SHA256:
+                    raise ValueError("The Ren'Py download failed its SHA-256 verification.")
+                partial.replace(archive)
+            finally:
+                partial.unlink(missing_ok=True)
+        print("Verifying and installing compatibility runtime...", flush=True)
+        executable = _install_from_archive(archive, root, RENPY_SHA256)
     print(f"Compatibility runtime ready: {executable}", flush=True)
     return executable
 

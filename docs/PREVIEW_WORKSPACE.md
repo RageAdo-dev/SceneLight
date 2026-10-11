@@ -46,11 +46,15 @@ Preview and Setup load the project’s `scenelight.json`, then its saved calibra
 profile. An explicitly selected config overrides both. **Save / export** lists
 the files in that order; the last file wins for matching settings.
 
-**Save profile** stores calibration for that project. Exporting to the project’s
-`scenelight.json` also updates its existing calibration profile so old defaults
+**Save profile** uses the project’s calibration file by default. If you choose
+another file, it is a portable profile that Setup does not load automatically.
+Exporting to the current project’s `scenelight.json` also updates its existing
+calibration profile so old defaults
 cannot override the export. Both files appear for review before you save. Existing
 discovery and per-background/per-sprite rules remain intact. Exporting elsewhere
-creates a portable config; select or copy it into the intended project before updating.
+creates a portable config. Pass its path with `--config` on the CLI. If you copy
+it to another project’s `scenelight.json`, check that the project’s saved profile
+does not override the settings you want.
 Strength uses the same scale: **78% is 0.78**.
 
 The game may apply additional background, character or player overrides. Press
