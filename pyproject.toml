@@ -11,12 +11,12 @@ requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "RageAdo-dev" }]
 dependencies = [
-  "numpy==2.1.3",
-  "opencv-python-headless==4.10.0.84",
+  "numpy==2.2.6",
+  "opencv-python-headless==5.0.0.93",
   "Pillow==12.3.0",
-  "psutil==6.1.1",
-  "PySide6-Essentials==6.9.2",
-  "PyOpenGL==3.1.9",
+  "psutil==7.2.2",
+  "PySide6-Essentials==6.11.2",
+  "PyOpenGL==3.1.10",
   "imageio-ffmpeg==0.6.0",
 ]
 classifiers = [
@@ -31,15 +31,15 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest==9.0.3",
-  "ruff==0.16.2",
-  "build==1.2.2.post1",
+  "pytest==9.1.1",
+  "ruff==0.16.10",
+  "build==1.6.1",
   "pip-audit==2.10.1",
   "bandit==1.9.4",
 ]
-cuda = ["cupy-cuda12x==13.4.1"]
+cuda = ["cupy-cuda12x==14.2.0"]
 preview = [
-  "PyOpenGL==3.1.9",
+  "PyOpenGL==3.1.10",
 ]
 
 [project.scripts]

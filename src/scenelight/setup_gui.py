@@ -57,11 +57,11 @@ DEPENDENCIES = {
     "PIL": "Pillow",
 }
 BASE_REQUIREMENTS = (
-    "numpy==2.1.3",
-    "opencv-python-headless==4.10.0.84",
+    "numpy==2.2.6",
+    "opencv-python-headless==5.0.0.93",
     "Pillow==12.3.0",
-    "psutil==6.1.1",
-    "PySide6-Essentials==6.9.2",
+    "psutil==7.2.2",
+    "PySide6-Essentials==6.11.2",
     "imageio-ffmpeg==0.6.0",
 )
 PACKAGING_REQUIREMENTS = (
@@ -77,11 +77,11 @@ BASE_DEPENDENCIES = {
     "PySide6": BASE_REQUIREMENTS[4],
     "imageio_ffmpeg": BASE_REQUIREMENTS[5],
 }
-CUDA_REQUIREMENT = "cupy-cuda12x==13.4.1"
+CUDA_REQUIREMENT = "cupy-cuda12x==14.2.0"
 PREVIEW_DEPENDENCIES = {
     **BASE_DEPENDENCIES,
-    "PySide6.QtOpenGLWidgets": "PySide6-Essentials==6.9.2",
-    "OpenGL": "PyOpenGL==3.1.9",
+    "PySide6.QtOpenGLWidgets": "PySide6-Essentials==6.11.2",
+    "OpenGL": "PyOpenGL==3.1.10",
 }
 
 
