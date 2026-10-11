@@ -22,6 +22,7 @@ from .developer import (
     MANIFEST_NAME,
     _atomic_json,
     _config_record,
+    _plain_project_path,
     _sha256,
     _tracked_source_state,
     developer_status,
@@ -168,18 +169,23 @@ def _record_plan(mode: str, reason: str, **details) -> None:
 
 
 def recover_update(root: Path) -> None:
-    journal = root / JOURNAL
+    journal = _plain_project_path(root, Path(JOURNAL))
     if not journal.exists():
         return
     record = read_json(journal)
     token = record.get("transaction")
     if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{16}", token):
         raise RuntimeError("SceneLight update journal is invalid; retain it for a support report.")
-    stage = root / "game" / (".sl-u-" + token)
-    data = root / EMBED_ROOT
+    stage = _plain_project_path(root, Path("game") / (".sl-u-" + token))
+    data = _plain_project_path(root, EMBED_ROOT)
     backup = stage / "previous"
     embedded = record.get("embedded") is True
-    manifest = root / (MANIFEST_NAME if embedded else ".scenelight_install.json")
+    manifest = _plain_project_path(
+        root, Path(MANIFEST_NAME if embedded else ".scenelight_install.json")
+    )
+    checked = set()
+    for path in stage.rglob("*"):
+        _plain_project_path(root, path.relative_to(root), checked=checked)
     if record.get("mode") == "files":
         entries = record.get("entries")
         allowed = set(runtime_payload(embedded=embedded)) | {
@@ -192,7 +198,7 @@ def recover_update(root: Path) -> None:
         for relative, entry in entries.items():
             if not isinstance(entry, dict):
                 raise RuntimeError("Invalid runtime update entry.")
-            target = root / relative
+            target = _plain_project_path(root, Path(relative))
             actual = _sha256(target) if target.is_file() else None
             acceptable = {entry.get("new_sha256"), entry.get("old_sha256")}
             if actual not in acceptable or (committed and actual != entry.get("new_sha256")):
@@ -261,9 +267,14 @@ def _publish(
     previous_files: dict,
 ) -> dict:
     token = uuid.uuid4().hex[:16]
-    stage = root / "game" / (".sl-u-" + token)
+    for relative in payload:
+        _plain_project_path(root, Path(relative))
+    _plain_project_path(root, Path(JOURNAL))
+    stage = _plain_project_path(root, Path("game") / (".sl-u-" + token))
     stage.mkdir()
-    manifest = root / (MANIFEST_NAME if embedded else ".scenelight_install.json")
+    manifest = _plain_project_path(
+        root, Path(MANIFEST_NAME if embedded else ".scenelight_install.json")
+    )
     entries = {}
     try:
         with ProgressStage("runtime-copy", item="Staging changed code only; maps stay in place"):

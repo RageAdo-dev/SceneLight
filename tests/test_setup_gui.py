@@ -1356,7 +1356,8 @@ def test_automatic_selection_keeps_exclusions_and_can_be_frozen(tmp_path, monkey
     assert restored["excluded_character_tags"] == ["guest"]
 
 
-def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
+@pytest.mark.parametrize("close_window", [False, True])
+def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path, close_window):
     monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
     event = threading.Event()
 
@@ -1366,6 +1367,7 @@ def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
     widget = SimpleNamespace(set=noop, configure=noop, grid=noop, start=noop, stop=noop)
     app = SimpleNamespace(
         _running=False,
+        _process=None,
         _cancel_requested=event,
         _refresh_project_state=noop,
         operation_var=widget,
@@ -1375,25 +1377,43 @@ def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path):
         _append_log=noop,
         _events=queue.Queue(),
         project_var=SimpleNamespace(get=lambda: str(tmp_path / "game")),
+        _close_character_review_window=noop,
+        destroy=noop,
     )
     process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: -1, pid=12345)
 
+    spawned = []
+
     def spawn(*args, **kwargs):
-        event.set()  # UI cancelled while the OS was creating the child.
+        spawned.append(args)
+        if close_window:
+            setup_gui.SceneLightSetup._close(app)
+        else:
+            event.set()  # UI cancelled while the OS was creating the child.
         return process
 
     killed = []
+    monkeypatch.setattr(setup_gui.messagebox, "askyesno", lambda *a, **kw: True)
     monkeypatch.setattr(setup_gui.subprocess, "Popen", spawn)
     monkeypatch.setattr(setup_gui, "terminate_process_tree", killed.append)
     monkeypatch.setattr(
         setup_gui.threading, "Thread", lambda target, **kw: SimpleNamespace(start=target)
     )
-    setup_gui.SceneLightSetup._start_operation(app, "scan", ["fake-command"])
+    setup_gui.SceneLightSetup._start_operation(app, "scan", [["fake-command"], ["second-command"]])
     assert killed == [process]
+    assert len(spawned) == 1
     messages = list(app._events.queue)
     assert messages[-1][0] == "done"
     assert messages[-1][2] == 130
     assert messages[-1][-1] is True
+
+
+def test_declining_close_leaves_running_operation_untouched(monkeypatch):
+    event = threading.Event()
+    app = SimpleNamespace(_running=True, _cancel_requested=event)
+    monkeypatch.setattr(setup_gui.messagebox, "askyesno", lambda *a, **kw: False)
+    setup_gui.SceneLightSetup._close(app)
+    assert not event.is_set()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree cancellation integration")

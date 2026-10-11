@@ -24,9 +24,8 @@ from .file_verification import bounded_file_work, verified_digest
 from .launch_safety import (
     LAUNCHER_CONFIG,
     ORIGINAL_LAUNCHER_DIR,
-    install_native_launcher,
+    launcher_asset,
     newer_runtime_save_files,
-    restore_native_launcher,
     snapshot_saves,
 )
 from .progress import ProgressStage, copytree_with_progress
@@ -128,7 +127,13 @@ def _installation_source_state(project_root: Path) -> dict[str, list[int | str]]
 
 
 def _runtime_file_hashes(
-    project_root: Path, destination_root: Path, *, expected=None, stamps=None, verified_out=None
+    project_root: Path,
+    destination_root: Path,
+    *,
+    expected=None,
+    stamps=None,
+    verified_out=None,
+    logical_root: Path | None = None,
 ) -> dict[str, str]:
     with ProgressStage("runtime-hashes", item="Counting prepared files") as progress:
         paths = []
@@ -139,7 +144,14 @@ def _runtime_file_hashes(
         progress.set_total(len(paths))
         known = expected or {}
         identities = stamps or {}
-        relative_paths = {path.relative_to(project_root).as_posix(): path for path in paths}
+        relative_paths = {
+            (
+                (logical_root / path.relative_to(destination_root))
+                if logical_root is not None
+                else path.relative_to(project_root)
+            ).as_posix(): path
+            for path in paths
+        }
         missing = set(known) - set(relative_paths)
         if missing:
             raise RuntimeError(
@@ -259,6 +271,8 @@ def _atomic_json(path: Path, payload: dict[str, object]) -> None:
         with temporary.open("x", encoding="utf-8", newline="\n") as stream:
             created = True
             stream.write(json.dumps(payload, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
         if created and temporary.is_file():
@@ -663,6 +677,9 @@ def preflight_embed_destination(project: Path) -> None:
     """Refuse an occupied in-place namespace before analysis starts."""
 
     project_root = project.expanduser().resolve()
+    from .developer_transaction import recover
+
+    recover(project_root)
     _plain_project_path(project_root, EMBED_ROOT)
     if _manifest(project_root) is not None:
         raise FileExistsError(
@@ -683,6 +700,9 @@ def preflight_refresh_destination(
     """Require a current, fully owned direct install before expensive analysis."""
 
     project_root = project.expanduser().resolve()
+    from .developer_transaction import recover
+
+    recover(project_root)
     _plain_project_path(project_root, EMBED_ROOT)
     manifest = _manifest(project_root)
     if manifest is None:
@@ -738,74 +758,78 @@ def embed_from_managed(
         native_launcher=legacy_playback,
         consume_managed=consume_managed,
     )
-    created_final = False
+    from .developer_transaction import JOURNAL, publish
+
     native_launcher: dict[str, object] | None = None
     save_backup: dict[str, object] | None = None
+    external = {}
     try:
-        os.replace(staged_data, destination_root)
-        created_final = True
-        stage.rmdir()
-
         if legacy_playback and native_executable is not None:
             assert playback_executable is not None
             save_backup = snapshot_saves(
                 project_root,
                 save_directory=(str(managed_save_directory) if managed_save_directory else None),
             )
-            installed_launcher = install_native_launcher(project_root, playback_executable)
+            executable_relative = native_executable.relative_to(project_root).as_posix()
+            _plain_project_path(project_root, Path(executable_relative))
+            backup_relative = ORIGINAL_LAUNCHER_DIR / native_executable.name
+            backup = staged_data / backup_relative.relative_to(EMBED_ROOT)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(native_executable, backup)
+            (staged_data / LAUNCHER_CONFIG.name).write_text(
+                str(playback_executable) + "\n", encoding="utf-8"
+            )
             native_launcher = {
-                "executable": Path(str(installed_launcher["executable"]))
-                .relative_to(project_root)
-                .as_posix(),
-                "original_backup": Path(str(installed_launcher["original_backup"]))
-                .relative_to(project_root)
-                .as_posix(),
-                "config": Path(str(installed_launcher["config"]))
-                .relative_to(project_root)
-                .as_posix(),
-                "runtime": str(installed_launcher["runtime"]),
+                "executable": executable_relative,
+                "original_backup": backup_relative.as_posix(),
+                "config": LAUNCHER_CONFIG.as_posix(),
+                "runtime": str(playback_executable),
             }
+            external[executable_relative] = launcher_asset()
 
         expected, stamps = _prepared_integrity(install)
         file_stamps = {}
         files = _runtime_file_hashes(
             project_root,
-            destination_root,
+            staged_data,
+            logical_root=EMBED_ROOT,
             expected=expected,
             stamps=stamps if consumed else {},
             verified_out=file_stamps,
         )
         if native_launcher is not None:
             executable_relative = str(native_launcher["executable"])
-            files[executable_relative] = _sha256(project_root / executable_relative)
-        _save_install_manifest(
-            manifest_path,
-            {
-                "version": 3,
-                "scenelight_version": __version__,
-                "release": release_record(),
-                "installed_at": datetime.now(timezone.utc).isoformat(),
-                "namespace": EMBED_ROOT.as_posix(),
-                "files": dict(sorted(files.items())),
-                "file_stamps": file_stamps,
-                "native_launcher": native_launcher,
-                "save_backup": save_backup,
-                "source_state": _analyzed_sources(project_root, install),
-                "config": _config_record(project_root, install),
-                "inspector_enabled": install.get("inspector_enabled", True),
-                "config_sha256": install.get("config_sha256"),
-                "analysis_config_sha256": install.get("analysis_config_sha256"),
-                "selection_settings": install.get("selection_settings"),
-            },
+            files[executable_relative] = _sha256(external[executable_relative])
+        next_manifest = {
+            "version": 3,
+            "scenelight_version": __version__,
+            "release": release_record(),
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+            "namespace": EMBED_ROOT.as_posix(),
+            "files": dict(sorted(files.items())),
+            "file_stamps": file_stamps,
+            "native_launcher": native_launcher,
+            "save_backup": save_backup,
+            "source_state": _analyzed_sources(project_root, install),
+            "config": _config_record(project_root, install),
+            "inspector_enabled": install.get("inspector_enabled", True),
+            "config_sha256": install.get("config_sha256"),
+            "analysis_config_sha256": install.get("analysis_config_sha256"),
+            "selection_settings": install.get("selection_settings"),
+        }
+        cleanup_warning = publish(
+            project_root,
+            stage,
+            None,
+            next_manifest,
+            external=external,
+            on_rollback=lambda: _discard_staged_runtime(stage, staged_data, source_data, consumed),
         )
     except Exception:
-        if native_launcher is not None:
-            restore_native_launcher(project_root, native_launcher)
-        _discard_staged_runtime(
-            stage, destination_root if created_final else staged_data, source_data, consumed
-        )
-        if manifest_path.is_file():
-            manifest_path.unlink()
+        if not (project_root / JOURNAL).exists():
+            _discard_staged_runtime(stage, staged_data, source_data, consumed)
+            if stage.exists():
+                shutil.rmtree(stage)
         raise
 
     return {
@@ -828,6 +852,7 @@ def embed_from_managed(
         ),
         "save_backup": save_backup,
         "prepared_runtime_transferred": consumed,
+        "cleanup_warning": cleanup_warning,
     }
 
 
@@ -859,11 +884,8 @@ def refresh_embedded_from_managed(
         native_launcher=launcher_owned,
         consume_managed=consume_managed,
     )
-    backup = destination_root.parent / f".sl-backup-{uuid.uuid4().hex[:8]}"
-    destination_moved = False
-    replacement_installed = False
-    manifest_updated = False
-    cleanup_warning: str | None = None
+    from .developer_transaction import JOURNAL, publish
+
     try:
         if launcher_owned:
             owned_paths = _owned_paths(project_root, original_manifest)
@@ -892,17 +914,12 @@ def refresh_embedded_from_managed(
             raise RuntimeError(
                 "Installation ownership changed during refresh; retry after the other operation finishes."
             )
-        os.replace(destination_root, backup)
-        destination_moved = True
-        os.replace(staged_data, destination_root)
-        replacement_installed = True
-        stage.rmdir()
-
         expected, stamps = _prepared_integrity(install)
         file_stamps = {}
         files = _runtime_file_hashes(
             project_root,
-            destination_root,
+            staged_data,
+            logical_root=EMBED_ROOT,
             expected=expected,
             stamps=stamps if consumed else {},
             verified_out=file_stamps,
@@ -933,23 +950,18 @@ def refresh_embedded_from_managed(
             "analysis_config_sha256": install.get("analysis_config_sha256"),
             "selection_settings": install.get("selection_settings"),
         }
-        _save_install_manifest(manifest_path, refreshed_manifest)
-        manifest_updated = True
-        try:
-            with ProgressStage("runtime-cleanup", item="Removing the replaced runtime"):
-                shutil.rmtree(backup)
-        except OSError as error:
-            # The refreshed install and ownership record are already complete.
-            # Do not risk rolling back from a partially removed backup tree.
-            cleanup_warning = f"Old verified runtime backup could not be removed: {error}"
-    except Exception:
-        _discard_staged_runtime(
-            stage, destination_root if replacement_installed else staged_data, source_data, consumed
+        cleanup_warning = publish(
+            project_root,
+            stage,
+            original_manifest,
+            refreshed_manifest,
+            on_rollback=lambda: _discard_staged_runtime(stage, staged_data, source_data, consumed),
         )
-        if destination_moved and backup.is_dir() and not destination_root.exists():
-            os.replace(backup, destination_root)
-        if manifest_updated:
-            _atomic_json(manifest_path, original_manifest)
+    except Exception:
+        if not (project_root / JOURNAL).exists():
+            _discard_staged_runtime(stage, staged_data, source_data, consumed)
+            if stage.exists():
+                shutil.rmtree(stage)
         raise
 
     return {
@@ -974,6 +986,9 @@ def remove_embedded(project: Path) -> dict[str, object]:
     """Remove a clean developer integration, or refuse before deleting anything."""
 
     project_root = project.expanduser().resolve()
+    from .developer_transaction import JOURNAL, publish, recover
+
+    recover(project_root)
     manifest = _manifest(project_root)
     if manifest is None:
         return {
@@ -1022,30 +1037,22 @@ def remove_embedded(project: Path) -> dict[str, object]:
                 save_backup=removal_save_backup,
                 newer_save_count=len(newer_saves),
             )
-        restored_executable = restore_native_launcher(project_root, native_launcher)
-    owned = set(owned_paths)
-    embed_root = project_root / EMBED_ROOT
-    compiler_outputs = [
-        path
-        for path in embed_root.rglob("*.rpyc")
-        if _recognized_compiler_output(path.relative_to(project_root).as_posix(), owned)
-    ]
-    for path in compiler_outputs:
-        path.unlink()
-    for path in sorted(owned_paths.values(), key=lambda item: len(item.parts), reverse=True):
-        if restored_executable is not None and path == restored_executable:
-            continue
-        if path.is_file():
-            path.unlink()
-    for directory in sorted(
-        (path for path in embed_root.rglob("*") if path.is_dir()),
-        key=lambda item: len(item.parts),
-        reverse=True,
-    ):
-        directory.rmdir()
-    if embed_root.is_dir():
-        embed_root.rmdir()
-    (project_root / MANIFEST_NAME).unlink()
+        restored_executable = owned_paths[str(native_launcher["executable"])]
+    stage = project_root / "game" / f".sl-{uuid.uuid4().hex[:8]}"
+    stage.mkdir()
+    external = {}
+    if restored_executable is not None:
+        external[restored_executable.relative_to(project_root).as_posix()] = owned_paths[
+            str(native_launcher["original_backup"])
+        ]
+    if LEGACY_LAUNCHER_NAME in owned_paths:
+        external[LEGACY_LAUNCHER_NAME] = None
+    try:
+        cleanup_warning = publish(project_root, stage, manifest, None, external=external)
+    except Exception:
+        if not (project_root / JOURNAL).exists() and stage.exists():
+            shutil.rmtree(stage)
+        raise
     analysis_cache_removed = False
     analysis_cache_warning: str | None = None
     try:
@@ -1067,4 +1074,5 @@ def remove_embedded(project: Path) -> dict[str, object]:
         ),
         "analysis_cache_removed": analysis_cache_removed,
         "analysis_cache_warning": analysis_cache_warning,
+        "cleanup_warning": cleanup_warning,
     }

@@ -1355,6 +1355,13 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
 
     project_root = selection.root
     try:
+        from .developer_transaction import JOURNAL, recover
+
+        if (project_root / JOURNAL).exists():
+            from .updates import operation_lock
+
+            with operation_lock(project_root):
+                recover(project_root)
         reserved_namespace = (project_root / "game" / "scenelight_runtime").exists()
         managed_root = managed_project_root(project_root)
         managed_install_present = (managed_root / ".scenelight_install.json").is_file()
@@ -4447,9 +4454,10 @@ class SceneLightSetup(tk.Tk):
             icon="warning",
         ):
             return
-        if self._process is not None:
-            self._cancel_requested.set()
-            terminate_process_tree(self._process)
+        self._cancel_requested.set()
+        process = self._process
+        if process is not None:
+            threading.Thread(target=terminate_process_tree, args=(process,), daemon=True).start()
         self._close_character_review_window()
         self.destroy()
 
