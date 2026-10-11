@@ -1,4 +1,4 @@
-# SceneLight in pictures
+# Gallery
 
 ## Warm and cool light
 
@@ -43,7 +43,7 @@ Groups share a lighting position and settings. [Add a group](AUTHOR_QUICKSTART.m
 
 Press **Shift+F9** to inspect and temporarily adjust the current scene.
 
-The forest, waterfall and motion examples were rendered with earlier versions;
-appearance can vary with settings and version. [Artwork credits and sources](media/CREDITS.md).
+Forest, waterfall and motion examples use earlier versions of SceneLight.
+[Artwork credits and sources](media/CREDITS.md).
 
 [Back to SceneLight](../README.md) · [Preview guide](PREVIEW_WORKSPACE.md)

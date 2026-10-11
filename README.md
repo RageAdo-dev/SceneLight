@@ -2,8 +2,6 @@
 
 ![SceneLight — character lighting for Ren’Py](docs/media/scenelight-banner.svg)
 
-Match your characters to the light around them.
-
 **[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.1)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
 
 [Ren’Py 7 & 8](docs/COMPATIBILITY.md) · [Version 1.1.1](CHANGELOG.md) · [MIT license](LICENSE)
@@ -15,12 +13,12 @@ Match your characters to the light around them.
 SceneLight adds background lighting to Ren’Py sprites. Characters respond to nearby
 colors and light sources as they move, with controls for shadows, highlights and glow.
 
-## Get started
+## Download
 
-| Download | Choose this if… |
+| Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | You want a small installer that downloads the app on first launch. |
-| [Full / offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | You want everything included, ready to use without an internet connection. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | 56 KB. Downloads the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | 230 MB. App and required components included. |
 
 1. Download either ZIP, extract it, and open **SceneLight.exe**.
 2. Select your game folder, scan it, and choose the characters to light.
@@ -28,14 +26,13 @@ colors and light sources as they move, with controls for shadows, highlights and
 
 Players can add SceneLight to a game or create a separate copy. Mod developers can
 install the API in their project and control lighting from their scripts.
-Both downloads provide the same app; no Python setup is required.
 Optional CUDA acceleration may need an additional download.
 
 ## Preview and controls
 
 ![Preview with lighting controls beside the character](docs/media/preview-workspace.png)
 
-| Tool | What you can do |
+| Tool | Controls |
 | --- | --- |
 | [Preview & Calibrator](docs/PREVIEW_WORKSPACE.md) | Move a sprite, tune lighting and glow, and compare with the original. Review settings before saving, or export an image or video. |
 | [In-game inspector](docs/TROUBLESHOOTING.md) | Press **Shift+F9** to see the applied settings, try temporary changes, and export a bug report. |
@@ -50,7 +47,7 @@ Update SceneLight**, then restart the game. Updates reuse compatible prepared da
 
 [Watch the video](docs/media/moving-light.mp4) · [More examples](docs/GALLERY.md)
 
-## Requirements and help
+## Requirements
 
 The Windows app supports compatible Ren’Py 7 and 8 games and includes a runtime for
 some older games. Working graphics acceleration is required; CUDA is optional.

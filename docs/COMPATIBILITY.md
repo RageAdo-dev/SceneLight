@@ -13,7 +13,7 @@ does not replace the graphics requirements for live lighting.
 The command-line tools can also be [installed from source](../CONTRIBUTING.md#development-setup);
 the packaged desktop release targets Windows.
 
-## What to expect
+## Limitations
 
 SceneLight works with separate character sprites. Full-screen painted scenes with
 no separate sprites may have nothing to light. Automatic discovery cannot identify

@@ -1,4 +1,4 @@
-# Find and report a problem
+# Troubleshooting
 
 [Install and update](INSTALL.md) · [Inspector reference](MOD_AUTHOR_API.md#inspect-an-actual-game-scene) · [Known issues](COMPATIBILITY.md)
 
@@ -11,10 +11,9 @@
    **Clear all test edits** to undo the whole experiment.
 4. Open **Checks** to add a short description, then choose **Export report**.
 
-The inspector saves a `scenelight-support-*.zip` beside `game/` with a readable
-report, settings and logs, with an optional screenshot. Story rules and save files
-are not included. Review the ZIP before sharing: project names and user-supplied
-error text may remain.
+The inspector saves a `scenelight-support-*.zip` beside `game/` containing the
+report, settings, logs and optional screenshot. Review it for private information
+before sharing. Story rules and save files are excluded.
 
 Inspector edits are temporary. New game, loading and restarting clear them;
 closing the panel alone keeps them active. To keep a lighting choice permanently,
@@ -75,7 +74,7 @@ continue. Activity and the report retain the asset names and reasons. Repair the
 source artwork and run Scan/Update to reconsider it. A write failure or a renderer
 that cannot initialize needs attention; it is not treated as missing artwork.
 
-## Useful details for an issue
+## Bug reports
 
 Include the SceneLight package/build, Ren’Py version, GPU/driver, steps to reproduce,
 and whether the problem affects Preview or the game. For a slow update, include

@@ -1,17 +1,15 @@
 # Installation
 
-Choose a Windows download:
-
-| Download | How it works |
+| Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | Downloads the app on first launch. Later launches reuse that installation. |
-| [Full / offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | Includes the app and required components for use without an internet connection. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | 56 KB. Downloads the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | 230 MB. App and required components included. |
 
-Both contain the same version. Extract the entire ZIP and open **SceneLight.exe**.
-You do not need administrator access or a separate Python installation.
+Extract the ZIP and open **SceneLight.exe**. No administrator access or separate
+Python installation is needed.
 
 Keep a backup of your game and saves before installing.
-Check [compatibility](COMPATIBILITY.md) if you are unsure about your game or graphics hardware.
+[System requirements](COMPATIBILITY.md).
 
 ## Add lighting to a game
 

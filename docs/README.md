@@ -1,15 +1,15 @@
 # Documentation
 
-| I want to… | Guide |
+| Topic | Guide |
 | --- | --- |
-| Install, update or remove SceneLight | [Installation](INSTALL.md) |
-| Adjust lighting, glow and exports | [Preview](PREVIEW_WORKSPACE.md) |
-| Add lighting to my mod | [Author quickstart](AUTHOR_QUICKSTART.md) |
-| Look up a command or setting | [API reference](MOD_AUTHOR_API.md) |
-| Diagnose a problem | [Troubleshooting](TROUBLESHOOTING.md) |
-| Check requirements and limitations | [Compatibility](COMPATIBILITY.md) |
-| See the results | [Gallery](GALLERY.md) |
-| Understand the lighting | [How it works](HOW_IT_WORKS.md) |
+| Installing, updating and removing SceneLight | [Installation](INSTALL.md) |
+| Lighting, glow and exports | [Preview](PREVIEW_WORKSPACE.md) |
+| Mod integration | [Author quickstart](AUTHOR_QUICKSTART.md) |
+| Commands and settings | [API reference](MOD_AUTHOR_API.md) |
+| Bug reports and fixes | [Troubleshooting](TROUBLESHOOTING.md) |
+| Requirements and limitations | [Compatibility](COMPATIBILITY.md) |
+| Screenshots and videos | [Gallery](GALLERY.md) |
+| Lighting and surface maps | [How it works](HOW_IT_WORKS.md) |
 
 For contributors: [development setup](../CONTRIBUTING.md),
 [architecture](ARCHITECTURE.md), [testing](TESTING.md),

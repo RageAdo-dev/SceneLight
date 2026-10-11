@@ -172,7 +172,6 @@ if ($MyInvocation.InvocationName -ne '.') {
         else {
             $start = @{ FilePath = (Join-Path $app 'SceneLight.exe'); WorkingDirectory = $app; Wait = $true; PassThru = $true }
             if ($env:SCENELIGHT_LAUNCH_ARGUMENTS) { $start.ArgumentList = $env:SCENELIGHT_LAUNCH_ARGUMENTS }
-            # This is the interactive application requested by the user.
             $process = Start-Process @start
             exit $process.ExitCode
         }

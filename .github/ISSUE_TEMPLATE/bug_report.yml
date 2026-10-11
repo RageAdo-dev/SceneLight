@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Export a report from Settings → Activity, or press Shift+F9 in the affected game scene and choose Export report. Review attachments for private information before sharing. Nothing is uploaded automatically.
+        Attach a report from Settings → Activity or the in-game inspector (Shift+F9 → Export report). Check attachments for private information before sharing.
   - type: input
     id: build
     attributes:

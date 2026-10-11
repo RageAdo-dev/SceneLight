@@ -13,8 +13,8 @@ Drag the character to move it and scroll over the canvas to resize it. The
 right-side placement controls allow finer adjustments. Choose a lighting preset
 and strength, then use **Original** or **Split comparison** to compare the result.
 
-At 0% strength, scene lighting leaves the artwork unchanged. Explicit glow is
-independent. Use **Exposure bias** if you want to brighten or darken the result.
+At 0% strength, scene lighting leaves the artwork unchanged. Glow is controlled
+separately. **Exposure bias** brightens or darkens the result.
 
 ## Lighting, glow and color
 
