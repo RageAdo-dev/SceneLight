@@ -2,9 +2,9 @@
 
 ![SceneLight — character lighting for Ren’Py](docs/media/scenelight-banner.svg)
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.1)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
 
-[Ren’Py 7 & 8](docs/COMPATIBILITY.md) · [Version 1.1.1](CHANGELOG.md) · [MIT license](LICENSE)
+[Ren’Py 7 & 8](docs/COMPATIBILITY.md) · [Version 1.0.0](CHANGELOG.md) · [MIT license](LICENSE)
 
 </div>
 
@@ -17,8 +17,8 @@ colors and light sources as they move, with controls for shadows, highlights and
 
 | Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows-online.zip) | 56 KB. Downloads the app on first launch (230 MB). |
-| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.1/SceneLight-v1.1.1-Windows.zip) | 230 MB. App and required components included. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows-online.zip) | 56 KB. Downloads the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows.zip) | 230 MB. App and required components included. |
 
 1. Download either ZIP, extract it, and open **SceneLight.exe**.
 2. Select your game folder, scan it, and choose the characters to light.

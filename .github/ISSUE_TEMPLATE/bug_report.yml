@@ -12,7 +12,7 @@ body:
     attributes:
       label: SceneLight version
       description: Include whether you updated the game and restarted it.
-      placeholder: "1.1.1, game updated and restarted"
+      placeholder: "1.0.0, game updated and restarted"
     validations:
       required: true
   - type: dropdown

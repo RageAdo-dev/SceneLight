@@ -60,7 +60,7 @@ upload directly to GitHub Releases.
 Build the complete ZIP first, then run:
 
 ```text
-python tools/build_online_installer.py dist/SceneLight-v1.1.1-Windows.zip --release-tag <tag>
+python tools/build_online_installer.py dist/SceneLight-v1.0.0-Windows.zip --release-tag <tag>
 ```
 
 Publish both ZIPs under that tag. The online installer pins the complete package’s

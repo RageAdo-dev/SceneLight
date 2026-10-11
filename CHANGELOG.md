@@ -1,39 +1,28 @@
 # Changelog
 
-## 1.1.1
-
-- Fixed Setup incorrectly asking for older components after an update.
-- Updated bundled components and clarified the installation and lighting guides.
-
-## 1.1.0
-
-- Added lighting groups so separate sprites can share settings and a lighting position.
-- Added group details to the in-game inspector.
-- Setup now detects project edits while it stays open and offers **Check changed assets → Update SceneLight**. Restart the game after updating.
-
-## 1.0.0-beta
+## 1.0.0
 
 ### Lighting
 
-- Automatic background lighting, full-resolution sprite surface maps, and animated-background support.
-- Reduced bright-scene washout and smoothed transitions between colored lights.
-- Fixed stale surface maps after pose changes and resource handling during window resizing.
-- Added sprite glow, selected-color glow, emitted light, and controls for background color influence.
-- Added rules for backgrounds, scenes, characters and individual images.
+- Background lighting for Ren’Py sprites, including animated backgrounds.
+- Lighting groups for sprites that share a pose or position.
+- Sprite glow, selected-color glow and light cast onto nearby characters.
+- Rules for backgrounds, scenes, characters and individual images.
+- Bright-scene detail preservation and smooth colored-light transitions.
 
-### Preview and diagnostics
+### Preview and inspector
 
-- Preview with draggable placement, lighting and glow controls, and Original/Split comparisons.
-- Settings review before saving profiles or configs, plus PNG, GIF and video exports at up to 4K.
-- Optional **Shift+F9** inspector with sliders, exact edits, rule sources and report export.
-- Persistent Activity logs with progress, skipped assets and support reports.
+- Draggable placement, lighting and glow controls, with Original/Split comparisons.
+- Settings review before export and PNG, GIF or video output at up to 4K.
+- Optional **Shift+F9** inspector with sliders, exact edits, rule sources and reports.
 
 ### Installation
 
-- Bundled Windows app; install in place or create a separate playable copy.
-- Character selection with persistent exclusions and optional inclusion of new characters.
+- Online setup and offline Windows package.
+- Install in place or create a separate playable copy.
+- Character selection and project change detection while Setup stays open.
 - Updates reuse compatible prepared data and preserve settings and saves.
-- Interrupted captures resume from completed work; missing or unsupported assets are skipped individually.
-- Ren’Py 7.7.1 compatibility runtime for supported older games.
+- Interrupted captures resume from completed work; unsupported assets are reported and skipped.
+- Bundled Ren’Py 7.7.1 compatibility runtime for supported older games.
 
 [Downloads](https://github.com/RageAdo-dev/SceneLight/releases) · [Compatibility](docs/COMPATIBILITY.md)

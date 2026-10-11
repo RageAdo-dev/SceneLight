@@ -51,7 +51,7 @@ def test_tagged_release_does_not_use_temporary_artifact_storage():
 def test_release_upload_preserves_existing_assets_and_reports_failures(
     tmp_path, monkeypatch, exists, upload_exit, lookup_exit, shell
 ):
-    monkeypatch.setenv("RELEASE_TAG", "v1.1.0")
+    monkeypatch.setenv("RELEASE_TAG", "v1.0.0")
     monkeypatch.setenv("TEST_GH_CALLS", str(tmp_path / "calls.json"))
     stub = """
 $ErrorActionPreference = 'Stop'
@@ -69,7 +69,7 @@ function gh {
 """
     stub = (
         stub.replace("LOOKUP_EXIT", str(lookup_exit))
-        .replace("RELEASE_LIST", '[{"tagName":"v1.1.0"}]' if exists else "[]")
+        .replace("RELEASE_LIST", '[{"tagName":"v1.0.0"}]' if exists else "[]")
         .replace("UPLOAD_EXIT", str(upload_exit))
     )
     script = tmp_path / "publish.ps1"
@@ -98,7 +98,7 @@ function gh {
         assert result.returncode == 0, result.stderr
         assert len(calls) == 1
     else:
-        assert calls[1][:3] == ["release", "create", "v1.1.0"]
+        assert calls[1][:3] == ["release", "create", "v1.0.0"]
         assert len([arg for arg in calls[1] if arg.startswith("dist/")]) == 8
         assert {"--draft", "--prerelease", "--verify-tag"}.issubset(calls[1])
         assert "--clobber" not in calls[1]
