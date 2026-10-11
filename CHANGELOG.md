@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Recover interrupted installs, full updates and removals without losing the previous installation.
+- Reject linked paths in installation records before changing game files.
+- Fix GLES lighting precision and release GPU resources when the Preview is resized.
+- Keep low-opacity sprites intact during contrast analysis.
+- Use the same project settings in Preview and installation; review both files when an export also updates a saved profile.
+- Preserve the current composition after failed or canceled media opens and exports.
+- Add progress and cancellation for large media opens, and prevent concurrent cache writes.
+- Redact structured credentials from diagnostic exports.
+- Sign launchers before packaging and verify their bytes and signatures in each distribution.
+- Correct installation, settings, effects and in-app help instructions.
+
 ## 1.0.0
 
 ### Lighting
