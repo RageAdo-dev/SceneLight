@@ -2,8 +2,8 @@
 
 | Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.1/SceneLight-v1.0.1-Windows-online.zip) | Downloads the app on first launch (230 MB). |
-| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.1/SceneLight-v1.0.1-Windows.zip) | 230 MB. App and required components included. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows-online.zip) | Downloads the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows.zip) | 230 MB. App and required components included. |
 
 Extract the ZIP and open **SceneLight.exe**. No administrator access or separate
 Python installation is needed.

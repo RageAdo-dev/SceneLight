@@ -47,20 +47,18 @@ runtime executables, `lib/`, `module/`, `renpy/` and original `LICENSE.txt`.
 
 ## GitHub distribution
 
-Pushing a `vX.Y.Z` tag runs the release workflow and creates a draft prerelease
-with the packages and checksums. Existing releases are left unchanged.
-Review the downloads and release notes before publishing.
+Upload the verified packages and checksums to a draft GitHub release. Check its
+tag, download links and release notes before publishing.
 
-Manual runs build without uploading unless **Keep a temporary ZIP download for
-one day** is selected. Temporary downloads use Actions storage; tagged releases
-upload directly to GitHub Releases.
+If GitHub Actions is enabled, pushing a `vX.Y.Z` tag builds the packages and
+creates the draft. The workflow leaves existing releases unchanged.
 
 ## Online installer
 
 Build the complete ZIP first, then run:
 
 ```text
-python tools/build_online_installer.py dist/SceneLight-v1.0.1-Windows.zip --release-tag v1.0.1
+python tools/build_online_installer.py dist/SceneLight-v1.0.0-Windows.zip --release-tag v1.0.0
 ```
 
 Publish both ZIPs under that tag. The online installer pins the complete package’s

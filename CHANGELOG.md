@@ -1,6 +1,8 @@
 # Changelog
 
-## 1.0.1
+## 1.0.0
+
+### Fixes
 
 - Finish stopping background operations when Setup closes.
 - Prevent simultaneous projects from interrupting a shared compatibility-runtime download.
@@ -16,8 +18,6 @@
 - Redact structured credentials from diagnostic exports.
 - Sign launchers before packaging and verify their bytes and signatures in each distribution.
 - Correct installation, settings, effects and in-app help instructions.
-
-## 1.0.0
 
 ### Lighting
 
