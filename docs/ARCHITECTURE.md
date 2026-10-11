@@ -157,7 +157,8 @@ in save/load and rollback; graphics resources do not.
 
 Built-in rain and glitch are optional post-lighting branches. Developer effect
 packs add validated shader parts; the player effects panel and hotkey are disabled.
-See the [lighting API](MOD_AUTHOR_API.md) and [effect-pack reference](EFFECT_PACKS.md).
+See the [lighting API](MOD_AUTHOR_API.md) and the
+[experimental effect-pack reference online](https://github.com/RageAdo-dev/SceneLight/blob/main/docs/EFFECT_PACKS.md).
 
 [Performance](performance.md) · [Testing](TESTING.md)
 
