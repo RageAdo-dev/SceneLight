@@ -36,6 +36,44 @@ After adding assets, use **Check new assets → Update SceneLight**. Existing po
 can use a generic surface until their own maps are ready. Updates reuse valid
 analysis and stop if an owned runtime file was changed.
 
+## Lighting groups
+
+Use a group when several sprites form one pose or should receive the same lighting:
+
+```renpy
+# Use the registered image tags selected in Setup.
+$ scenelight.group("hug", ["hero", "companion"], strength=0.8)
+show hero hugging
+show companion hugging
+
+# Optional: follow one member, or use a fixed normalized screen point.
+$ scenelight.group("hug", anchor="hero")
+$ scenelight.group("hug", anchor=(0.45, 0.5))
+
+# Restore individual lighting after the shared pose.
+$ scenelight.clear_group("hug")
+```
+
+Without an anchor argument, the group samples the center of the visible members'
+combined bounds. The point follows their movement. A hidden member anchor falls
+back to the visible group's center. Fixed coordinates run from 0 to 1 across
+and down the screen. Members use registered tags on the `master` layer; use
+separate registered tags for separate pieces, rather than `show ... as` aliases.
+
+Group members inherit project, background and scene settings, followed by the
+group's own overrides. Their individual character/image lighting overrides are
+ignored while grouped. Surface maps and painted detail stay individual; this
+does not merge or flatten their artwork. Local lighting can still vary across
+surfaces. Glow and emitted-light settings stay per member unless the group sets
+them. Disabled members and `scenelight.off()` remain disabled. Inspector test
+edits can temporarily override a member; the inspector identifies that source.
+
+A tag can belong to one group at a time. Repeated calls merge group settings;
+omitting members and anchor keeps them. `clear_group(name)` restores the original
+member rules, and `reset()` removes all groups. Calls inside `init python` seed
+new games. Story calls, save/load and rollback preserve the current group state.
+The inspector shows membership, shared position and applied setting sources.
+
 ## Scopes and precedence
 
 ### Inspect an actual game scene
@@ -132,8 +170,9 @@ Preview profiles and exported configuration.
 | `scenelight.scene(**settings)` | The current sequence, until cleared |
 | `scenelight.character(tag, **settings)` | Every image with that tag |
 | `scenelight.image(name, **settings)` | One exact registered image name |
+| `scenelight.group(name, members=None, anchor=None, **settings)` | Shared lighting for registered sprite tags; see [groups](#lighting-groups) |
 
-Values apply in that order. A more specific rule replaces only the settings it
+For ungrouped sprites, the first five scopes apply in that order. A more specific rule replaces only the settings it
 contains. Repeated calls at the same scope merge their values. Rule state supports
 Ren'Py save/load and rollback.
 

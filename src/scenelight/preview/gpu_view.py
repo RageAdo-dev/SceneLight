@@ -1041,6 +1041,7 @@ class SceneLightGPUView(QOpenGLWidget):
         self._uniform("u_sc_local_luminance", scene.get("local_luminance", 0.12))
         self._uniform("u_sc_has_form", 1.0)
         self._uniform("u_sc_form_center", form_center)
+        self._uniform("u_sc_group_anchor", (0.0, 0.0, 0.0))
         self._uniform("u_sc_mean_form_visibility", form.get("mean_form_visibility", 1.0))
         self._uniform("u_sc_form_contrast_mid", form.get("contrast_mid", REFERENCE_ART_MID))
         self._uniform("u_sc_height_range", form.get("height_range", (-0.25, 1.25)))

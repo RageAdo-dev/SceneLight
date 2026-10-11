@@ -216,6 +216,7 @@ def test_existing_installation_is_not_labeled_ready_during_update(tmp_path):
         managed_install_present=False,
         managed_launcher=None,
         direct_refresh_required=False,
+        refresh_required=False,
         direct_launch_ready=True,
         managed_install_ready=False,
     )

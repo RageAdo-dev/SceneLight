@@ -911,7 +911,7 @@ def analyze_scene(
 
     # A bright object below the subject in an already well-exposed scene is
     # usually reflecting daylight (flowers, snow, pale foliage, foam), not
-    # emitting it.  Preserve genuinely compact practical lights and every
+    # emitting it.  Preserve compact practical lights and every
     # low-key source, but keep broad/repeated lower-field reflectors in the
     # environment probes.  This is a radiometric prior, not scene- or
     # character-specific tuning.
@@ -1052,7 +1052,7 @@ def analyze_scene(
         float(x) for x in np.clip(_linear_to_srgb(shadow_chroma * 0.5), 0.0, 1.0)
     )
 
-    # Keep the fused dominant estimate first, followed by genuinely separate
+    # Keep the fused dominant estimate first, followed by separate
     # connected emitters. This avoids inventing a source halfway between two
     # lamps while preserving the broad-gradient/off-frame correction above.
     lights: list[DetectedLight] = [
@@ -1305,7 +1305,7 @@ def diffuse_scene_exposure_guard(analysis: SceneAnalysis) -> float:
     bright, yet its high global contrast makes the existing result correct.
     The shoulder is therefore enabled only by the conjunction of a high
     whole-scene level and a very flat whole-scene field.  This global evidence
-    deliberately outranks a compact-source guess: a flower cluster must not
+    outranks a compact-source guess: a flower cluster must not
     switch exposure as the sprite crosses it.  Local adaptation still follows
     the moving character while this classification remains stable.
     """
@@ -1745,7 +1745,7 @@ def relight_sprite(
     # as pale skin, producing a sticker-like halo on fur, black dresses, and
     # other perimeter-dense silhouettes.  The smooth response leaves normal
     # DDLC midtones untouched while retaining a restrained dielectric glint on
-    # genuinely dark paint.  It depends only on local linear albedo.
+    # dark paint.  It depends only on local linear albedo.
     rim *= 0.12 + 0.88 * material_response
     lit += rim[..., None] * np.clip(light_chroma, 0.55, 2.2)[None, None, :] * 0.52 * exposure
 

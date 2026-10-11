@@ -154,9 +154,9 @@ def _single_creative_source_is_separate(
 ) -> bool:
     """Accept one colored source only when it is distinct from a neutral key.
 
-    A neutral key plus one red/blue/green practical is already a genuinely
+    A neutral key plus one red/blue/green practical is already a
     multicolored environment; requiring two *colored* hue families discards
-    exactly the local light that should paint one side of the character.  The
+    the local light on one side of the character. The
     conservative evidence below is scene-only and keeps a weak colorful prop
     from replacing ordinary multi-light transport.
     """
@@ -921,7 +921,7 @@ def _scene_maps(
     )
     # Local pixel value is not local illumination: a white wall, pale tree, or
     # printed highlight can be bright without emitting light. Anchor exposure
-    # to the robust whole-scene adaptation and allow only a low-frequency,
+    # to the whole-scene adaptation and allow only a low-frequency,
     # compressed positional drift. Actual emitters still affect direction,
     # color, and key strength through the independently classified field below.
     global_target = scene_target_mid(analysis)

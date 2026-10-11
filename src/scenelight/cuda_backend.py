@@ -74,7 +74,7 @@ class TransportAnalysisBundle:
 
     The component worker already decodes and prepares the source. Returning a
     compact subset prevents the parent from repeating that expensive work.
-    Arrays used only by CPU classification are deliberately discarded before
+    Arrays used only by CPU classification are discarded before
     IPC; all radiometric arrays consumed by CUDA remain full-resolution
     float32 data.
     """
@@ -291,12 +291,9 @@ def _build_cuda_geometry(
         0.15,
         1.0,
     )
-    # ``local_weights_gpu`` is already the canonical FP32 CUDA meter used by
-    # every other dense reduction. Keeping this one product in FP64 forces a
-    # large GEMM onto the 4090's deliberately limited FP64 units without
-    # restoring any precision that was discarded by the FP32 input. Use the
-    # same canonical precision end-to-end and validate the encoded LUT rather
-    # than paying a consumer-GPU FP64 penalty for zero recoverable bits.
+    # Inputs are FP32. FP64 multiplication cannot recover their lost precision
+    # and is much slower on consumer GPUs. Keep the reduction in FP32; the
+    # encoded LUT is checked against the reference implementation.
     upper_weights_gpu = local_weights_gpu * upper_factor[:, :, None].astype(cp.float32)
     upper_totals_gpu = cp.sum(upper_weights_gpu, axis=(1, 2))
 
@@ -457,7 +454,7 @@ def _detect_components_for_layout(
     # media therefore classifies the scene-wide saliency field once and keeps
     # those source identities fixed while the transport grid changes the
     # subject's local meter, probes, and source-to-surface directions.  This
-    # removes the dominant video-analysis cost and, more importantly, prevents
+    # removes the dominant video-analysis cost and prevents
     # a moving character from making a real lamp change identity.  Static
     # project builds retain the historical placement-weighted classifier so
     # existing authored/cached results remain unchanged.

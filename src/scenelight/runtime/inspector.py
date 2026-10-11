@@ -180,6 +180,15 @@ def describe(
     )
     scene = rules.get("scene", {})
     apply("Scene override", scene, sites.get("scene"))
+    shared = copy.deepcopy(values)
+    group_name, group = next(
+        (
+            (name, group)
+            for name, group in rules.get("groups", {}).items()
+            if tag in group.get("members", ())
+        ),
+        (None, None),
+    )
     apply(
         "Character: " + tag,
         rules.get("characters", {}).get(tag, {}),
@@ -190,6 +199,19 @@ def describe(
         rules.get("images", {}).get(image, {}),
         sites.get("images", {}).get(image),
     )
+    if group is not None:
+        shared = {
+            name: value
+            for name, value in shared.items()
+            if not name.startswith(("glow_", "emission_"))
+        }
+        shared.update(group.get("settings", {}))
+        apply("Lighting group: " + group_name, shared, sites.get("groups", {}).get(group_name))
+        if any(
+            rules.get(scope, {}).get(name, {}).get("enabled") is False
+            for scope, name in (("characters", tag), ("images", image))
+        ):
+            apply("Member disabled", {"enabled": False})
     if scene.get("enabled") is False:
         apply("Scene off (hard bypass)", {"enabled": False}, sites.get("scene"))
     temporary = session.values(background, tag, image) if session else {}
@@ -201,6 +223,7 @@ def describe(
         "background": background,
         "tag": tag,
         "image": image,
+        "group": dict(copy.deepcopy(group), name=group_name) if group is not None else None,
         "values": values,
         "origins": origins,
         "chains": chains,

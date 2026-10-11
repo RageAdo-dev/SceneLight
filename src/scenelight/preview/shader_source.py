@@ -38,6 +38,7 @@ uniform vec2 u_canvas_size;
 uniform vec2 u_sprite_position;
 uniform vec2 u_sprite_size;
 uniform vec2 u_sc_form_center;
+uniform vec3 u_sc_group_anchor;
 uniform float u_sc_render_local;
 out vec2 v_tex_coord;
 out vec2 v_sc_screen;
@@ -54,6 +55,7 @@ void main() {
     v_tex_coord = in_uv;
     v_sc_screen = pixel / u_canvas_size;
     v_sc_center = (u_sprite_position + u_sc_form_center * u_sprite_size) / u_canvas_size;
+    v_sc_center = mix(v_sc_center, u_sc_group_anchor.xy, u_sc_group_anchor.z);
 }
 """
     if center_samples:

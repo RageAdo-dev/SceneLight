@@ -1,9 +1,35 @@
 # Compatibility and validation
 
-Documentation reviewed on 5 October 2026. Automatic discovery does not recognize
+Documentation reviewed on 10 October 2026. Automatic discovery does not recognize
 every game, and a successful installation is not a complete playthrough.
 
-## Current tester build — beta 28
+## Current tester build — 1.1.0
+
+The local suite passed **1,026 tests**. Formatting, lint, the medium/high security
+scan, dependency audit, wheel/source build and Windows packaging passed. All 67
+packaged Python/Ren’Py source files matched the tested tree. Four native package
+rehearsals passed: Ren’Py 7.7.1 and 8.5.2, each in developer and player-copy modes.
+They verified unchanged updates, one new sprite/background, map and settings
+reuse, preserved save bytes and loading the earlier gameplay checkpoint.
+
+In these small fixtures, unchanged updates took 0.34–0.45 seconds and adding one
+sprite/background took 8.98–9.34 seconds. These are not timings for a large mod.
+The real open Setup window detected a source edit in about 10 seconds and
+invalidated its cached scan without being restarted.
+
+Native Ren’Py 7.7.1 and 8.5.2 checks confirm that group members share the same
+rendered lighting anchor and strength. The fixture covers movement, hiding the
+anchor, fixed coordinates, scene off, clearing a group, and loading a real save.
+The inspector reports the values used by each rendered sprite.
+
+Setup now polls source metadata off the UI thread, debounces edits and clears
+stale scan/review state. This offers the normal update workflow for both developer
+installs and separate player copies. Detection uses names, sizes and timestamps;
+an editor that preserves all three may require a manual update. Installation
+continues to verify source bytes. No background rebuild runs while an author is
+saving files, and the running game must be restarted after an update.
+
+## Previous tester build — beta 28
 
 The local suite passed **1,004 tests**. The extracted Windows package passed four
 native rehearsals: Ren’Py 7.7.1 and 8.5.2, each in player and developer modes.
@@ -12,7 +38,7 @@ retained map/config/save bytes, and loading a real saved gameplay checkpoint.
 All 66 packaged Python/Ren’Py source files matched the tested tree. Formatting,
 lint, dependency audit, Python build and the medium/high security scan passed.
 
-The current build includes the optional Shift+F9 inspector with sliders and exact
+The beta 28 build includes the optional Shift+F9 inspector with sliders and exact
 edits, a visible six-category Preview adjustment panel, reviewed profile/config
 exports, selective background-light color adjustment, and runtime/settings-only
 updates. Glow supports 0–10 and per-image color rules. Weather and custom effect
@@ -23,7 +49,7 @@ Bright-scene regression coverage compared original and recovered sprites across
 Sixty matched cases were rendered in each of Ren’Py 7 and 8 and compared with
 Preview: the largest mean opaque-sprite difference was 0.359 of 255. These are
 controlled inputs, not universal pixel equivalence for every transform or GPU.
-The installer revisions leave that rendering code unchanged. Beta 28 adds a
+The beta 28 installer revisions left that rendering code unchanged. Beta 28 adds a
 Windows journal-sequence check: timestamp collisions on GitHub's Windows runners
 exposed a case that the earlier local runs did not. An exclusive read prevents
 reuse while another open handle could coalesce journal records. Unsupported or
@@ -36,14 +62,15 @@ are additional work.
 
 ### Known issues and coverage limits
 
-- An intermittent shimmer affecting multiple characters after longer gameplay is
-  under investigation. This build does **not** claim to fix that report. A recording
-  and an inspector export from the affected state are the most useful evidence.
+- The tester traced intermittent shimmer to scenes added before updating the
+  prepared lighting data. Restarting Setup and updating resolved it. The new
+  watcher removes the need to restart Setup to discover changes; confirmation in
+  that mod is still needed. Record any recurrence after a completed update.
 - Current physical GPU validation is on NVIDIA RTX 4090. Earlier AMD coverage is
   recorded below; this candidate still needs fresh AMD and Intel tester passes.
 - Packaged-interpreter and native tests are not a fresh Windows VM validation.
 - A successful installation is not a complete playthrough of a large mod.
-- Newly added assets need Scan/Update; there is no continuous folder watcher.
+- Newly added assets still need Scan/Update and a game restart; detection alone does not prepare maps.
 
 [Report a reproducible issue](TROUBLESHOOTING.md).
 

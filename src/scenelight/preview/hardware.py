@@ -87,7 +87,7 @@ def recommended_lookahead_seconds(anchors_per_second: float) -> float:
     The two-second floor also keeps the normal four-anchor/second pipeline at
     or above one full eight-worker wave on the validated class of hardware;
     going below it can reduce utilization rather than improve first-view time.
-    The later source-specific cold-prefix gate still holds genuinely difficult
+    The later source-specific cold-prefix gate still holds slow
     videos for a complete exact warmup.
     """
 

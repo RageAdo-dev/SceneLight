@@ -574,7 +574,7 @@ def _stage_runtime(
     game_root = project_root / "game"
     if not game_root.is_dir():
         raise FileNotFoundError(f"Ren'Py game folder not found: {game_root}")
-    # Keep this transaction directory deliberately short. Generated sprite-map
+    # Keep this transaction directory short. Generated sprite-map
     # filenames can be long enough that the previous 61-character staging name
     # crossed Win32's traditional MAX_PATH boundary in otherwise valid games.
     stage = game_root / f".sl-{uuid.uuid4().hex[:8]}"

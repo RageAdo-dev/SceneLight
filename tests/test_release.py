@@ -24,7 +24,7 @@ from scenelight.release import (
 
 
 def test_100_is_the_first_public_release() -> None:
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.1.0"
     assert FIRST_PUBLIC_VERSION == "1.0.0"
 
 
@@ -38,14 +38,15 @@ def test_versionless_install_is_explicitly_pre_release() -> None:
 
 def test_release_relation_handles_rc_upgrade_and_newer_downgrade() -> None:
     assert classify_release("1.0.0-rc.2").kind == "upgrade"
-    assert classify_release("1.0.0").kind == "current"
-    assert classify_release("1.1.0").kind == "downgrade"
+    assert classify_release("1.0.0").kind == "upgrade"
+    assert classify_release("1.1.0").kind == "current"
+    assert classify_release("1.2.0").kind == "downgrade"
     assert classify_release("old-local-build").kind == "unrecognized"
 
 
 def test_same_version_with_different_recorded_build_is_replaceable() -> None:
     relation = classify_release(
-        "1.0.0",
+        __version__,
         installed_content_sha256="0" * 64,
         current_content_sha256="f" * 64,
     )
@@ -61,7 +62,7 @@ def test_release_record_names_every_cache_contract() -> None:
     assert len(fingerprint) == 64
     assert record == {
         "version": 1,
-        "product_version": "1.0.0",
+        "product_version": __version__,
         "first_public_version": "1.0.0",
         "runtime_api_version": 1,
         "runtime_manifest_version": 8,
@@ -120,7 +121,7 @@ def test_managed_install_manifest_records_release_identity(tmp_path: Path) -> No
     )
 
     payload = json.loads((managed / ".scenelight_install.json").read_text(encoding="utf-8"))
-    assert payload["scenelight_version"] == "1.0.0"
+    assert payload["scenelight_version"] == __version__
     assert payload["release"] == release_record()
 
 

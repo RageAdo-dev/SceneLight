@@ -64,7 +64,7 @@ _INTRO = (
         START,
         "Which setting wins?",
         "Rules apply from broad defaults to the most specific image.",
-        "Project defaults → background → scene → character → exact image. A later rule replaces only the settings it contains. Repeated calls at the same scope merge their settings.",
+        "Project defaults → background → scene → character → exact image. A later rule replaces only the settings it contains. Lighting groups replace member character/image lighting rules with shared settings; glow and disabled-member rules remain local. Repeated calls at the same scope merge their settings.",
         "scenelight.off() is an exception: it bypasses lighting for the sequence even if a character or image rule enables it.",
         "An authored strength replaces Preview's saved strength at that scope. The player's master strength still multiplies the result. Rule state supports save/load and rollback.",
         keywords="scope priority override inheritance save load rollback",
@@ -139,6 +139,33 @@ _COMMANDS = (
         """,
         placement=INIT,
         keywords="image exact expression pose",
+    ),
+    _topic(
+        "group",
+        COMMANDS,
+        "Light several sprites together",
+        "scenelight.group(name, members=None, anchor=None, **settings)",
+        "Group members share one position for exposure and background color. The default anchor is the center of the visible members' combined bounds. Use a member tag or a normalized (x, y) point for another anchor.",
+        "The group uses scene/background defaults plus its own settings, instead of each member's character/image lighting rules. Glow and emitted light stay per sprite unless the group sets them. Disabled members stay disabled.",
+        "Members are registered image tags on the master layer, and must already be selected for lighting in Setup. A tag belongs to one group. A hidden anchor falls back to the visible members' center.",
+        "Calls in init python apply from a new game. Story calls apply until scenelight.clear_group(name). Save/load and rollback retain group state. To change only settings, omit members and anchor.",
+        example="""
+            $ scenelight.group("hug", ["hero", "companion"], anchor="hero", strength=0.8)
+            # Show the grouped sprites in this sequence.
+            $ scenelight.clear_group("hug")
+        """,
+        placement=STORY,
+        keywords="group composite pieces hug shared lighting position anchor center",
+    ),
+    _topic(
+        "clear-group",
+        COMMANDS,
+        "Restore separate sprite lighting",
+        "scenelight.clear_group(name)",
+        "Removes the group and restores each member's individual lighting position and rules. Other groups are unchanged. scenelight.reset() removes all groups and other authored overrides.",
+        example='$ scenelight.clear_group("hug")',
+        placement=STORY,
+        keywords="ungroup separate clear remove group",
     ),
     _topic(
         "off",

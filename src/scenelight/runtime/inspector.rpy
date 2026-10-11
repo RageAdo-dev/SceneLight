@@ -82,6 +82,8 @@ init 1001 python:
                     report["frozen_transition"] = bool(getattr(sprite, "_sc_snapshot_frozen", False))
                     report["exposure_owner"] = bool(getattr(sprite, "_sc_exposure_owner", True))
                     report["screen_rect"] = sprite._scenelight_screen_rect()
+                    group = report.get("group")
+                    report["group_anchor"] = _scenelight_control_group_anchor(group) if group else None
                     report["last_drawn"] = {
                         "enabled": getattr(sprite, "_sc_last_rendered_enabled", report["effective_enabled"]),
                         "strength": getattr(sprite, "_sc_last_rendered_strength", report["effective_strength"]),
@@ -364,12 +366,15 @@ screen scenelight_inspector():
                             text _scenelight_inspector_text(target["image"]) substitute False style "sc_inspector_button_text"
             if info:
                 text ("Background: " + _scenelight_inspector_text(info["background"])) substitute False color "#98b4c8"
+                if info.get("group"):
+                    text ("Lighting group: " + _scenelight_inspector_text(info["group"]["name"])) substitute False color "#8bdeef" size 15
+                    text ("Shared position: " + _scenelight_inspector_text(info.get("group_anchor"))) substitute False color "#98b4c8" size 13
                 text ("Effective: %s · %.3f × %.3f = %.3f" % ("ON" if info["effective_enabled"] else "OFF", info["values"]["strength"], info["master"]["strength"], info["effective_strength"])) size 18
                 text _scenelight_inspector_text(info["note"]) substitute False color "#e9c883" size 14
             else:
                 text "No visible sprites. Open this during a scene." color "#e9c883"
             viewport:
-                ysize max(100, config.screen_height - 450)
+                ysize max(100, config.screen_height - 450 - (42 if info and info.get("group") else 0))
                 scrollbars "vertical"
                 mousewheel True
                 draggable True

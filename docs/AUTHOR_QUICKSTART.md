@@ -125,3 +125,5 @@ Before distributing a game, check movement, expression changes, scene transition
 custom shaders, unlit UI and save/load/rollback with your own assets.
 
 [Full API reference](MOD_AUTHOR_API.md) · [Installation and removal](INSTALL.md) · [Compatibility](BETA_VALIDATION.md)
+
+For multi-sprite poses, [lighting groups](MOD_AUTHOR_API.md#lighting-groups) share a sampling position and lighting settings. Setup now detects source changes while it stays open; apply the offered update and restart the game to load the prepared data.

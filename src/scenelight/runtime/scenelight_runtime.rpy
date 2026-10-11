@@ -140,9 +140,8 @@ init -50 python:
         "separate": _SCENELIGHT_SEPARATE_MODE,
         "individual": _SCENELIGHT_SEPARATE_MODE,
         "creative": _SCENELIGHT_SEPARATE_MODE,
-        # A validated, palette-independent cinematic compromise discovered by
-        # combining separated source colors with compressed scene exposure.
-        # Explicit values in the same API call override these preset values.
+        # Separate source colors with lower exposure. Explicit settings in the
+        # same call override the preset.
         "cinematic": _scenelight_light_mode_values(
             strength=0.72,
             exposure_bias=-0.22,
@@ -163,6 +162,7 @@ init -50 python:
         "backgrounds": {},
         "characters": {},
         "images": {},
+        "groups": {},
     }
 
     def _scenelight_control_initial_state():
@@ -175,7 +175,7 @@ init -50 python:
         if not isinstance(state, dict) or state.get("version") != 1:
             state = _scenelight_control_initial_state()
         elif state.get("revision", 0) == 0 and not any(
-            state.get(scope) for scope in ("defaults", "scene", "backgrounds", "characters", "images")
+            state.get(scope) for scope in ("defaults", "scene", "backgrounds", "characters", "images", "groups")
         ):
             # Older saves may contain the untouched empty default that used to
             # erase init-authored rules. An intentional runtime clear/reset has
@@ -359,6 +359,114 @@ init -50 python:
             state.get("call_sites", {}).get(scope, {}).pop(key, None)
         _scenelight_control_assign(state)
 
+    def _scenelight_control_group_for_tag(state, tag):
+        for name, group in state.get("groups", {}).items():
+            if tag in group.get("members", ()):
+                return name, group
+        return None, None
+
+    def _scenelight_control_group(name, members=None, anchor=None, settings=None):
+        import math
+        name = _scenelight_control_name(name, "group")
+        state = copy.deepcopy(_scenelight_control_current_state())
+        groups = state.setdefault("groups", {})
+        group = copy.deepcopy(groups.get(name, {}))
+        if members is not None:
+            if isinstance(members, _SCENELIGHT_STRING_TYPES) or not isinstance(members, (list, tuple)):
+                raise ValueError("Group members must be a list of image tags")
+            tags = []
+            for member in members:
+                if not isinstance(member, _SCENELIGHT_STRING_TYPES) or len(member.split()) != 1:
+                    raise ValueError("Group members must be single registered image tags")
+                tag = _scenelight_control_name(member, "character")
+                if tag in tags:
+                    raise ValueError("Duplicate lighting-group member: " + tag)
+                tags.append(tag)
+            group["members"] = tags
+        if not group.get("members"):
+            raise ValueError("A lighting group needs at least one member")
+        for other, entry in groups.items():
+            if other != name and set(group["members"]) & set(entry.get("members", ())):
+                raise ValueError("A sprite can belong to only one lighting group: " + other)
+        if anchor is not None:
+            if isinstance(anchor, _SCENELIGHT_STRING_TYPES):
+                anchor = anchor.strip().lower()
+                if anchor != "center" and anchor not in group["members"]:
+                    raise ValueError("Group anchor must be 'center', a member tag, or an (x, y) point")
+            elif isinstance(anchor, (list, tuple)) and len(anchor) == 2:
+                anchor = tuple(float(value) for value in anchor)
+                if any(math.isnan(value) or math.isinf(value) or not 0.0 <= value <= 1.0 for value in anchor):
+                    raise ValueError("Group anchor coordinates must be finite numbers from 0 to 1")
+            else:
+                raise ValueError("Group anchor must be 'center', a member tag, or an (x, y) point")
+            group["anchor"] = anchor
+        group.setdefault("anchor", "center")
+        if isinstance(group["anchor"], _SCENELIGHT_STRING_TYPES) and group["anchor"] != "center" and group["anchor"] not in group["members"]:
+            raise ValueError("The anchor tag must remain a member of its lighting group")
+        values = _scenelight_control_values(settings or {})
+        group.setdefault("settings", {}).update(values)
+        groups[name] = group
+        sites = state.setdefault("call_sites", {}).setdefault("groups", {}).setdefault(name, {})
+        try:
+            filename, line = renpy.get_filename_line()
+        except (AttributeError, TypeError, ValueError):
+            filename, line = None, 0
+        for setting in values:
+            if filename:
+                sites[setting] = {"file": filename, "line": int(line or 0)}
+            else:
+                sites.pop(setting, None)
+        _scenelight_control_assign(state)
+
+    def _scenelight_control_group_anchor(group):
+        import math
+        global _SCENELIGHT_MEASURING_EMITTERS
+        anchor = group.get("anchor", "center")
+        if isinstance(anchor, (tuple, list)):
+            return tuple(anchor)
+        layer = group.get("layer", "master")
+        try:
+            visible = set(renpy.get_showing_tags(layer=layer))
+            sw, sh = float(config.screen_width), float(config.screen_height)
+            if sw <= 0 or sh <= 0:
+                return None
+            # One result per presented frame keeps members independent of draw order.
+            frame = (renpy.game.interface.frame_time, sw, sh,
+                     _scenelight_control_current_state().get("revision", 0))
+            previous, cache = getattr(renpy.display, "_scenelight_group_anchors", (None, {}))
+            if previous != frame:
+                cache = {}
+                renpy.display._scenelight_group_anchors = (frame, cache)
+            key = (layer, tuple(group["members"]), anchor, tuple(sorted(visible)))
+            if key in cache:
+                return cache[key]
+            tags = [anchor] if anchor != "center" and anchor in visible else group["members"]
+            bounds = []
+            measuring = _SCENELIGHT_MEASURING_EMITTERS
+            _SCENELIGHT_MEASURING_EMITTERS = True
+            try:
+                for tag in tags:
+                    if tag not in visible:
+                        continue
+                    rect = renpy.get_image_bounds(tag, config.screen_width, config.screen_height, layer)
+                    if rect and len(rect) == 4 and rect[2] > 0 and rect[3] > 0:
+                        rect = tuple(float(value) for value in rect)
+                        if not any(math.isnan(value) or math.isinf(value) for value in rect):
+                            bounds.append(rect)
+            finally:
+                _SCENELIGHT_MEASURING_EMITTERS = measuring
+            point = None
+            if bounds:
+                x0 = min(rect[0] for rect in bounds)
+                y0 = min(rect[1] for rect in bounds)
+                x1 = max(rect[0] + rect[2] for rect in bounds)
+                y1 = max(rect[1] + rect[3] for rect in bounds)
+                point = ((x0 + x1) * 0.5 / sw, (y0 + y1) * 0.5 / sh)
+            cache[key] = point
+            return point
+        except (AttributeError, TypeError, ValueError, KeyError):
+            return None
+
     def _scenelight_control_snapshot(background_key, tag, image_name):
         state = _scenelight_control_current_state()
         background_key = _scenelight_control_name(background_key, "background")
@@ -372,6 +480,15 @@ init -50 python:
             state.get("characters", {}).get(character_key, {}),
             state.get("images", {}).get(image_key, {}),
         )
+        group_name, group = _scenelight_control_group_for_tag(state, character_key)
+        if group is not None:
+            # The group owns ordinary lighting. Glow/emission and disabled-image
+            # rules stay local unless the group explicitly supplies those values.
+            local = {}
+            for layer in layers[3:]:
+                local.update((key, value) for key, value in layer.items()
+                             if key.startswith(("glow_", "emission_")))
+            layers = layers[:3] + (local, group.get("settings", {}))
         result = {
             "enabled": True,
             "strength": 1.0,
@@ -391,6 +508,11 @@ init -50 python:
                     result["calibration"][key] = (
                         copy.deepcopy(layer[key]) if key == "glow_rules" else float(layer[key])
                     )
+        if group is not None:
+            result["group"] = dict(copy.deepcopy(group), name=group_name)
+            if any(state.get(scope, {}).get(key, {}).get("enabled") is False
+                   for scope, key in (("characters", character_key), ("images", image_key))):
+                result["enabled"] = False
         # A scripted scene bypass is absolute. It must not be undone by a
         # reusable character or image rule authored at a narrower scope.
         if isinstance(scene_layer, dict) and scene_layer.get("enabled") is False:
@@ -433,6 +555,12 @@ init -50 python:
         def on(self):
             self.scene(enabled=True)
 
+        def group(self, name, members=None, anchor=None, **settings):
+            _scenelight_control_group(name, members, anchor, settings)
+
+        def clear_group(self, name):
+            _scenelight_control_clear("groups", name)
+
         def off(self):
             self.scene(enabled=False)
 
@@ -464,6 +592,7 @@ init -50 python:
                     "backgrounds": {},
                     "characters": {},
                     "images": {},
+                    "groups": {},
                 }
             )
 
@@ -2126,6 +2255,7 @@ init -50 python:
             uniform float u_sc_sharpness;
             uniform float u_sc_has_form;
             uniform vec2 u_sc_form_center;
+            uniform vec3 u_sc_group_anchor;
             uniform vec4 u_sc_snapshot_rect;
             uniform float u_sc_use_snapshot_rect;
             uniform float u_sc_mean_form_visibility;
@@ -2222,6 +2352,7 @@ init -50 python:
                 sc_snapshot_center,
                 u_sc_use_snapshot_rect
             );
+            v_sc_center = mix(v_sc_center, u_sc_group_anchor.xy, u_sc_group_anchor.z);
         """
     _scenelight_shader_fragment_functions = _scenelight_fragment_source("""
             vec3 scenelight_sprite_light(vec4 light, vec3 color, vec3 normal, float aspect) {
@@ -3257,7 +3388,7 @@ init -50 python:
                 1.15,
                 sc_scene_chroma_span
             );
-            // Only genuinely extreme environment chroma is compressed. Typical
+            // Only extreme environment chroma is compressed. Typical
             // daylight/classroom transport stays exactly on the original path;
             // this is an energy guard for backgrounds whose baked grade is too
             // saturated to represent incident light literally.
@@ -4242,6 +4373,8 @@ init -50 python:
                     frozen_effect_time,
                     frozen_controls,
                 ) = self._live_lighting_state()
+                if frozen_controls.get("group") is not None:
+                    frozen_controls["group_anchor"] = _scenelight_control_group_anchor(frozen_controls["group"])
             else:
                 frozen_scene = self._sc_last_rendered_scene
                 frozen_enabled = self._sc_last_rendered_enabled
@@ -4297,6 +4430,10 @@ init -50 python:
                 # rollback/load. It keeps procedural animation deterministic
                 # across expression swaps instead of restarting with each new
                 # displayable's ATL time.
+                group = controls.get("group")
+                if group is not None:
+                    controls["group_anchor"] = _scenelight_control_group_anchor(group)
+                    renpy.redraw(self, 0.0)
                 self._sc_last_rendered_scene = scene
                 self._sc_last_rendered_enabled = enabled
                 self._sc_last_rendered_strength = strength
@@ -4576,6 +4713,9 @@ init -50 python:
                     "u_sc_probe%d_color" % probe_index,
                     tuple(probe["chroma"]),
                 )
+            group_anchor = controls.get("group_anchor")
+            result.add_uniform("u_sc_group_anchor", tuple(group_anchor) + (1.0,)
+                               if group_anchor is not None else (0.0, 0.0, 0.0))
             result.add_uniform("u_sc_has_form", 1.0 if self.has_form else 0.0)
             if self._sc_snapshot_frozen:
                 snapshot_rect = self._sc_frozen_screen_rect

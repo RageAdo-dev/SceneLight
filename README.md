@@ -2,13 +2,13 @@
 
 ![SceneLight — character lighting for Ren’Py](docs/media/scenelight-banner.svg)
 
-**Let your characters share the light.**
+**Character lighting for Ren’Py games and mods.**
 
 Automatic lighting, color and glow for Ren’Py sprites. Preview a scene, tune it in-game, and keep your existing story workflow.
 
-[![CI](https://img.shields.io/badge/CI-Windows_%2B_Linux-233c51?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml) [![Tester build: beta 28](https://img.shields.io/badge/tester_build-beta_28-57c7dc?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.28) [![Ren’Py 7 and 8](https://img.shields.io/badge/Ren%27Py-7_%26_8-233c51?style=flat-square)](docs/BETA_VALIDATION.md) [![License: MIT](https://img.shields.io/badge/code-MIT-233c51?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/badge/CI-Windows_%2B_Linux-233c51?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/actions/workflows/ci.yml) [![Tester build: 1.1.0](https://img.shields.io/badge/tester_build-1.1.0-57c7dc?style=flat-square)](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.0) [![Ren’Py 7 and 8](https://img.shields.io/badge/Ren%27Py-7_%26_8-233c51?style=flat-square)](docs/BETA_VALIDATION.md) [![License: MIT](https://img.shields.io/badge/code-MIT-233c51?style=flat-square)](LICENSE)
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.28)** · **[Player setup](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)** · **[All documentation](docs/README.md)**
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.0)** · **[Player setup](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)** · **[All documentation](docs/README.md)**
 
 </div>
 
@@ -24,7 +24,7 @@ Automatic lighting, color and glow for Ren’Py sprites. Preview a scene, tune i
 | Choose which characters receive lighting. Keep exclusions when new assets arrive. | Keep your existing `scene`, `show`, ATL and transitions; add rules where you need them. |
 | [Install, update and remove →](docs/INSTALL.md) | [Start building →](docs/AUTHOR_QUICKSTART.md) |
 
-1. Download **SceneLight-v1.0.0-Windows.zip**, extract it, and open **SceneLight.exe**.
+1. Download **SceneLight-v1.1.0-Windows.zip**, extract it, and open **SceneLight.exe**.
 2. Select the folder containing your game, scan, and review the character choices.
 3. Install, wait for the completion message, and launch the game normally.
 
@@ -80,6 +80,20 @@ init python:
 
 You can target one background, apply rules to several backgrounds, override a whole character, or tune one expression. Glow, selective-color rules and emitted light are available in the mod API. The searchable **Developer guide** is also built into Setup. [Command reference →](docs/MOD_AUTHOR_API.md)
 
+## Light sprite pieces together
+
+Use a lighting group for a character assembled from several sprites, or a shared pose such as a hug. Members sample the same lighting position and use common settings.
+
+![Two separately positioned sprites sharing group lighting in Ren’Py](docs/media/lighting-groups.png)
+
+```renpy
+$ scenelight.group("hug", ["hero", "companion"], anchor="hero", strength=0.8)
+# After the shared pose:
+$ scenelight.clear_group("hug")
+```
+
+The default anchor follows the center of the visible group. Choose a member or a fixed screen point when needed. Each sprite keeps its surface detail and individual glow. [Groups and precedence →](docs/MOD_AUTHOR_API.md#lighting-groups)
+
 ## Updates that reuse your work
 
 Compatible code-only and lighting-settings updates retain the existing asset maps. When artwork changes, SceneLight checks the inventory and reuses compatible capture and analysis results. Missing or unsupported assets are reported individually while usable assets continue.
@@ -96,7 +110,7 @@ Windows checksum reuse requires a file-journal sequence and an exclusive read;
 if those are unavailable, verification reads the bytes again. [Performance and
 verification details →](docs/performance.md#installation-and-update-finalization)
 
-After adding assets, run **Scan / Update**. Newly discovered characters follow your saved inclusion policy; SceneLight does not continuously watch the project folder. **Settings → Activity** shows the current stage, retained logs and report exports.
+While Setup is open, it checks the selected folder for changes and offers **Check changed assets → Update SceneLight**. Newly discovered characters follow your saved inclusion policy. Restart the game after updating. **Settings → Activity** shows the current stage, retained logs and report exports.
 
 ## Lighting in motion
 
@@ -108,7 +122,7 @@ After adding assets, run **Scan / Update**. Newly discovered characters follow y
 
 Windows with compatible graphics; Ren’Py 7 and 8, plus a bundled compatibility runtime for some older games. CUDA is optional preparation acceleration. Live lighting still needs a supported graphics renderer.
 
-The latest local build passed **1,004 automated tests** and real Ren’Py 7/8 player/developer install, update and save-loading rehearsals. GPU coverage varies by device. An intermittent shimmer reported during longer gameplay remains **under investigation**; this build does not claim to resolve it.
+The build passed **1,026 automated tests** and native Ren’Py 7/8 player/developer update and save-loading checks. Lighting groups also passed native movement, hidden-anchor and save/load checks. GPU coverage varies by device. A tester traced an intermittent shimmer to new scenes that had not been updated; the new change indicator addresses stale setup state. The affected mod still needs a confirmation run.
 
 [Compatibility and known issues](docs/BETA_VALIDATION.md) · [Report a problem](docs/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md)
 

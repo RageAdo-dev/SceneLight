@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- Added lighting groups: shared background sampling and settings for separate sprites, with moving, member-based or fixed anchors. Per-sprite glow and disabled-member rules remain available.
+- Show group membership and shared position in the in-game inspector. Groups survive save/load and rollback, and can be cleared during a scene.
+- Setup detects source changes while it stays open, invalidates stale scans and offers updates for both direct installs and separate player copies. Saves and generated caches do not trigger this check.
+- Updated the API guide, examples, download page and release instructions. Simplified comments and documentation while retaining technical explanations.
+
 ## 1.0.0-beta
 
 ### Lighting and playback

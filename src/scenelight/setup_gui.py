@@ -1,8 +1,7 @@
 """Native setup window for the existing SceneLight command-line installer.
 
-The GUI deliberately delegates every scan/install/verify operation to the
-same CLI used by automation.  It owns presentation and process supervision,
-not a second copy of the installer.
+The GUI runs scan, install and verification through the CLI. It displays
+progress and manages the worker processes.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility
 from .cuda_detection import CudaSupport, detect_cuda_support
 from .developer import DeveloperStatus, developer_status
 from .progress import STAGE_LABELS
+from .project_watch import ProjectWatch, source_metadata
 from .release import (
     ReleaseRelation,
     classify_release,
@@ -149,6 +149,8 @@ class ProjectInspection:
     managed_content_sha256: str | None = None
     reserved_namespace_present: bool = False
     error: str | None = None
+    source_metadata: dict | None = None
+    managed_refresh_required: bool = False
 
     @property
     def direct_install_ready(self) -> bool:
@@ -168,6 +170,10 @@ class ProjectInspection:
     def direct_refresh_required(self) -> bool:
         status = self.developer_status
         return bool(status and status.installed and status.clean and status.refresh_required)
+
+    @property
+    def refresh_required(self) -> bool:
+        return self.direct_refresh_required or self.managed_refresh_required
 
     @property
     def managed_install_ready(self) -> bool:
@@ -1359,6 +1365,20 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
         )
     except (OSError, RuntimeError, ValueError) as caught:
         return ProjectInspection(selection, error=str(caught))
+    try:
+        snapshot = source_metadata(project_root)
+        managed_refresh = False
+        if managed_install_present:
+            manifest = json.loads(
+                (managed_root / ".scenelight_install.json").read_text(encoding="utf-8")
+            )
+            previous = manifest.get("source_state")
+            if isinstance(previous, dict):
+                managed_refresh = {
+                    name: tuple(value[:2]) for name, value in previous.items()
+                } != snapshot
+    except (OSError, TypeError, ValueError) as caught:
+        return ProjectInspection(selection, error=str(caught))
     status: DeveloperStatus | None = None
     error: str | None = None
     try:
@@ -1367,6 +1387,8 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
         error = str(caught)
     return ProjectInspection(
         selection=selection,
+        source_metadata=snapshot,
+        managed_refresh_required=managed_refresh,
         developer_status=status,
         managed_install_present=managed_install_present,
         managed_launcher=managed_launcher,
@@ -1479,6 +1501,8 @@ class SceneLightSetup(tk.Tk):
         self._project_inspection_value = ""
         self._project_checking = False
         self._project_generation = 0
+        self._source_watch = ProjectWatch()
+        self._watch_busy = False
         self._progress_phase: str | None = None
         self._progress_started_at = 0.0
         self._progress_origin = 0
@@ -1537,6 +1561,7 @@ class SceneLightSetup(tk.Tk):
         self._project_changed()
         self.after(self._dependency_poll_delay(), self._poll_dependency_state)
         self._begin_cuda_detection()
+        self.after(5_000, self._poll_project_sources)
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self)
@@ -2302,20 +2327,19 @@ class SceneLightSetup(tk.Tk):
                     relation and relation.kind in {"pre_release", "unrecognized"}
                 )
                 self._scan()
-        elif (
-            not self.developer_mode
-            and inspection is not None
-            and inspection.direct_refresh_required
-        ):
+        elif inspection is not None and inspection.refresh_required:
             if self._scan_ok:
-                self._refresh_embed()
+                if inspection.direct_install_ready:
+                    self._refresh_embed()
+                else:
+                    self._install()
             else:
                 self._scan()
         elif self.developer_mode:
             if self._attached:
                 if self._scan_ok:
                     self._refresh_embed()
-                elif inspection is not None and inspection.direct_refresh_required:
+                elif inspection is not None and inspection.refresh_required:
                     self._scan()
                 else:
                     self._open_project()
@@ -2455,6 +2479,7 @@ class SceneLightSetup(tk.Tk):
         if generation != self._project_generation or value != self.project_var.get():
             return
         self._project_checking = False
+        self._source_watch = ProjectWatch(inspection.source_metadata)
         self._project_inspection = inspection
         self._project_inspection_value = value
         self.progress.stop()
@@ -2462,6 +2487,51 @@ class SceneLightSetup(tk.Tk):
             self.progress_frame.grid_remove()
             self.operation_var.set("Ready")
         self._refresh_project_state()
+
+    def _poll_project_sources(self) -> None:
+        if self._destroying:
+            return
+        inspection = self._project_inspection
+        if (
+            not self._running
+            and not self._project_checking
+            and not self._watch_busy
+            and inspection is not None
+            and inspection.selection.valid
+        ):
+            root = inspection.selection.root
+            generation = self._project_generation
+            self._watch_busy = True
+
+            def worker():
+                try:
+                    snapshot = source_metadata(root)
+                except OSError:
+                    snapshot = None  # An editor may be replacing a file; retry next poll.
+                self._events.put(("project-sources", generation, snapshot))
+
+            threading.Thread(target=worker, name="scenelight-project-watch", daemon=True).start()
+        self.after(5_000, self._poll_project_sources)
+
+    def _finish_project_sources(self, generation, snapshot) -> None:
+        self._watch_busy = False
+        if (
+            generation != self._project_generation
+            or self._running
+            or self._project_checking
+            or snapshot is None
+        ):
+            return
+        if not self._source_watch.observe(snapshot):
+            return
+        self._scan_ok = False
+        self._review_completed_for = None
+        self._character_review_pending_for = None
+        self._last_scan_payload = {}
+        self._close_character_review_window()
+        self.preview_var.set("Project files changed. Update SceneLight, then restart the game.")
+        self._append_log("[Project files changed; checking the installed lighting data.]\n")
+        self._begin_project_inspection()
 
     def _poll_dependency_state(self) -> None:
         if not self._running:
@@ -2717,12 +2787,9 @@ class SceneLightSetup(tk.Tk):
                     )
                 self.installation_var.set(message)
                 self.installation_status.configure(foreground="#f0b66d")
-            elif inspection is not None and inspection.direct_refresh_required:
-                status = inspection.developer_status
-                assert status is not None
+            elif inspection is not None and inspection.refresh_required:
                 self.installation_var.set(
-                    f"SceneLight found {len(status.changed_sources)} changed project file(s). "
-                    "Update SceneLight before playing."
+                    "Project files changed. Update SceneLight, then restart the game."
                 )
                 self.installation_status.configure(foreground="#f0b66d")
             elif inspection is not None and inspection.direct_install_ready:
@@ -2950,11 +3017,7 @@ class SceneLightSetup(tk.Tk):
                     else "SceneLight is ready to update this installation."
                 )
             )
-        elif (
-            not self.developer_mode
-            and inspection is not None
-            and inspection.direct_refresh_required
-        ):
+        elif inspection is not None and inspection.refresh_required:
             label = "Update SceneLight" if self._scan_ok else "Check changed assets"
             primary_state = "normal"
             self.workflow_title_var.set("Game changes detected")
@@ -2967,7 +3030,7 @@ class SceneLightSetup(tk.Tk):
                     "Update SceneLight"
                     if self._scan_ok
                     else "Check new assets"
-                    if inspection is not None and inspection.direct_refresh_required
+                    if inspection is not None and inspection.refresh_required
                     else "Open mod project"
                 )
             elif self._attached:
@@ -2980,7 +3043,7 @@ class SceneLightSetup(tk.Tk):
                 label = "Launch existing SceneLight copy"
             primary_state = "normal"
             if self.developer_mode:
-                if inspection is not None and inspection.direct_refresh_required:
+                if inspection is not None and inspection.refresh_required:
                     self.workflow_title_var.set("Project changes detected")
                     self.workflow_subtitle_var.set(
                         "Review new characters, then update lighting data and surface maps."
@@ -3545,12 +3608,17 @@ class SceneLightSetup(tk.Tk):
         selection = self._selection()
         if selection.root is None:
             return
+        updating = bool(self._project_inspection and self._project_inspection.managed_install_ready)
         approved = messagebox.askyesno(
-            "Create a SceneLight copy?",
-            "Create a separate SceneLight-enabled copy of:\n\n"
-            f"{selection.root}\n\n"
-            "The selected game, its saves, and its normal executable will not be changed.\n\n"
-            "Continue?",
+            "Update SceneLight copy?" if updating else "Create a SceneLight copy?",
+            (
+                "Update the existing SceneLight copy of:\n\n"
+                if updating
+                else "Create a separate SceneLight-enabled copy of:\n\n"
+            )
+            + f"{selection.root}\n\n"
+            + ("The copy's saves and lighting choices will be kept. " if updating else "")
+            + "The selected source game will not be changed.\n\nContinue?",
             icon="question",
         )
         if approved:
@@ -4092,6 +4160,8 @@ class SceneLightSetup(tk.Tk):
                     )
                 elif event[0] == "dependency-check":
                     self._refresh_dependency_display()
+                elif event[0] == "project-sources":
+                    self._finish_project_sources(event[1], event[2])
                 elif event[0] == "project-inspection" and isinstance(event[3], ProjectInspection):
                     self._finish_project_inspection(int(event[1]), str(event[2]), event[3])
                 elif event[0] == "cuda-detection" and isinstance(event[2], CudaSupport):

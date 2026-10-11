@@ -76,3 +76,5 @@ python tools/build_scene_examples.py /path/to/waterfall.mp4 /path/to/sprite.png 
 
 An OpenGL 3.3 context is required. The SDK and scratch cache stay outside the
 repository. Only the documented figures and their provenance belong here.
+
+`lighting-groups.png` is a native Ren’Py 8.5.2 capture using the same credited Eileen tutorial artwork and SceneLight’s generated two-light stage. Two registered sprites share a group anchor and strength.

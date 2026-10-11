@@ -756,6 +756,8 @@ def _exposure_runtime():
         "_scenelight_control_glow_rules",
         "_scenelight_control_update",
         "_scenelight_control_snapshot",
+        "_scenelight_control_group_for_tag",
+        "_scenelight_control_group_anchor",
         "_scenelight_calibration_blocks",
         "_scenelight_emission_controls",
         "_scenelight_color_glow_rules",

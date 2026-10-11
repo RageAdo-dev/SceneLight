@@ -3,8 +3,8 @@
 Back up your game or project folder and saves before installing. It gives you an
 easy way back if setup is interrupted or your game isn’t compatible.
 
-[Download the current tester build](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.0.0-beta.28).
-Choose **SceneLight-v1.0.0-Windows.zip**, extract the entire archive, and open
+[Download the current tester build](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.0).
+Choose **SceneLight-v1.1.0-Windows.zip**, extract the entire archive, and open
 **SceneLight.exe**. The complete package includes Setup, Preview and the legacy
 compatibility runtime. No administrator access or system Python installation is
 needed. Optional CUDA preparation acceleration may still need a download.
@@ -16,7 +16,7 @@ release it downloads the same complete payload and verifies its pinned SHA-256;
 it changes when the payload is downloaded, not its total required size.
 
 For release builders: build the complete ZIP first, then run
-`python tools/build_online_installer.py dist/SceneLight-v1.0.0-Windows.zip --release-tag <tag>`.
+`python tools/build_online_installer.py dist/SceneLight-v1.1.0-Windows.zip --release-tag <tag>`.
 Publish both ZIPs under that exact tag. The online ZIP pins the complete ZIP's hash;
 rebuild it whenever the payload changes. Local candidate installers cannot download
 their payload until that matching release asset is published. The release workflow
@@ -104,9 +104,11 @@ projects. Unchecked families stay excluded even with this on. Turn it off to add
 characters only when you explicitly select them. Existing manual choices remain
 manual after upgrading. Settings are saved per project.
 
-After adding or changing game assets, run Scan/Update. There is no continuous
-folder watcher; new characters need discovery and prepared lighting maps before
-they can use the full effect. Player-copy updates synchronize authored game files
+While Setup stays open, it checks the selected project every five seconds and
+waits for two matching file snapshots before checking the installation again.
+Changed files clear the cached scan and show **Check changed assets**. Apply
+**Update SceneLight**, then restart the game. New characters need discovery and
+prepared lighting maps before they can use the full effect. Player-copy updates synchronize authored game files
 while preserving saves and your lighting choices. Developer updates refresh the
 embedded runtime and generated maps without replacing story scripts.
 
