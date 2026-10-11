@@ -262,6 +262,13 @@ def _luminance(linear_rgb: np.ndarray) -> np.ndarray:
     return linear_rgb[..., 0] * 0.2126 + linear_rgb[..., 1] * 0.7152 + linear_rgb[..., 2] * 0.0722
 
 
+def _contrast_mid(luminance: np.ndarray, alpha: np.ndarray) -> float:
+    samples = alpha > 0.15
+    if not np.any(samples):
+        samples = alpha > 0.01
+    return float(np.quantile(luminance[samples], 0.52))
+
+
 def _clamp_scalar(value: float, lower: float, upper: float) -> float:
     """Clamp a known-finite scalar without dispatching through NumPy."""
 
@@ -1780,7 +1787,7 @@ def relight_sprite(
 
     # Match contrast around the relit median without crushing line work.
     lit_luma = _luminance(lit)
-    lit_mid = float(np.quantile(lit_luma[alpha > 0.15], 0.52))
+    lit_mid = _contrast_mid(lit_luma, alpha)
     desired_contrast = np.clip(0.84 + analysis.local_contrast * 0.35, 0.76, 1.24)
     contrast_power = (
         1.0 + (desired_contrast - 1.0) * settings.contrast_match * settings.auto_strength

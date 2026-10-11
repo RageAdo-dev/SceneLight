@@ -19,6 +19,7 @@ from PIL import Image
 
 from .engine import (
     RelightSettings,
+    _contrast_mid,
     _luminance,
     _material_light_response,
     _pseudo_surface,
@@ -208,7 +209,7 @@ def build_sprite_form_maps(
     ys, xs = np.nonzero(visible)
     center_x = (float(xs.min()) + float(xs.max())) * 0.5 / max(sprite.width - 1, 1)
     center_y = (float(ys.min()) + float(ys.max())) * 0.5 / max(sprite.height - 1, 1)
-    contrast_mid = float(np.quantile(original_luma[alpha > 0.15], 0.52))
+    contrast_mid = _contrast_mid(original_luma, alpha)
 
     # Keep all six exact v1 channels, but group smooth fields together. Storing
     # form data in alpha is unsafe because Ren'Py uses premultiplied textures.
