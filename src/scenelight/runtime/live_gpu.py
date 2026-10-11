@@ -174,6 +174,11 @@ class Driver(object):
         self.shading_version = self.GetString(0x8B8C).decode("ascii", "replace")
         self.renderer = self.GetString(0x1F01).decode("ascii", "replace")
         self.es = "OpenGL ES" in self.version
+        if self.es:
+            address = self.get_proc(b"glTexStorage2D")
+            if not address:
+                raise RuntimeError("The current graphics context lacks glTexStorage2D")
+            self.TexStorage2D = self.prototype(None, GLuint, GLint, GLuint, GLint, GLint)(address)
         major, minor = self.integer(0x821B), self.integer(0x821C)
         extensions = {
             self.GetStringi(0x1F03, i).decode("ascii") for i in range(self.integer(0x821D))
@@ -405,15 +410,28 @@ class Device(object):
             target = self.target("capability", 8, 1)
             program = self.program(
                 "capability_float",
-                "out vec4 color;void main(){color=vec4(0.0000123,1.125,-0.25,1.0);}",
+                "out vec4 color;void main(){color=vec4(0.0000123,1.125123,-0.250123,1.0);}",
             )
             self.draw(program, target, 8, 1)
             values = (GLfloat * 32)()
             gl.ReadPixels(0, 0, 8, 1, RGBA, FLOAT, C.cast(values, GLvoidp))
-            expected = (0.0000123, 1.125, -0.25, 1.0)
+            expected = (0.0000123, 1.125123, -0.250123, 1.0)
             if any(abs(values[i] - expected[i % 4]) > 1e-7 for i in range(32)):
                 raise RuntimeError(
                     "SceneLight requires full-precision floating-point render targets"
+                )
+            sampled = self.target("capability_sampled", 8, 1)
+            sample_program = self.program(
+                "capability_sampled",
+                "uniform sampler2D source;out vec4 color;"
+                "vec4 sample_value(sampler2D image){return texelFetch(image,ivec2(gl_FragCoord.xy),0);}"
+                "void main(){color=sample_value(source);}",
+            )
+            self.draw(sample_program, sampled, 8, 1, textures=(("source", target),))
+            gl.ReadPixels(0, 0, 8, 1, RGBA, FLOAT, C.cast(values, GLvoidp))
+            if any(abs(values[i] - expected[i % 4]) > 1e-7 for i in range(32)):
+                raise RuntimeError(
+                    "SceneLight requires full-precision floating-point texture sampling"
                 )
             program = self.program(
                 "capability_sum",
@@ -433,7 +451,7 @@ class Device(object):
             return self.programs[key]
         gl = self.gl
         prefix = (
-            "#version 300 es\nprecision highp float;\nprecision highp int;\n"
+            "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\n"
             if gl.es
             else "#version 330 core\n"
         )
@@ -507,17 +525,21 @@ class Device(object):
             # Preserve every sampler channel while storing one 32-bit float.
             for parameter in (0x8E42, 0x8E43, 0x8E44, 0x8E45):
                 gl.TexParameteri(TEXTURE_2D, parameter, 0x1903)
-        gl.TexImage2D(
-            TEXTURE_2D,
-            0,
-            storage,
-            width,
-            height,
-            0,
-            0x8227 if storage == RG32F else 0x1903 if storage == R32F else RGBA,
-            FLOAT if storage in (RGBA32F, RG32F, R32F) else UNSIGNED_BYTE,
-            None,
-        )
+        if gl.es:
+            # ES image load/store requires immutable texture storage.
+            gl.TexStorage2D(TEXTURE_2D, 1, storage, width, height)
+        else:
+            gl.TexImage2D(
+                TEXTURE_2D,
+                0,
+                storage,
+                width,
+                height,
+                0,
+                0x8227 if storage == RG32F else 0x1903 if storage == R32F else RGBA,
+                FLOAT if storage in (RGBA32F, RG32F, R32F) else UNSIGNED_BYTE,
+                None,
+            )
         self.targets[name] = (texture,) + shape
         return texture
 
@@ -625,11 +647,17 @@ class Device(object):
             return self.programs[key]
         gl = self.gl
         if gl.es:
-            prefix = "#version 310 es\nprecision highp float;\nprecision highp int;\n"
+            prefix = (
+                "#version 310 es\nprecision highp float;\nprecision highp int;\n"
+                "precision highp sampler2D;\nprecision highp image2D;\n"
+            )
         elif gl.compute_core or gl.shading_version.startswith(("4.3", "4.4", "4.5", "4.6")):
             prefix = "#version 430 core\n"
         else:
             prefix = "#version 330 core\n#extension GL_ARB_compute_shader : require\n#extension GL_ARB_shader_storage_buffer_object : require\n#extension GL_ARB_shader_image_load_store : require\n"
+        # ES requires an image binding in the declaration. Older desktop GLSL
+        # uses the default unit zero without requiring the 420pack extension.
+        prefix += "#define sl_binding_zero " + ("binding=0," if gl.es else "") + "\n"
         shader = gl.CreateShader(0x91B9)
         program = 0
         try:
@@ -1104,7 +1132,6 @@ class Analysis(object):
         device.uniform(program, "quantiles", tuple(quantiles) + (0.0,) * (4 - len(quantiles)))
         device.uniform(program, "ranks", ranks, integer=True)
         gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, RGBA32F)
-        device.uniform(program, "destination", 0, integer=True)
         gl.DispatchCompute(groups, 1, 1)
         gl.MemoryBarrier(0x2428)
         return target
@@ -1114,7 +1141,7 @@ class Analysis(object):
         return """
             layout(local_size_x=128) in;
             uniform sampler2D histogram;
-            layout(rgba32f) writeonly uniform image2D destination;
+            layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
             shared uint blocks[128];
             uint values[8];
             void prefix(int row){
@@ -1175,7 +1202,6 @@ class Analysis(object):
             device.uniform(program, uniform, index, integer=True)
         device.uniform(program, "ranks", ranks, integer=True)
         gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, RGBA32F)
-        device.uniform(program, "destination", 0, integer=True)
         gl.DispatchCompute(groups * ranks, 1, 1)
         gl.MemoryBarrier(0x2428)
         return target
@@ -1200,7 +1226,7 @@ class Analysis(object):
         gl.BindBufferBase(0x90D2, 0, buffer)
         header = """
             layout(local_size_x=128) in;
-            layout(std430) buffer Histogram { uint bins[]; };
+            layout(sl_binding_zero std430) buffer Histogram { uint bins[]; };
         """
         clear = device.compute_program(
             "clear_quantile_histogram", header + "void main(){bins[gl_GlobalInvocationID.x]=0u;}"
@@ -1260,14 +1286,13 @@ class Analysis(object):
             "copy_quantile_histogram",
             header
             + """
-            layout(rgba32f) writeonly uniform image2D destination;
+            layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
             void main(){uint i=gl_GlobalInvocationID.x;
                 imageStore(destination,ivec2(int(i)%1024,int(i)/1024),vec4(float(bins[i]),0.0,0.0,0.0));}
             """,
         )
         gl.UseProgram(copy)
         gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, RGBA32F)
-        device.uniform(copy, "destination", 0, integer=True)
         gl.DispatchCompute(rows * 8, 1, 1)
         gl.MemoryBarrier(0x2428)
 
@@ -1550,7 +1575,7 @@ class Analysis(object):
         gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, RGBA32F)
         header = """
             layout(local_size_x=128) in;
-            layout(std430) coherent buffer Parents { uint parent[]; };
+            layout(sl_binding_zero std430) coherent buffer Parents { uint parent[]; };
             uniform sampler2D mask;
             uint root(uint p){
                 uint q=atomicAdd(parent[p],0u);
@@ -1583,7 +1608,7 @@ class Analysis(object):
                     uint j=uint(q.y*size.x+q.x);
                     if(atomicAdd(parent[j],0u)!=0xffffffffu)join(i,j);
                 }}""",
-            """layout(rgba32f) writeonly uniform image2D destination;
+            """layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
                 void main(){uint i=gl_GlobalInvocationID.x;ivec2 size=textureSize(mask,0);
                 if(i>=uint(size.x*size.y))return;ivec2 p=ivec2(int(i)%size.x,int(i)/size.x);
                 float label=atomicAdd(parent[i],0u)==0xffffffffu ? 0.0 : float(root(i)+1u);
@@ -1595,7 +1620,6 @@ class Analysis(object):
             gl.ActiveTexture(TEXTURE0)
             gl.BindTexture(TEXTURE_2D, mask)
             device.uniform(program, "mask", 0, integer=True)
-            device.uniform(program, "destination", 0, integer=True)
             gl.DispatchCompute((count + 127) // 128, 1, 1)
             gl.MemoryBarrier(0x2000 if index < 2 else 0x2428)
         return target
@@ -1870,7 +1894,7 @@ class Analysis(object):
         else:
             buffer = previous[0]
         gl.BindBufferBase(0x90D2, 0, buffer)
-        header = "layout(std430) buffer Candidates { uint count; uint pad[3]; vec4 values[]; };\n"
+        header = "layout(sl_binding_zero std430) buffer Candidates { uint count; uint pad[3]; vec4 values[]; };\n"
         program = device.compute_program(
             "compact_clear", header + "layout(local_size_x=1) in;void main(){count=0u;}"
         )
@@ -1908,7 +1932,7 @@ class Analysis(object):
             + """
             layout(local_size_x=128) in;
             uniform sampler2D source;
-            layout(rgba32f) writeonly uniform image2D destination;
+            layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
             shared vec4 items[128];
             void main(){int i=int(gl_LocalInvocationID.x);items[i]=INITIAL;barrier();
                 for(int stage=2;stage<=128;stage*=2)for(int step=stage/2;step>0;step/=2){
@@ -1928,7 +1952,6 @@ class Analysis(object):
         gl.ActiveTexture(TEXTURE0)
         gl.BindTexture(TEXTURE_2D, source)
         device.uniform(program, "source", 0, integer=True)
-        device.uniform(program, "destination", 0, integer=True)
         gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, RGBA32F)
         gl.DispatchCompute(1, 1, 1)
         gl.MemoryBarrier(0x2428)
@@ -1984,7 +2007,7 @@ class Analysis(object):
             else:
                 buffer = prior[0]
             gl.BindBufferBase(0x90D2, 0, buffer)
-            header = "layout(std430) buffer Histogram { uint bins[]; };\n"
+            header = "layout(sl_binding_zero std430) buffer Histogram { uint bins[]; };\n"
             clear = device.compute_program(
                 "clear_" + key,
                 header
@@ -2057,13 +2080,12 @@ class Analysis(object):
                 header
                 + """
                 layout(local_size_x=128) in;
-                layout(rgba32f) writeonly uniform image2D destination;
+                layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
                 void main(){uint i=gl_GlobalInvocationID.x;if(i>=COUNTu)return;
                     imageStore(destination,ivec2(int(i)%1024,int(i)/1024),vec4(float(bins[i])));}
             """.replace("COUNT", str(count)),
             )
             gl.UseProgram(program)
-            device.uniform(program, "destination", 0, integer=True)
             gl.DispatchCompute((count + 127) // 128, 1, 1)
             gl.MemoryBarrier(0x2428)
             histograms.append(target)
@@ -2765,7 +2787,7 @@ class Analysis(object):
             layout(local_size_x=128) in;
             uniform sampler2D source;
             uniform int axis;
-            layout(rgba32f) writeonly uniform image2D destination;
+            layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
             shared KIND data[N];
             int reversed(int index){int result=0;
                 for(int bit=0;bit<BITS;bit++){result=(result<<1)|(index&1);index>>=1;}
@@ -2798,7 +2820,9 @@ class Analysis(object):
         target = device.target(name, *size, storage=R32F)
         program = device.compute_program(
             "shared_gaussian_fft_%d" % n,
-            self._shared_fft_shader(n).replace("layout(rgba32f)", "layout(r32f)")
+            self._shared_fft_shader(n).replace(
+                "layout(sl_binding_zero rgba32f)", "layout(sl_binding_zero r32f)"
+            )
             + """
             uniform sampler2D kernel; uniform int radius;
             float reflect_index(float p,float n){if(n<=1.0)return 0.0;
@@ -2833,7 +2857,6 @@ class Analysis(object):
         device.uniform(program, "axis", axis, integer=True)
         device.uniform(program, "radius", radius, integer=True)
         gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, R32F)
-        device.uniform(program, "destination", 0, integer=True)
         gl.DispatchCompute(size[1 - axis], 1, 1)
         gl.MemoryBarrier(0x2428)
         return target
@@ -3556,7 +3579,6 @@ class Analysis(object):
                 device.uniform(program, "sign", 1.0 if inverse else -1.0)
                 device.uniform(program, "normalization", float(n) if inverse else 1.0)
                 gl.BindImageTexture(0, target, 0, False, 0, 0x88B9, RGBA32F)
-                device.uniform(program, "destination", 0, integer=True)
                 gl.DispatchCompute(size[1 - axis], 1, 1)
                 gl.MemoryBarrier(0x2428)
                 texture = target

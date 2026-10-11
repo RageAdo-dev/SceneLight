@@ -12,6 +12,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  graphics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [desktop, gles]
+    env:
+      EGL_PLATFORM: surfaceless
+      PYOPENGL_PLATFORM: egl
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      SCENELIGHT_TEST_EGL: "1"
+      SCENELIGHT_TEST_GL: ${{ matrix.api }}
+      SCENELIGHT_REQUIRE_GPU: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libgles2
+      - run: python -m pip install -e ".[dev,preview]"
+      - run: pytest tests/test_live_gpu.py -rA --junitxml=graphics-results.xml
+      - name: Require executed parity and resource tests
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+          cases = ElementTree.parse("graphics-results.xml").findall(".//testcase")
+          required = [case for case in cases if case.get("name", "").startswith((
+              "test_live_fields_preserve_reference_model", "test_resize_releases_actual",
+              "test_advertised_compute_path",
+          ))]
+          assert len(required) == 9, "Graphics checks were not collected"
+          assert all(len(case) == 0 or not any(child.tag in {"skipped", "error", "failure"}
+                     for child in case) for case in required), "Required graphics checks did not pass"
+          PY
+
   player-install:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
