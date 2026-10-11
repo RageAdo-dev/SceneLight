@@ -44,7 +44,6 @@ from ..calibration import (
     Calibration,
     CalibrationProfile,
     lighting_mode_preset,
-    load_profile,
     profile_path,
 )
 from ..prepared import engine_identity, source_identity
@@ -137,10 +136,15 @@ class MainWindow(QMainWindow):
         self._project_root = project_root.expanduser().resolve() if project_root else None
         self._profile_path = profile_path(self._project_root) if self._project_root else None
         profile_error = None
+        self._settings_sources = ()
         try:
+            from ..configuration import resolve_project_settings
+
+            settings = resolve_project_settings(self._project_root) if self._project_root else None
+            self._settings_sources = settings.sources if settings is not None else ()
             self._calibration_profile = (
-                load_profile(self._profile_path)
-                if self._profile_path is not None
+                CalibrationProfile.from_payload(settings.values)
+                if settings is not None
                 else CalibrationProfile()
             )
         except (OSError, ValueError) as error:
@@ -323,6 +327,7 @@ class MainWindow(QMainWindow):
             self._current_profile(),
             self._profile_path,
             self._project_root / "scenelight.json" if self._project_root else None,
+            sources=self._settings_sources,
         )
         self._settings_export.saved.connect(self._settings_saved)
         self._settings_export.editRequested.connect(self._open_calibration)
@@ -407,7 +412,7 @@ class MainWindow(QMainWindow):
     def _settings_saved(self, destination: str, mode: str) -> None:
         if mode == "profile":
             self._profile_path = Path(destination)
-        self.statusBar().showMessage(f"Reviewed {mode} saved to {destination}")
+        self.statusBar().showMessage(f"Saved {mode} to {destination}")
 
     @staticmethod
     def _slider(minimum: int, maximum: int, value: int, callback) -> QSlider:

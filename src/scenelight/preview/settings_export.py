@@ -47,8 +47,33 @@ class SettingsWrite:
     destination: Path
     previous: bytes | None
     content: bytes
+    related: tuple[SettingsWrite, ...] = ()
 
     def write(self) -> None:
+        plans = (*self.related, self)
+        for plan in plans:
+            if _read_existing(plan.destination) != plan.previous:
+                raise SettingsChangedError(
+                    "A settings file changed outside Preview. Refresh before saving."
+                )
+        written = []
+        try:
+            for plan in plans:
+                plan._write_one()
+                written.append(plan)
+        except (OSError, ValueError):
+            for plan in reversed(written):
+                if _read_existing(plan.destination) != plan.content:
+                    raise SettingsChangedError(
+                        "A settings file changed during saving; its edits were kept."
+                    )
+                if plan.previous is None:
+                    plan.destination.unlink()
+                else:
+                    SettingsWrite(plan.destination, plan.content, plan.previous)._write_one()
+            raise
+
+    def _write_one(self) -> None:
         """Write exactly the reviewed bytes; refuse a stale destination."""
         if _read_existing(self.destination) != self.previous:
             raise SettingsChangedError(
@@ -77,7 +102,9 @@ class SettingsWrite:
                 temporary.unlink(missing_ok=True)
 
 
-def prepare_settings_write(destination: Path, profile: CalibrationProfile) -> SettingsWrite:
+def prepare_settings_write(
+    destination: Path, profile: CalibrationProfile, *, associated_profile: Path | None = None
+) -> SettingsWrite:
     destination = destination.expanduser().resolve()
     previous = _read_existing(destination)
     payload = {} if previous is None else json.loads(previous.decode("utf-8-sig"))
@@ -92,7 +119,14 @@ def prepare_settings_write(destination: Path, profile: CalibrationProfile) -> Se
     content = (json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode(
         "utf-8"
     )
-    return SettingsWrite(destination, previous, content)
+    related = ()
+    if (
+        associated_profile is not None
+        and associated_profile.resolve() != destination
+        and associated_profile.is_file()
+    ):
+        related = (prepare_settings_write(associated_profile, profile),)
+    return SettingsWrite(destination, previous, content, related)
 
 
 class SettingsExportPage(QWidget):
@@ -105,9 +139,13 @@ class SettingsExportPage(QWidget):
         profile_path: Path | None,
         config_path: Path | None,
         parent=None,
+        *,
+        sources: tuple[Path, ...] = (),
     ):
         super().__init__(parent)
         self._profile = profile
+        self._associated_profile = profile_path
+        self._project_config = config_path
         self._destinations = [profile_path, config_path]
         self._plan: SettingsWrite | None = None
         outer = QVBoxLayout(self)
@@ -127,6 +165,14 @@ class SettingsExportPage(QWidget):
         self.scope.setWordWrap(True)
         self.scope.setObjectName("subtitle")
         layout.addWidget(self.scope)
+        self.sources = QLabel(
+            "Settings loaded from (last file takes priority):\n"
+            + "\n".join(str(path) for path in sources)
+            if sources
+            else "Using SceneLight defaults."
+        )
+        self.sources.setWordWrap(True)
+        layout.addWidget(self.sources)
         self.destination = QLineEdit()
         self.destination.setReadOnly(True)
         self.destination.setPlaceholderText("Choose where to save…")
@@ -153,6 +199,11 @@ class SettingsExportPage(QWidget):
         self.file_preview.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.file_preview.setMinimumHeight(180)
         self.review.addTab(self.file_preview, "File preview")
+        self.profile_preview = QPlainTextEdit()
+        self.profile_preview.setReadOnly(True)
+        self.profile_preview.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.review.addTab(self.profile_preview, "Saved project profile")
+        self.review.setTabVisible(2, False)
         layout.addWidget(self.review, 1)
         edit = QPushButton("Edit lighting values")
         edit.clicked.connect(self.editRequested.emit)
@@ -196,9 +247,7 @@ class SettingsExportPage(QWidget):
             else "Export global lighting defaults to scenelight.json. Existing background, "
             "sprite and discovery rules are kept. Update SceneLight in the project to apply them."
         )
-        self.write_button.setText(
-            "Save reviewed profile" if is_profile else "Write reviewed config"
-        )
+        self.write_button.setText("Save profile" if is_profile else "Export config")
         self.refresh()
 
     def set_destination(self, path: Path) -> None:
@@ -222,6 +271,7 @@ class SettingsExportPage(QWidget):
         self._show_values()
         destination = self._destinations[self.mode.currentIndex()]
         self._plan = None
+        self.review.setTabVisible(2, False)
         self.write_button.setEnabled(False)
         self.destination.setText(str(destination or ""))
         self.destination.setToolTip(str(destination or ""))
@@ -233,17 +283,35 @@ class SettingsExportPage(QWidget):
             )
             return
         try:
-            self._plan = prepare_settings_write(destination, self._profile)
+            linked = (
+                self.mode.currentIndex() == 1
+                and self._project_config is not None
+                and destination.resolve() == self._project_config.resolve()
+            )
+            self._plan = prepare_settings_write(
+                destination,
+                self._profile,
+                associated_profile=self._associated_profile if linked else None,
+            )
         except (OSError, ValueError, UnicodeError) as error:
             self.file_preview.clear()
             self.message.setText(f"Cannot prepare this file: {error}")
             return
         self.file_preview.setPlainText(self._plan.content.decode("utf-8"))
+        if self._plan.related:
+            related = self._plan.related[0]
+            self.profile_preview.setPlainText(related.content.decode("utf-8"))
+            self.profile_preview.setToolTip(str(related.destination))
+            self.review.setTabVisible(2, True)
         self.message.setText(
             "This will replace the file’s global lighting defaults. Target-specific rules are kept."
             if self._plan.previous is not None
             else "This will create a new file with the reviewed settings."
         )
+        if self._plan.related:
+            self.message.setText(
+                "Export will also update the saved project profile so it uses these values. Review both files above."
+            )
         self.write_button.setEnabled(True)
 
     def _write(self) -> None:

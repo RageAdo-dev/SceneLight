@@ -48,6 +48,33 @@ def test_review_is_read_only_then_writes_exact_bytes_preserving_target_rules(tmp
     assert not list(tmp_path.glob(".scenelight-settings-*"))
 
 
+def test_export_reviews_project_profile_and_keeps_portable_exports_separate(app, tmp_path):
+    config, associated, portable = (
+        tmp_path / name for name in ("scenelight.json", "saved.json", "portable.json")
+    )
+    config.write_text('{"strength":1}')
+    associated.write_text('{"strength":0.3,"excluded_character_tags":["ui"]}')
+    page = SettingsExportPage(CalibrationProfile(strength=0.8), associated, config)
+    try:
+        page.select_mode(1)
+        assert page.review.isTabVisible(2)
+        assert json.loads(page.profile_preview.toPlainText())["strength"] == 0.8
+        assert json.loads(associated.read_text())["strength"] == 0.3
+        page.set_destination(portable)
+        assert not page.review.isTabVisible(2)
+        page.write_button.click()
+        assert json.loads(portable.read_text())["strength"] == 0.8
+        assert json.loads(associated.read_text())["strength"] == 0.3
+        assert json.loads(config.read_text())["strength"] == 1
+        page.set_destination(config)
+        page.write_button.click()
+        assert json.loads(config.read_text())["strength"] == 0.8
+        assert json.loads(associated.read_text())["strength"] == 0.8
+        assert json.loads(associated.read_text())["excluded_character_tags"] == ["ui"]
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize(
     "initial,external", [(None, b"{}"), (b"{}", None), (b"{}", b'{"strength":0.2}')]
 )

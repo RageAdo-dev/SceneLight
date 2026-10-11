@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import io
-import json
 import re
 import tokenize
 from dataclasses import dataclass, field
@@ -251,19 +250,9 @@ def _resolve_asset(
 
 
 def _load_config(project_root: Path, config_path: Path | None) -> dict[str, object]:
-    payload: dict[str, object] = {}
-    default_path = project_root / "scenelight.json"
-    paths = [default_path]
-    if config_path is not None and config_path.resolve() != default_path.resolve():
-        paths.append(config_path)
-    for path in paths:
-        if not path.is_file():
-            continue
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(loaded, dict):
-            raise ValueError(f"SceneLight config must contain a JSON object: {path}")
-        payload.update(loaded)
-    return payload
+    from .configuration import resolve_project_settings
+
+    return resolve_project_settings(project_root, config_path).values
 
 
 def _looks_like_foreground_character(layers: tuple[Path, ...], reference_height: int) -> bool:
