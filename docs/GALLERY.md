@@ -23,8 +23,6 @@ The same sprite and placement, without and with SceneLight:
 
 ![Waterfall scene](media/waterfall-example.png)
 
-[Watch the waterfall video](media/waterfall-example.mp4).
-
 ## Shared lighting
 
 ![Two separate sprites sharing a lighting group](media/lighting-groups.png)
