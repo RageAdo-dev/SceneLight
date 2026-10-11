@@ -41,6 +41,7 @@ MODULES = (
     "prepared",
     "prepared_renpy",
     "shader_stages",
+    "shader_data",
     "shader_renpy",
     "inspector",
 )

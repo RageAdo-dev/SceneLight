@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scenelight.capture import CAPTURE_VERSION
+from scenelight.runtime.shader_data import SHADERS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,8 +93,12 @@ def test_public_docs_use_current_launcher_dependencies_and_runtime() -> None:
 
 
 def test_runtime_has_no_character_specific_defaults() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert "SCENELIGHT_CHARACTER_TAGS = set()" in runtime
     for name in ("sayori", "natsuki", "yuri", "monika", "demonika"):
@@ -107,8 +112,12 @@ def test_runtime_has_one_canonical_source_copy() -> None:
 
 
 def test_shader_registration_fits_legacy_renpy_logical_line_limit() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     registration_start = runtime.index(
         '        renpy.register_shader(\n            "scenelight.dynamic_sprite"'
@@ -130,8 +139,12 @@ def test_shader_registration_fits_legacy_renpy_logical_line_limit() -> None:
 
 
 def test_runtime_isolates_and_composes_third_party_mesh_shaders() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
 
     # Image-declared shaders finish in child_render and become tex0. SceneLight
@@ -147,13 +160,17 @@ def test_runtime_isolates_and_composes_third_party_mesh_shaders() -> None:
     # consumes the lower-priority result instead of discarding and resampling it.
     fragment = runtime.index("    _scenelight_shader_fragment_350 =")
     registration = runtime.index("        renpy.register_shader(", fragment)
-    assert "vec4 source = gl_FragColor;" in runtime[fragment:registration]
+    assert "vec4 source = gl_FragColor;" in SHADERS["fragment_350"]
     assert "fragment_350=_scenelight_shader_fragment_350" in runtime[registration:]
 
 
 def test_native_renpy_6_skips_unavailable_shader_features() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert (
         '_SCENELIGHT_SHADER_AVAILABLE = callable(getattr(renpy, "register_shader", None))'
@@ -174,8 +191,12 @@ def test_native_renpy_6_skips_unavailable_shader_features() -> None:
 
 
 def test_runtime_routes_expression_sprites_at_scene_boundary() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert "def _scenelight_install_scene_router():" in runtime
     assert 'for module_name in ("scenelists", "core")' in runtime
@@ -192,8 +213,12 @@ def test_runtime_routes_expression_sprites_at_scene_boundary() -> None:
 
 
 def test_runtime_wrapper_preserves_renpy_transform_lifecycle() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     sprite_start = runtime.index("    class SceneLightSprite")
     sprite_end = runtime.index("\n    class SceneLightImageLike", sprite_start)
@@ -209,8 +234,12 @@ def test_runtime_wrapper_preserves_renpy_transform_lifecycle() -> None:
 
 
 def test_runtime_does_not_double_wrap_registered_character_images() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     route_start = runtime.index("    def _scenelight_route_scene_add")
     route_end = runtime.index("\n    def _scenelight_install_scene_router", route_start)
@@ -229,8 +258,12 @@ def test_runtime_scene_router_survives_a_full_restart() -> None:
     implementation has to be resolved at call time and re-bound every init.
     """
 
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     router_start = runtime.index("    def _scenelight_mutation_router(original):")
     router_end = runtime.index("\n    def _scenelight_install_scene_router", router_start)
@@ -252,8 +285,12 @@ def test_runtime_scene_router_survives_a_full_restart() -> None:
 
 
 def test_runtime_retains_stable_scene_during_character_show_hide_mutations() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     lookup_start = runtime.index("    def _scenelight_live_scene_entry")
     lookup_end = runtime.index("\n    def _scenelight_live_scene", lookup_start + 10)
@@ -266,16 +303,24 @@ def test_runtime_retains_stable_scene_during_character_show_hide_mutations() -> 
 
 
 def test_runtime_has_renpy_7_texture_compatibility_fallback() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert 'getattr(renpy.display.im, "unoptimized_texture", None)' in runtime
     assert 'getattr(renpy.display.im, "render_for_texture", None)' in runtime
 
 
 def test_runtime_has_early_renpy_asset_loader_and_fragment_function_fallbacks() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert 'getattr(renpy, "open_file", None)' in runtime
     assert "opener = renpy.loader.load" in runtime
@@ -301,8 +346,12 @@ def test_runtime_has_early_renpy_asset_loader_and_fragment_function_fallbacks() 
 
 
 def test_hybrid_runtime_resolves_image_like_definitions_before_wrapping() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert "class SceneLightImageLike(object):" in runtime
     assert "child = self.original._duplicate(args)" in runtime
@@ -340,8 +389,12 @@ def test_runtime_image_discovery_supports_legacy_renpy_699() -> None:
     helper = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_capture.rpy").read_text(
         encoding="utf-8"
     )
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
 
     for source in (helper, runtime):
@@ -364,8 +417,12 @@ def test_capture_progress_checkpoint_retries_transient_windows_reader_handles() 
 
 
 def test_production_runtime_contains_the_full_hybrid_transport_pipeline() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     # Four lights occupy transport planes 3..14; eight probes occupy 15..25.
     assert "transport_light3_position = scenelight_transport_at(12.0" in runtime
@@ -380,8 +437,12 @@ def test_production_runtime_contains_the_full_hybrid_transport_pipeline() -> Non
 
 
 def test_optional_effects_are_modular_post_relight_gpu_branches() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     shoulder = runtime.index("float peak_excess = max(peak - peak_start")
     optional = runtime.index("if (u_sc_rain_data.x > 0.0001")
@@ -396,8 +457,12 @@ def test_optional_effects_are_modular_post_relight_gpu_branches() -> None:
 
 
 def test_disabled_effect_defaults_are_exact_shader_identities() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert runtime.count('"intensity": 0.0') >= 2
     assert "if (u_sc_rain_data.x > 0.0001" in runtime
@@ -406,8 +471,12 @@ def test_disabled_effect_defaults_are_exact_shader_identities() -> None:
 
 
 def test_individual_light_color_mode_is_default_off_and_uses_all_sources() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert '"individual_light_colors": 0.0' in runtime
     assert '"adaptive_light_colors": 1.0' in runtime
@@ -422,8 +491,12 @@ def test_individual_light_color_mode_is_default_off_and_uses_all_sources() -> No
 
 
 def test_failed_eye_glow_experiment_is_absent_from_the_public_runtime() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     for token in (
         "eye_glow",
@@ -443,8 +516,12 @@ def test_failed_eye_glow_experiment_is_absent_from_the_public_runtime() -> None:
 
 
 def test_player_effect_panel_is_dormant_in_the_1_0_release() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert "screen scenelight_effect_controls():\n    modal True" in runtime
     assert "use scenelight_effect_controls_panel" in runtime
@@ -457,8 +534,12 @@ def test_player_effect_panel_is_dormant_in_the_1_0_release() -> None:
 
 
 def test_production_runtime_uses_final_transform_for_live_spatial_updates() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert "uniform mat4 u_transform;" in runtime
     assert "vec2 sc_live_center = vec2(" in runtime
@@ -468,8 +549,12 @@ def test_production_runtime_uses_final_transform_for_live_spatial_updates() -> N
 
 
 def test_runtime_resolves_hide_snapshot_before_a_new_sprite_has_rendered() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     sprite_start = runtime.index("    class SceneLightSprite")
     sprite_end = runtime.index("\n    class SceneLightImageLike", sprite_start)
@@ -486,8 +571,12 @@ def test_runtime_resolves_hide_snapshot_before_a_new_sprite_has_rendered() -> No
 
 
 def test_production_runtime_stabilizes_background_and_character_transitions() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert "_scenelight_existing_with_callback = config.with_callback" in runtime
     assert "def _scenelight_contains_lit_sprite(displayable):" in runtime
@@ -515,8 +604,12 @@ def test_production_runtime_stabilizes_background_and_character_transitions() ->
 
 
 def test_transition_callback_does_not_chain_to_itself_after_reload() -> None:
-    runtime = (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
-        encoding="utf-8"
+    runtime = (
+        (ROOT / "src" / "scenelight" / "runtime" / "scenelight_runtime.rpy").read_text(
+            encoding="utf-8"
+        )
+        + "\n"
+        + "\n".join(SHADERS.values())
     )
     assert 'getattr(_scenelight_existing_with_callback, "_scenelight_callback", False)' in runtime
     assert 'getattr(_scenelight_existing_with_callback, "__name__", "")' in runtime

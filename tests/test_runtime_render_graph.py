@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from scenelight.runtime.shader_data import SHADERS
+
 
 def test_incoming_transition_is_live_in_transition_coordinates_and_forwards_events():
     class Displayable:
@@ -161,6 +163,7 @@ def test_sprite_space_ramps_have_no_hard_saturation_edges():
 
     path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
     source = path.read_text()
+    source += "\n" + "\n".join(SHADERS.values())
     assert "directional_ramp / sqrt(1.0 + directional_ramp * directional_ramp)" in source
     assert "/ sqrt(dot(relative_form_position, relative_form_position) + 0.0064)" in source
     assert "float lower_body_ramp = clamp(" in source
@@ -181,6 +184,7 @@ def test_ray_occlusion_requires_height_map_without_flattening_fallback_lighting(
     matched engine captures cover that, and render tests cover enabled lighting.
     """
     source = _runtime_source()
+    source += "\n" + "\n".join(SHADERS.values())
     ray = source.split("float scenelight_ray_shadow(", 1)[1].split(
         "void scenelight_accumulate_probe(", 1
     )[0]
@@ -326,10 +330,9 @@ def test_sprite_lighting_uses_child_dimensions_with_or_without_form_map(has_form
 
 def test_sprite_shader_does_not_depend_on_sampler_allocation_resolution():
     """Ren'Py's res0 can describe a light-field sampler rather than tex0."""
-    source = _runtime_source()
-    start = source.index('    _scenelight_shader_variables = """')
-    end = source.index("    class SceneLightSprite(", start)
-    shader = source[start:end]
+    from scenelight.runtime.shader_data import SHADERS
+
+    shader = "\n".join(SHADERS.values())
     assert not re.search(r"\bres0\b", shader)
     assert "uniform vec2 u_sc_sprite_size;" in shader
     assert "vec2 sprite_texel = 1.0 / max(u_sc_sprite_size, vec2(1.0));" in shader
@@ -881,6 +884,7 @@ def test_frozen_transition_keeps_exposure_ownership_when_live_child_changes():
 
 def test_exposure_ownership_uniforms_gate_only_exposure_terms():
     source = _runtime_source()
+    source += "\n" + "\n".join(SHADERS.values())
     assert "uniform float u_sc_exposure_owner;" in source
     assert "uniform float u_sc_exposure_bias_owner;" in source
     assert "uniform float u_sc_exposure_auto;" in source
@@ -957,6 +961,7 @@ def test_absolute_exposure_survives_mixed_authored_grade_chains(grades, expected
 
 def test_incoming_paint_and_new_additive_light_use_separate_exposure():
     source = _runtime_source()
+    source += "\n" + "\n".join(SHADERS.values())
     assert (
         "vec3 lit = base * input_exposure * mix(1.0, u_sc_calibration0.z, sc_adjustment_strength)"
         in source

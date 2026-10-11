@@ -4,30 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import re
-from pathlib import Path
 
-from ..runtime import shader_stages
+from ..runtime.shader_data import SHADERS
 from ..runtime.shader_stages import build, vertex_preamble
-from .core import runtime_source_path
+from .core import runtime_source_path as runtime_source_path
 
 
 def _extract(name: str) -> str:
-    text = runtime_source_path().read_text(encoding="utf-8")
-    runtime_name = f"_scenelight_shader_{name}"
-    match = re.search(
-        rf"\b{runtime_name}\s*=\s*(?:_scenelight_fragment_source\s*\(\s*)?\"\"\"(.*?)\"\"\"",
-        text,
-        flags=re.DOTALL,
-    )
-    if match is None:
-        raise RuntimeError(f"Could not extract {name} from the production shader")
-    return match.group(1)
+    return SHADERS[name]
 
 
 def production_shader_sha256() -> str:
-    digest = hashlib.sha256(runtime_source_path().read_bytes())
-    digest.update(Path(shader_stages.__file__).read_bytes())
-    return digest.hexdigest()
+    # Hash compiled inputs, so rule/docs changes do not invalidate shader identity.
+    sources = [vertex_source(center_samples=value) for value in (False, True)]
+    sources += [fragment_source(center_samples=value) for value in (False, True)]
+    sources += [transport_blend_fragment_source(), live_probe_fragment_source()]
+    sources += [color_glow_fragment_source(stage) for stage in ("composite", "mask", "blur")]
+    sources += [name + "\0" + SHADERS[name] for name in sorted(SHADERS)]
+    return hashlib.sha256("\0".join(sources).encode("utf-8")).hexdigest()
 
 
 def vertex_source(*, center_samples: bool = False) -> str:

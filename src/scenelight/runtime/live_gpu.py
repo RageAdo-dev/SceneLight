@@ -2788,7 +2788,7 @@ class Analysis(object):
             uniform sampler2D source;
             uniform int axis;
             layout(sl_binding_zero rgba32f) writeonly uniform image2D destination;
-            shared KIND data[N];
+            shared KIND data[__FFT_SIZE__];
             int reversed(int index){int result=0;
                 for(int bit=0;bit<BITS;bit++){result=(result<<1)|(index&1);index>>=1;}
                 return result;}
@@ -2796,9 +2796,9 @@ class Analysis(object):
             ivec2 coordinate(int index){int row=int(gl_WorkGroupID.x);
                 return axis==0 ? ivec2(index,row) : ivec2(row,index);}
             void fft(float sign){
-                for(int stage=2;stage<=N;stage*=2){
+                for(int stage=2;stage<=__FFT_SIZE__;stage*=2){
                     int h=stage/2;
-                    for(int pair=int(gl_LocalInvocationID.x);pair<N/2;pair+=128){
+                    for(int pair=int(gl_LocalInvocationID.x);pair<__FFT_SIZE__/2;pair+=128){
                         int lane=pair%h,base=pair/h*stage+lane;
                         KIND a=data[base],b=data[base+h];
                         float angle=sign*6.283185307179586*float(lane)/float(stage);
@@ -2812,7 +2812,7 @@ class Analysis(object):
         """.replace("KIND", kind)
             .replace("MULTIPLY", multiply)
             .replace("BITS", str(int(round(math.log(n, 2)))))
-            .replace("N", str(n))
+            .replace("__FFT_SIZE__", str(n))
         )
 
     def compute_gaussian_axis(self, name, texture, kernel, size, axis, n, radius):
@@ -2830,7 +2830,7 @@ class Analysis(object):
             void main(){
                 ivec2 size=textureSize(source,0);int length=axis==0 ? size.x : size.y;
                 int thread=int(gl_LocalInvocationID.x);
-                for(int index=thread;index<N;index+=128){
+                for(int index=thread;index<__FFT_SIZE__;index+=128){
                     int r=reversed(index);
                     if(r>=length+2*radius)data[index]=vec2(0.0);
                     else {
@@ -2839,15 +2839,15 @@ class Analysis(object):
                     }
                 }
                 barrier();fft(-1.0);
-                for(int index=thread;index<N;index+=128)data[index]*=texelFetch(kernel,ivec2(index,0),0).r;
+                for(int index=thread;index<__FFT_SIZE__;index+=128)data[index]*=texelFetch(kernel,ivec2(index,0),0).r;
                 barrier();
-                for(int index=thread;index<N;index+=128){int r=reversed(index);
+                for(int index=thread;index<__FFT_SIZE__;index+=128){int r=reversed(index);
                     if(r>index){vec2 temporary=data[index];data[index]=data[r];data[r]=temporary;}}
                 barrier();fft(1.0);
                 for(int index=thread;index<length;index+=128)
-                    imageStore(destination,coordinate(index),vec4(data[index+radius].r/float(N)));
+                    imageStore(destination,coordinate(index),vec4(data[index+radius].r/float(__FFT_SIZE__)));
             }
-            """.replace("N", str(n)),
+            """.replace("__FFT_SIZE__", str(n)),
         )
         gl.UseProgram(program)
         for unit, (uniform, value) in enumerate((("source", texture), ("kernel", kernel))):
@@ -3563,13 +3563,13 @@ class Analysis(object):
                     + """
                     uniform float sign; uniform float normalization;
                     void main(){int thread=int(gl_LocalInvocationID.x);
-                        for(int index=thread;index<N;index+=128)
+                        for(int index=thread;index<__FFT_SIZE__;index+=128)
                             data[index]=texelFetch(source,coordinate(reversed(index)),0);
                         barrier();fft(sign);
-                        for(int index=thread;index<N;index+=128)
+                        for(int index=thread;index<__FFT_SIZE__;index+=128)
                             imageStore(destination,coordinate(index),data[index]/normalization);
                     }
-                    """.replace("N", str(n)),
+                    """.replace("__FFT_SIZE__", str(n)),
                 )
                 gl.UseProgram(program)
                 gl.ActiveTexture(TEXTURE0)
