@@ -508,7 +508,7 @@ def test_setup_offers_in_place_or_separate_copy_after_scan() -> None:
 
 
 def test_cuda_dependency_is_an_explicit_release_requirement() -> None:
-    assert CUDA_REQUIREMENT == "cupy-cuda12x==13.4.1"
+    assert CUDA_REQUIREMENT == "cupy-cuda12x==14.2.0"
 
 
 def test_private_environment_bootstrap_tools_are_security_pinned() -> None:
@@ -520,10 +520,10 @@ def test_private_environment_bootstrap_tools_are_security_pinned() -> None:
 
 
 def test_preview_dependency_action_includes_base_analysis_components() -> None:
-    assert PREVIEW_DEPENDENCIES["numpy"] == "numpy==2.1.3"
-    assert PREVIEW_DEPENDENCIES["cv2"] == "opencv-python-headless==4.10.0.84"
+    assert PREVIEW_DEPENDENCIES["numpy"] == "numpy==2.2.6"
+    assert PREVIEW_DEPENDENCIES["cv2"] == "opencv-python-headless==5.0.0.93"
     assert PREVIEW_DEPENDENCIES["PIL"] == "Pillow==12.3.0"
-    assert PREVIEW_DEPENDENCIES["psutil"] == "psutil==6.1.1"
+    assert PREVIEW_DEPENDENCIES["psutil"] == "psutil==7.2.2"
     assert set(BASE_REQUIREMENTS) <= set(PREVIEW_DEPENDENCIES.values())
 
 
@@ -615,8 +615,8 @@ def test_standalone_preview_can_install_missing_optional_components(monkeypatch)
 
 
 def test_core_install_does_not_download_optional_preview_stack() -> None:
-    assert "psutil==6.1.1" in BASE_REQUIREMENTS
-    assert "PySide6-Essentials==6.9.2" in BASE_REQUIREMENTS
+    assert "psutil==7.2.2" in BASE_REQUIREMENTS
+    assert "PySide6-Essentials==6.11.2" in BASE_REQUIREMENTS
     assert "imageio-ffmpeg==0.6.0" in BASE_REQUIREMENTS
     assert all(not requirement.startswith("PySide6==") for requirement in BASE_REQUIREMENTS)
     assert all(not requirement.startswith("PyOpenGL==") for requirement in BASE_REQUIREMENTS)
@@ -641,8 +641,8 @@ def test_player_components_do_not_make_the_optional_preview_appear_installed(mon
     )
     assert setup_gui.missing_dependencies() == []
     assert setup_gui.missing_preview_dependencies() == [
-        "PySide6-Essentials==6.9.2",
-        "PyOpenGL==3.1.9",
+        "PySide6-Essentials==6.11.2",
+        "PyOpenGL==3.1.10",
     ]
 
 
@@ -735,10 +735,10 @@ def test_dependency_state_reports_every_exact_missing_version_for_new_environmen
     assert not state.runtime_ready
     assert state.missing == state.required
     assert len(state.required) == len(set(PREVIEW_DEPENDENCIES.values()))
-    assert "NumPy 2.1.3" in describe_dependency_plan(state)
+    assert "NumPy 2.2.6" in describe_dependency_plan(state)
     assert format_requirement("opencv-python-headless==4.10.0.84") == "OpenCV 4.10.0.84"
     statuses = requirement_statuses(state)
-    assert statuses[0] == ("NumPy 2.1.3", False)
+    assert statuses[0] == ("NumPy 2.2.6", False)
     assert len(statuses) == len(set(PREVIEW_DEPENDENCIES.values()))
     assert state.verified_count == 0
     assert state.verification_summary == "0 of 8 components verified"
@@ -765,14 +765,14 @@ def test_missing_preview_binding_marks_shared_package_once(tmp_path, monkeypatch
 
     python = tmp_path / "python.exe"
     python.touch()
-    qt = "PySide6-Essentials==6.9.2"
+    qt = "PySide6-Essentials==6.11.2"
     monkeypatch.setattr(setup_gui, "_missing_modules", lambda *args: [qt, qt])
     state = dependency_state(include_preview=True, python_executable=python)
     assert state.required.count(qt) == 1
     assert state.missing == (qt,)
     assert state.verified_count == 7
     assert state.verification_summary == "7 of 8 components verified"
-    assert dict(state.component_statuses)["PySide6-Essentials 6.9.2"] is False
+    assert dict(state.component_statuses)["PySide6-Essentials 6.11.2"] is False
 
 
 def test_vm_renderer_failure_is_not_mislabeled_as_a_dependency_failure() -> None:

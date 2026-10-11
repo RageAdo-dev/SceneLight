@@ -35,7 +35,8 @@ jobs:
       - name: Verify a plain install provides preparation and the Preview stack
         run: >-
           python -c "from scenelight.setup_gui import missing_dependencies, missing_preview_dependencies;
-          assert not missing_dependencies(); assert not missing_preview_dependencies();
+          assert not missing_dependencies(), missing_dependencies();
+          assert not missing_preview_dependencies(), missing_preview_dependencies();
           from PySide6.QtGui import QOpenGLContext, QOffscreenSurface;
           from scenelight.prepared import FramePreparer;
           from scenelight.preview.media import MediaClip;
