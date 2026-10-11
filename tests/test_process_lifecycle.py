@@ -9,6 +9,105 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize("cancel_second", [False, True])
+def test_close_stops_new_operation_while_previous_cleanup_finishes(
+    tmp_path: Path, monkeypatch, cancel_second: bool
+) -> None:
+    import queue
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scenelight import setup_gui
+
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "managed"))
+
+    def noop(*args, **kwargs):
+        pass
+
+    widget = SimpleNamespace(set=noop, configure=noop, grid=noop, start=noop, stop=noop)
+    app = SimpleNamespace(
+        _running=False,
+        _process=None,
+        _cancel_requested=threading.Event(),
+        _refresh_project_state=noop,
+        operation_var=widget,
+        progress_frame=widget,
+        progress=widget,
+        cancel_operation_button=widget,
+        _append_log=noop,
+        _events=queue.Queue(),
+        project_var=SimpleNamespace(get=lambda: str(tmp_path)),
+        _close_character_review_window=noop,
+        destroy=noop,
+    )
+    release_cleanup = threading.Event()
+    first_stopped = threading.Event()
+    terminate = setup_gui.terminate_process_tree
+    stopped = []
+    processes = []
+    threads = []
+
+    def delayed_cleanup(process):
+        terminate(process)
+        process.wait(timeout=5)
+        stopped.append(process)
+        if process is processes[0]:
+            first_stopped.set()
+            assert release_cleanup.wait(15)
+
+    def start_ready_child():
+        setup_gui.SceneLightSetup._start_operation(
+            app,
+            "scan",
+            [sys.executable, "-u", "-c", "import time; print('READY'); time.sleep(30)"],
+        )
+        threads.append(app._operation_thread)
+        deadline = time.monotonic() + 5
+        while True:
+            event = app._events.get(timeout=max(0.01, deadline - time.monotonic()))
+            if event[0] == "log" and event[1].strip() == "READY":
+                processes.append(app._process)
+                return app._process
+            assert time.monotonic() < deadline
+
+    monkeypatch.setattr(setup_gui, "terminate_process_tree", delayed_cleanup)
+    monkeypatch.setattr(setup_gui.messagebox, "askyesno", lambda *a, **kw: True)
+    try:
+        first = start_ready_child()
+        setup_gui.SceneLightSetup._cancel_operation(app)
+        threads.append(app._termination_thread)
+        assert first_stopped.wait(5)
+        app._operation_thread.join(timeout=5)
+        assert not app._operation_thread.is_alive()
+        assert first.poll() is not None
+        assert app._termination_thread.is_alive()
+        assert any(event[0] == "done" for event in list(app._events.queue))
+        # Processing the first operation's done event enables another operation.
+        app._running = False
+        second = start_ready_child()
+        if cancel_second:
+            setup_gui.SceneLightSetup._cancel_operation(app)
+            threads.append(app._termination_thread)
+        setup_gui.SceneLightSetup._close(app)
+        threads.append(app._termination_thread)
+        app._operation_thread.join(timeout=5)
+        assert second.poll() is not None, "Close left the new operation running"
+        assert not app._operation_thread.is_alive()
+        app._termination_thread.join(timeout=5)
+        assert stopped.count(second) == 1
+    finally:
+        app._cancel_requested.set()
+        release_cleanup.set()
+        for process in processes:
+            terminate(process)
+            process.wait(timeout=5)
+        for thread in set(threads):
+            thread.join(timeout=5)
+        for process in processes:
+            process.stdout.close()
+
+
 @pytest.mark.parametrize("phase", ["starting", "running", "cancelled"])
 def test_setup_exit_finishes_child_cleanup(tmp_path: Path, phase: str) -> None:
     script = tmp_path / "close_setup.py"

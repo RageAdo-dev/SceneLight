@@ -920,6 +920,7 @@ class SceneLightSetup(tk.Tk):
         self._process: subprocess.Popen[str] | None = None
         self._operation_thread: threading.Thread | None = None
         self._termination_thread: threading.Thread | None = None
+        self._termination_process: subprocess.Popen[str] | None = None
         self._closing = False
         self._cancel_requested = threading.Event()
         self._running = False
@@ -3334,6 +3335,7 @@ class SceneLightSetup(tk.Tk):
             self.cancel_operation_button.configure(state="disabled", text="Cancelling…")
         process = self._process
         if process is not None:
+            self._termination_process = process
             self._termination_thread = threading.Thread(
                 target=terminate_process_tree,
                 args=(process,),
@@ -3895,7 +3897,12 @@ class SceneLightSetup(tk.Tk):
         self._cancel_requested.set()
         process = self._process
         termination = getattr(self, "_termination_thread", None)
-        if process is not None and (termination is None or not termination.is_alive()):
+        if process is not None and (
+            termination is None
+            or not termination.is_alive()
+            or getattr(self, "_termination_process", None) is not process
+        ):
+            self._termination_process = process
             self._termination_thread = threading.Thread(
                 target=terminate_process_tree,
                 args=(process,),

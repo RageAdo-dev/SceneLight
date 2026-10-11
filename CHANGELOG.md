@@ -5,6 +5,7 @@
 ### Fixes
 
 - Finish stopping background operations when Setup closes.
+- Stop the active operation on close even when an earlier cancellation is still finishing.
 - Prevent simultaneous projects from interrupting a shared compatibility-runtime download.
 - Keep shared analysis memory tracked until its owner finishes, including interrupted Linux workers.
 
