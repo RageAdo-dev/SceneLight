@@ -35,6 +35,12 @@ OFFLINE_DIAGRAMS = {
     "media/preview-export.png",
     "media/ingame-inspector.png",
 }
+CONTRIBUTOR_DOCS = {
+    "architecture.md",
+    "fresh_machine_validation.md",
+    "releasing.md",
+    "testing.md",
+}
 ONLINE_FILES = "https://github.com/RageAdo-dev/SceneLight/blob/main/"
 
 
@@ -74,9 +80,9 @@ def keep(relative: Path, profile: str) -> bool:
             "module",
         }
     if profile == "examples":
-        return parts[0] != "effect-packs"
+        return parts[0] not in {"effect-packs", "synthetic"}
     if profile == "docs":
-        if parts[0] == "effect_packs.md":
+        if parts[0] == "effect_packs.md" or parts[0] in CONTRIBUTOR_DOCS:
             return False
         if parts[0] != "media" or len(parts) == 1:
             return True
@@ -145,37 +151,30 @@ def package_docs(repository: Path, package: Path) -> None:
     if repository == package or package in repository.parents or repository in package.parents:
         raise ValueError("Package documentation must be staged outside the source tree")
     copy_payload(repository / "docs", package / "docs", "docs")
-    # Keep repository documentation intact. Only the staged Windows copy links
-    # excluded demo media online, rather than shipping broken local references.
+    # Link omitted contributor files and large media to the source repository.
     pattern = re.compile(r"(!?)\[([^\]]*)\]\(([^)\s]+)\)")
-    for output in [package / "README.md", *sorted((package / "docs").rglob("*.md"))]:
-        if not output.exists():
-            continue
+    for output in [*sorted(package.glob("*.md")), *sorted((package / "docs").rglob("*.md"))]:
         original = repository / output.relative_to(package)
 
         def replace_link(match: re.Match[str]) -> str:
             image, label, url = match.groups()
             parsed = urlsplit(url)
-            if parsed.scheme or parsed.netloc:
+            if parsed.scheme or parsed.netloc or not parsed.path:
                 return match.group(0)
             target = (original.parent / unquote(parsed.path)).resolve()
-            media = repository / "docs/media"
-            if media not in target.parents or not target.is_file():
+            if repository not in target.parents or not target.is_file():
                 return match.group(0)
-            relative = target.relative_to(repository / "docs")
-            if keep(relative, "docs"):
+            relative = target.relative_to(repository)
+            if (package / relative).is_file():
                 return match.group(0)
-            online = ONLINE_FILES + quote(target.relative_to(repository).as_posix())
+            online = ONLINE_FILES + quote(relative.as_posix())
+            if parsed.query:
+                online += "?" + parsed.query
+            if parsed.fragment:
+                online += "#" + parsed.fragment
             return f"[{label}{' (online example)' if image else ''}]({online})"
 
         text = pattern.sub(replace_link, original.read_text(encoding="utf-8"))
-        if output == package / "README.md":
-            text = text.replace(
-                "# SceneLight for Ren’Py\n",
-                "# SceneLight for Ren’Py\n\nThis Windows package includes the app, required runtimes, "
-                "written guides and small diagrams. Large example images and animations are linked online.\n",
-                1,
-            )
         output.write_text(text, encoding="utf-8")
 
 

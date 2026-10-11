@@ -30,7 +30,7 @@ def test_release_uses_one_launcher_for_players_and_mod_authors() -> None:
     assert "Embed in development copy" not in setup
     assert "Remove embedded files" not in setup
     assert "_toggle_developer_mode" in setup
-    assert '"SceneLight.bat", "scenelight.sh", "README.md", "LICENSE"' in build_script
+    assert '"SceneLight.bat", "README.md", "LICENSE"' in build_script
     assert '$payloadRoot = Join-Path $packageRoot "_scenelight"' in build_script
     assert 'Join-Path $payloadRoot "effect-packs"' not in build_script
     assert '"CONTRIBUTING.md"' in build_script

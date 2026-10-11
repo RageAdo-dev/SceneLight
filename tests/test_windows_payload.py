@@ -81,6 +81,10 @@ def _policy():
             "docs",
             [
                 "INSTALL.md",
+                "MOD_AUTHOR_API.md",
+                "licenses/LGPL-3.0-only.txt",
+                "licenses/GPL-3.0-only.txt",
+                "licenses/FFMPEG-GPL-3.0.txt",
                 "media/CREDITS.md",
                 "media/RENPY_ART_LICENSE.txt",
                 "media/lighting-comparison.png",
@@ -93,6 +97,10 @@ def _policy():
             ],
             [
                 "EFFECT_PACKS.md",
+                "ARCHITECTURE.md",
+                "FRESH_MACHINE_VALIDATION.md",
+                "RELEASING.md",
+                "TESTING.md",
                 "media/moving-light.gif",
                 "media/waterfall-example.mp4",
                 "media/waterfall-example.webp",
@@ -101,8 +109,13 @@ def _policy():
         ),
         (
             "examples",
-            ["renpy/scenelight_author_example.rpy", "synthetic/make_fixture.py"],
-            ["effect-packs/environmental_atmosphere.json", "effect-packs/horror_signals.json"],
+            ["renpy/scenelight_author_example.rpy"],
+            [
+                "synthetic/make_fixture.py",
+                "synthetic/make_release_lab.py",
+                "effect-packs/environmental_atmosphere.json",
+                "effect-packs/horror_signals.json",
+            ],
         ),
     ],
 )
@@ -163,6 +176,34 @@ def test_existing_destinations_and_overlapping_trees_are_rejected(tmp_path):
     with pytest.raises(FileExistsError):
         policy.copy_payload(source, destination, "desktop")
     assert marker.read_text() == "existing"
+
+
+def test_packaged_guides_link_omitted_contributor_files_online(tmp_path):
+    source, package = tmp_path / "source", tmp_path / "package"
+    (source / "docs").mkdir(parents=True)
+    package.mkdir()
+    guide = (
+        "[Install](INSTALL.md#updates)\n"
+        "[Contribute](../CONTRIBUTING.md#setup)\n"
+        "[Checks](TESTING.md#graphics)\n"
+        "[Top](#top)\n"
+    )
+    (source / "docs/README.md").write_text(guide)
+    (source / "docs/INSTALL.md").write_text("Install guide")
+    (source / "docs/TESTING.md").write_text("Contributor checks")
+    (source / "CONTRIBUTING.md").write_text("Development setup")
+    security = "[Checks](docs/TESTING.md#security)\n"
+    (source / "SECURITY.md").write_text(security)
+    (package / "SECURITY.md").write_text(security)
+    _policy().package_docs(source, package)
+    packaged = (package / "docs/README.md").read_text()
+    assert "[Install](INSTALL.md#updates)" in packaged
+    assert "[Top](#top)" in packaged
+    assert "blob/main/CONTRIBUTING.md#setup)" in packaged
+    assert "blob/main/docs/TESTING.md#graphics)" in packaged
+    assert not (package / "docs/TESTING.md").exists()
+    assert (source / "docs/README.md").read_text() == guide
+    assert "blob/main/docs/TESTING.md#security)" in (package / "SECURITY.md").read_text()
 
 
 def test_windows_release_uses_filters_for_fresh_and_reused_runtimes():

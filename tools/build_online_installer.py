@@ -56,8 +56,22 @@ def build(offline: Path, release_tag: str, destination: Path) -> Path:
         archive.write(
             ROOT / "tools/bootstrap_release.ps1", online_root + "tools/bootstrap_release.ps1"
         )
-        for name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
-            archive.write(ROOT / name, online_root + name)
+        archive.write(ROOT / "LICENSE", online_root + "LICENSE")
+        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        # Dependencies and their license files arrive with the full app.
+        notices = re.sub(
+            r"\]\((docs/[^)]+)\)",
+            lambda match: (
+                "]("
+                + "https://github.com/RageAdo-dev/SceneLight/blob/"
+                + quote(release_tag, safe="")
+                + "/"
+                + quote(match[1], safe="/")
+                + ")"
+            ),
+            notices,
+        )
+        archive.writestr(online_root + "THIRD_PARTY_NOTICES.md", notices)
         archive.writestr(
             online_root + "README.txt",
             "SceneLight online setup\n\n"

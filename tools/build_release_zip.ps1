@@ -118,15 +118,15 @@ if ($Source) {
     Copy-Item -LiteralPath (Join-Path $root "src\scenelight\assets\scenelight-desktop.exe") `
         -Destination (Join-Path $packageRoot "SceneLight.exe")
     foreach ($item in @(
-        "SceneLight.bat", "scenelight.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
-        "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md"
+        "SceneLight.bat", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
+        "SECURITY.md", "CHANGELOG.md"
     )) {
         Copy-Item -LiteralPath (Join-Path $root $item) -Destination $packageRoot -Force
     }
     # Written guides and small diagrams stay offline; large demos stay online.
     & python (Join-Path $root "tools\windows_payload.py") docs $root $packageRoot
     if ($LASTEXITCODE -ne 0) { throw "Windows documentation packaging failed." }
-    # Include launch examples; deferred effect packs stay in the source tree.
+    # Include mod examples; development fixtures stay in the source tree.
     & python (Join-Path $root "tools\windows_payload.py") examples `
         (Join-Path $root "examples") (Join-Path $packageRoot "examples")
     if ($LASTEXITCODE -ne 0) { throw "Example packaging failed" }

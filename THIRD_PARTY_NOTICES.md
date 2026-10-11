@@ -12,13 +12,19 @@ directories under `_scenelight/python/Lib/site-packages`.
 
 ## Qt and PySide6
 
-The Preview interface links against **PySide6-Essentials 6.9.2** and the Qt 6
-libraries it ships, which are offered under the **LGPL v3**. They are included
-unmodified as separate dynamic libraries, so a recipient can replace them with
-their own build. The full licence text travels with the package under
-`_scenelight/python/Lib/site-packages/pyside6_essentials-6.9.2.dist-info/licenses/`
-and `shiboken6-6.9.2.dist-info/licenses/`. SceneLight does not modify PySide6 or
-Qt, and its own source stays under the MIT licence.
+Preview uses **PySide6-Essentials 6.11.2**, **Shiboken6 6.11.2** and their bundled
+Qt libraries. These are included unmodified as separate dynamic libraries.
+The open-source license options and component notices are documented in
+[Qt for Python's licenses](https://doc.qt.io/qtforpython-6.11/licenses.html).
+License texts: [LGPL v3](docs/licenses/LGPL-3.0-only.txt) and
+[GPL v3](docs/licenses/GPL-3.0-only.txt).
+
+Upstream package notices remain in the `pyside6_essentials-6.11.2.dist-info`
+and `shiboken6-6.11.2.dist-info` directories under
+`_scenelight/python/Lib/site-packages`. Source code is available from
+[Qt for Python](https://code.qt.io/cgit/pyside/pyside-setup.git/tree/?h=v6.11.2)
+and the [Qt 6.11.2 source archive](https://download.qt.io/archive/qt/6.11/6.11.2/single/).
+The license texts above are retained from Qt for Python's `v6.11.2` source.
 
 ## FFmpeg
 
@@ -34,8 +40,7 @@ against it, SceneLight itself remains MIT licensed.
 
 Windows packages include the official **Ren'Py 7.7.1** compatibility runtime for
 legacy games. Its MIT license and other dependency notices remain in
-`compatibility-runtime/LICENSE.txt`. The SDK may include Ren'Py's own launcher
-and samples; no user game or mod content is bundled.
+`_scenelight/compatibility-runtime/LICENSE.txt`. No user game or mod content is bundled.
 
 ## Documentation artwork
 

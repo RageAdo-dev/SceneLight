@@ -136,6 +136,9 @@ def test_builder_pins_exact_payload_and_preserves_signed_launcher(tmp_path):
         assert "/v1.0.0-beta.2/" in manifest["url"]
         assert zip.read(root + "SceneLight.exe") == b"test payload"
         assert not any("pythonw.exe" in name for name in zip.namelist())
+        notices = zip.read(root + "THIRD_PARTY_NOTICES.md").decode("utf-8")
+        assert "](docs/" not in notices
+        assert "/blob/v1.0.0-beta.2/docs/licenses/LGPL-3.0-only.txt" in notices
     assert (
         online.with_suffix(".zip.sha256")
         .read_text()

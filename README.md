@@ -17,7 +17,7 @@ colors and light sources as they move, with controls for shadows, highlights and
 
 | Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows-online.zip) | 56 KB. Downloads the app on first launch (230 MB). |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows-online.zip) | Downloads the app on first launch (230 MB). |
 | [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.0.0/SceneLight-v1.0.0-Windows.zip) | 230 MB. App and required components included. |
 
 1. Download either ZIP, extract it, and open **SceneLight.exe**.
