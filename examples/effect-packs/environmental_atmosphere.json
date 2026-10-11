@@ -1,0 +1,47 @@
+{
+  "format": "scenelight-effect-pack",
+  "version": 1,
+  "id": "environmental_atmosphere",
+  "name": "Environmental Atmosphere",
+  "author": "SceneLight",
+  "license": "MIT",
+  "effects": [
+    {
+      "id": "underwater_caustics",
+      "name": "Underwater Caustics",
+      "description": "Cool tint with moving bands of light.",
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "speed": { "type": "float", "default": 0.75, "min": 0.05, "max": 4.0 },
+        "depth": { "type": "float", "default": 0.62, "min": 0.0, "max": 1.0 },
+        "water_color": { "type": "vec3", "default": [0.24, 0.68, 0.82], "min": 0.0, "max": 1.5 },
+        "caustics": { "type": "float", "default": 0.18, "min": 0.0, "max": 0.6 }
+      },
+      "fragment": "float l__wave_a = sin(v_tex_coord.y * 42.0 + u_time * u__speed * 3.1);\nfloat l__wave_b = sin((v_tex_coord.x + v_tex_coord.y) * 57.0 - u_time * u__speed * 2.3);\nfloat l__caustic = pow(clamp(0.5 + 0.25 * l__wave_a + 0.25 * l__wave_b, 0.0, 1.0), 3.0);\nvec3 l__submerged = mix(gl_FragColor.rgb, gl_FragColor.rgb * u__water_color, u__depth);\nl__submerged += u__water_color * l__caustic * u__caustics;\ngl_FragColor.rgb = mix(gl_FragColor.rgb, l__submerged, u__intensity);"
+    },
+    {
+      "id": "sunset_air",
+      "name": "Sunset Air",
+      "description": "Warm haze over the lit sprite.",
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "warmth": { "type": "vec3", "default": [1.18, 0.78, 0.52], "min": 0.0, "max": 1.5 },
+        "haze": { "type": "float", "default": 0.16, "min": 0.0, "max": 0.6 },
+        "falloff": { "type": "float", "default": 0.55, "min": 0.0, "max": 2.0 }
+      },
+      "fragment": "float l__height = clamp(1.0 - v_tex_coord.y, 0.0, 1.0);\nfloat l__air = mix(1.0, pow(l__height, 1.0 + u__falloff), u__falloff * 0.5);\nvec3 l__warm = gl_FragColor.rgb * u__warmth + u__warmth * u__haze * l__air;\ngl_FragColor.rgb = mix(gl_FragColor.rgb, l__warm, u__intensity);"
+    },
+    {
+      "id": "dream_phase",
+      "name": "Dream Phase",
+      "description": "Slow pulsing glow with brighter pastel shadows.",
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "speed": { "type": "float", "default": 0.45, "min": 0.05, "max": 3.0 },
+        "pastel": { "type": "vec3", "default": [0.92, 0.74, 1.08], "min": 0.0, "max": 1.5 },
+        "lift": { "type": "float", "default": 0.12, "min": 0.0, "max": 0.5 }
+      },
+      "fragment": "float l__pulse = 0.5 + 0.5 * sin(u_time * u__speed + v_tex_coord.x * 2.4);\nfloat l__luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));\nvec3 l__dream = mix(vec3(l__luma), gl_FragColor.rgb * u__pastel, 0.68);\nl__dream += u__pastel * u__lift * (0.65 + 0.35 * l__pulse) * (1.0 - l__luma);\ngl_FragColor.rgb = mix(gl_FragColor.rgb, l__dream, u__intensity);"
+    }
+  ]
+}

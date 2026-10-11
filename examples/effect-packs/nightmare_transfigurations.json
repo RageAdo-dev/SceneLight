@@ -1,0 +1,16 @@
+{
+  "format": "scenelight-effect-pack",
+  "version": 1,
+  "id": "nightmare_transfigurations",
+  "name": "Nightmare Transfigurations",
+  "author": "SceneLight",
+  "license": "MIT",
+  "effects": [
+    {
+      "id": "eyes_everywhere",
+      "name": "Eyes Everywhere",
+      "description": "Adds irregular eyes that move independently across the sprite.",
+      "preset": "eyes_everywhere"
+    }
+  ]
+}

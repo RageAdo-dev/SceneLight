@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a lighting, installation or performance problem.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Attach a report from Settings → Activity or the in-game inspector (Shift+F9 → Export report). Check attachments for private information before sharing.
+  - type: input
+    id: build
+    attributes:
+      label: SceneLight version
+      description: Include whether you updated the game and restarted it.
+      placeholder: "1.0.0, game updated and restarted"
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - Preview & Calibrator
+        - A game after SceneLight was installed
+        - Setup or installation
+        - Export
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game and engine version
+      description: For example, "DDLC mod, Ren'Py 7.7.1" or "original game, Ren'Py 8.5.3".
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Graphics hardware and driver
+      description: The GPU reported in the SceneLight window, plus the driver version if you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the game
+        2. Move the character to the left
+        3. Lighting jumps between two states
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: false
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots or recording
+      description: A short recording at the moment the problem appears helps most.
+    validations:
+      required: false
+  - type: textarea
+    id: reports
+    attributes:
+      label: Inspector or Activity report
+      description: Attach the exported ZIP here. For flicker/shimmer, capture it before restarting or reinstalling; include a short video and any shareable transforms used by the affected scene. Do not attach private artwork or saves.
+    validations:
+      required: false
+  - type: textarea
+    id: timing
+    attributes:
+      label: Timing and conditions
+      description: For shimmer, does it continue while standing still, and does turning SceneLight off stop it? For slow updates, include the stage, changed-asset count, storage type and the complete Activity export.
+    validations:
+      required: false

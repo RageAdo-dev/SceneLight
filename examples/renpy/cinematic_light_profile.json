@@ -1,0 +1,9 @@
+{
+  "calibration_version": 1,
+  "strength": 0.72,
+  "calibration": {
+    "exposure_bias": -0.22,
+    "color_adaptation": 0.92,
+    "individual_light_colors": 1.0
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "source": "Ren'Py tutorial/game/images/eileen happy.png",
+  "source_sha256": "536f034b266f735c23a6dba1267d0e5e25f1bb86f26788919b98bf55730288b1",
+  "shader_sha256": "911e40ee5f3a4f07e6e94c25cf73fd96867a04ebb088e35c90b7dc5873ee62bd",
+  "form": {
+    "version": 6,
+    "source_size": [
+      320,
+      720
+    ],
+    "map_size": [
+      320,
+      720
+    ],
+    "source_sha256": "2218c130156c30098d27792fcca21afedf05938d88a0a9bca5d2cf50c5cce8b8",
+    "center": [
+      0.49216301,
+      0.50486787
+    ],
+    "mean_form_visibility": 0.9700029,
+    "contrast_mid": 0.2286398,
+    "height_range": [
+      -0.25,
+      1.25
+    ],
+    "noise_range": 4.0,
+    "response_size": [
+      64,
+      64
+    ],
+    "surface_depth": 0.72,
+    "seed": 947
+  },
+  "comparison_changed_pixels": 146404,
+  "animation_frames": 240,
+  "animation_fps": 60,
+  "animation_duration_ms": 4000,
+  "animation_size": [
+    1920,
+    1080
+  ],
+  "encodings": {
+    "moving-light.webp": {
+      "bytes": 4952984,
+      "sha256": "ec2c322fca67f34079b8975a72b1a8d9a15307e22ea06452b37abf7000215e54",
+      "frames": 240,
+      "duration_ms": 4000,
+      "frame_durations_ms": [
+        16,
+        17
+      ]
+    },
+    "moving-light.mp4": {
+      "bytes": 876431,
+      "sha256": "585227d243c8c957b85f18e60a556c1a57e3056aba20177ff8c960dd89f382a2",
+      "frames": 240,
+      "fps": 60
+    },
+    "moving-light.gif": {
+      "bytes": 21399117,
+      "sha256": "f515ba216e6f5cdf7c231c664c5c854e594750ea3890eb7ad49670e83e563ded",
+      "frames": 120,
+      "duration_ms": 4000,
+      "frame_durations_ms": [
+        30,
+        40
+      ]
+    },
+    "moving-light-preview.webp": {
+      "bytes": 3796598,
+      "sha256": "6a90239735476b37c8e80a8da679a9b280c8980ce1f7ec7b0b7ecc39f82db8b2",
+      "frames": 240,
+      "duration_ms": 3999,
+      "frame_durations_ms": [
+        16,
+        17
+      ]
+    }
+  },
+  "normal_display": "X/Y from stored channels; Z reconstructed from unit length",
+  "height_display": "Stored height channel, without contrast stretching",
+  "occlusion_display": "Inverted stored amount: white is open, dark is occluded",
+  "animation_encoding": "Animated WebP, lossless RGB"
+}

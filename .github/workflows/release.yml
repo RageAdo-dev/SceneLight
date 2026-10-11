@@ -1,0 +1,166 @@
+name: Build release ZIP
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: "Keep a temporary ZIP download for one day (requires available Actions storage)"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      SCENELIGHT_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+      SCENELIGHT_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -e ".[dev,preview]"
+      - run: python -m pip check
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest
+      - run: bandit -r src -ll
+      - run: python -m pip_audit -r requirements-preview.txt --progress-spinner off
+      - run: python -m build
+      - name: Sign the bundled launchers
+        if: env.SCENELIGHT_CERT_PFX != ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfx = Join-Path $env:RUNNER_TEMP 'scenelight-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SCENELIGHT_CERT_PFX))
+          try {
+            $password = ConvertTo-SecureString -String $env:SCENELIGHT_CERT_PASSWORD -Force -AsPlainText
+            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            foreach ($exe in @(
+              'src\scenelight\assets\scenelight-desktop.exe',
+              'src\scenelight\assets\scenelight-launcher.exe'
+            )) {
+              $signature = Set-AuthenticodeSignature -FilePath $exe -Certificate $cert `
+                -HashAlgorithm SHA256 -TimestampServer 'http://timestamp.digicert.com'
+              if ($signature.Status -ne 'Valid') {
+                throw "Signing failed for $exe ($($signature.Status))"
+              }
+              Write-Output "Signed $exe"
+            }
+          } finally {
+            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
+          }
+      - name: Sign with Azure Artifact Signing
+        if: env.TRUSTED_SIGNING_ACCOUNT != '' && env.TRUSTED_SIGNING_CERT_PROFILE != ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter 'signtool.exe' -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe was not found; install the Windows SDK first.' }
+          $dlib = if ($env:TRUSTED_SIGNING_DLIB) { Get-Item -LiteralPath $env:TRUSTED_SIGNING_DLIB } else {
+            Get-ChildItem -Path $env:ProgramFiles -Filter 'Azure.CodeSigning.Dlib.dll' -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          }
+          if (-not $dlib) {
+            throw 'Azure.CodeSigning.Dlib.dll was not found. Install the Trusted Signing client tools or set TRUSTED_SIGNING_DLIB.'
+          }
+          $metadata = Join-Path $env:RUNNER_TEMP 'scenelight-signing.json'
+          @{
+            Endpoint = if ($env:TRUSTED_SIGNING_ENDPOINT) { $env:TRUSTED_SIGNING_ENDPOINT } else { 'https://eus.codesigning.azure.net/' }
+            CodeSigningAccountName = $env:TRUSTED_SIGNING_ACCOUNT
+            CertificateProfileName = $env:TRUSTED_SIGNING_CERT_PROFILE
+          } | ConvertTo-Json | Set-Content -LiteralPath $metadata -Encoding utf8
+          foreach ($exe in @(
+            'src\scenelight\assets\scenelight-desktop.exe',
+            'src\scenelight\assets\scenelight-launcher.exe'
+          )) {
+            & $signtool.FullName sign /v /fd SHA256 /tr 'http://timestamp.acs.microsoft.com' /td SHA256 `
+              /dlib $dlib.FullName /dmdf $metadata $exe
+            if ($LASTEXITCODE -ne 0) { throw "Artifact Signing failed for $exe" }
+            $signature = Get-AuthenticodeSignature -FilePath $exe
+            if ($signature.Status -ne 'Valid') { throw "Invalid signature on $exe ($($signature.Status))" }
+            Write-Output "Signed $exe"
+          }
+      - name: Build the tested ZIP variants with the verified compatibility runtime
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SCENELIGHT_COMPATIBILITY_ROOT = Join-Path $env:RUNNER_TEMP 'scenelight-renpy'
+          python -m scenelight.compatibility
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility runtime verification failed.' }
+          .\tools\build_release_zip.ps1 -CompatibilityRuntime $env:SCENELIGHT_COMPATIBILITY_ROOT
+          $version = python -c "import scenelight; print(scenelight.__version__)"
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "v$version" }
+          python tools/build_online_installer.py "dist/SceneLight-v$version-Windows.zip" --release-tag $tag
+          if ($LASTEXITCODE -ne 0) { throw 'Online installer build failed.' }
+          .\tools\build_release_zip.ps1 -Source
+      - name: Record package checksums
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          "## Built packages" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "| File | Bytes | SHA-256 |" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "| --- | ---: | --- |" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          Get-ChildItem -LiteralPath 'dist' -File | Sort-Object Name | ForEach-Object {
+            $digest = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "| $($_.Name) | $($_.Length) | $digest |" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+      - name: Explain build-only result
+        if: github.event_name == 'workflow_dispatch' && !inputs.upload_artifact
+        shell: powershell
+        run: |
+          "Build and validation only. No package was uploaded. Enable the temporary download option when starting a manual run if Actions storage is available. Tagged releases upload directly to the release page." | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Create draft release for tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $releases = gh release list --limit 1000 --json tagName
+          if ($LASTEXITCODE -ne 0) { throw 'Release lookup failed.' }
+          $existing = @($releases | ConvertFrom-Json) | Where-Object { $_.tagName -eq $env:RELEASE_TAG }
+          if ($existing) {
+            Write-Output "A release for $env:RELEASE_TAG already exists; leaving it untouched."
+            exit 0
+          }
+          gh release create "$env:RELEASE_TAG" `
+            dist/SceneLight-v*-Windows.zip `
+            dist/SceneLight-v*-Windows.zip.sha256 `
+            dist/SceneLight-v*-Windows-online.zip `
+            dist/SceneLight-v*-Windows-online.zip.sha256 `
+            dist/SceneLight-v*-Windows-source.zip `
+            dist/SceneLight-v*-Windows-source.zip.sha256 `
+            dist/scenelight_renpy-*.whl `
+            dist/scenelight_renpy-*.tar.gz `
+            --generate-notes --draft --prerelease --verify-tag `
+            --title "SceneLight $env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
+      - name: Upload temporary download
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SceneLight-Windows
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            dist/SceneLight-v*-Windows.zip
+            dist/SceneLight-v*-Windows.zip.sha256
+            dist/SceneLight-v*-Windows-online.zip
+            dist/SceneLight-v*-Windows-online.zip.sha256
+            dist/SceneLight-v*-Windows-source.zip
+            dist/SceneLight-v*-Windows-source.zip.sha256
+            dist/scenelight_renpy-*.whl
+            dist/scenelight_renpy-*.tar.gz

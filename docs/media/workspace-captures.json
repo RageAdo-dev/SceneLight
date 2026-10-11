@@ -1,0 +1,26 @@
+{
+  "sprite_sha256": "536f034b266f735c23a6dba1267d0e5e25f1bb86f26788919b98bf55730288b1",
+  "background_sha256": "dcfc13c997004856560630d566784e6fb6d62aba7a26e12cd8c4121adb7bf949",
+  "capture": "QWidget.grab from the production MainWindow, no composited controls",
+  "renderer": "NVIDIA Corporation \u00b7 NVIDIA GeForce RTX 4090/PCIe/SSE2\nShader 0b1197c45c3c \u00b7 8 bound textures",
+  "captured_on": "2026-10-04",
+  "renpy": "8.5.2",
+  "source": "RenPy tutorial/game/images/eileen happy.png",
+  "background_generator": "tools/build_docs_media.py:lighting_stage",
+  "preview_size": [
+    2250,
+    1350
+  ],
+  "inspector_size": [
+    1500,
+    900
+  ],
+  "sprite_glow": 0.2,
+  "inspector_character_strength": 0.85,
+  "files": {
+    "preview-workspace.png": "8e81b0247e6cefaeb7be31b7b8202436cc9b1853e12b0119194af07488c55d62",
+    "preview-glow.png": "44d961b6f6fbec49973734d9e7a02a2fb0360fa9bf490fde006d36db8e723416",
+    "preview-export.png": "248d8a2880a2a71c9ef5d7d1035571dd8efb492b4850b139bd215809e8541b0f",
+    "ingame-inspector.png": "fb3da0c74c4e4f19a58724f8ba047d29e0002dfb08a1853df280b9f3059969ee"
+  }
+}

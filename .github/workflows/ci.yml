@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  player-install:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Linux graphics runtime
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: python -m pip install .
+      - run: python -m pip check
+      - name: Verify a plain install provides preparation and the Preview stack
+        run: >-
+          python -c "from scenelight.setup_gui import missing_dependencies, missing_preview_dependencies;
+          assert not missing_dependencies(), missing_dependencies();
+          assert not missing_preview_dependencies(), missing_preview_dependencies();
+          from PySide6.QtGui import QOpenGLContext, QOffscreenSurface;
+          from scenelight.prepared import FramePreparer;
+          from scenelight.preview.media import MediaClip;
+          import imageio_ffmpeg"
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install Linux graphics runtime
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: python -m pip install -e ".[dev,preview]"
+      - run: python -m pip check
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest
+      - run: bandit -r src -ll
+      - run: python -m pip_audit -r requirements-preview.txt --progress-spinner off
+      - run: python -m build

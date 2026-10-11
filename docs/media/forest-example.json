@@ -1,0 +1,30 @@
+{
+  "background_sha256": "fdaa77c50a75711880259c44ac1c762dcd2dec3dafa5e508958b67b2da9d9038",
+  "source_size": [
+    2643,
+    1821
+  ],
+  "crop_box": [
+    0.0,
+    112.52625,
+    2643.0,
+    1599.21375
+  ],
+  "sprite_sha256": "da70f20d31d6b106ff29f949d2c1a40cac112ddb6dbfc051b0c736a584b24b83",
+  "shader_sha256": "911e40ee5f3a4f07e6e94c25cf73fd96867a04ebb088e35c90b7dc5873ee62bd",
+  "size": [
+    1920,
+    1080
+  ],
+  "placement": [
+    0.38,
+    1.08,
+    1.02
+  ],
+  "movement_radius": 0.0,
+  "calibration": "Default",
+  "analysis": "Production live GPU analyzer, once per source frame",
+  "changed_pixels": 349692,
+  "frames": 1,
+  "fps": 60.0
+}

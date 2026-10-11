@@ -1,0 +1,48 @@
+{
+  "format": "scenelight-effect-pack",
+  "version": 1,
+  "id": "horror_signals",
+  "name": "Horror Signals",
+  "author": "SceneLight",
+  "license": "MIT",
+  "effects": [
+    {
+      "id": "spectral_presence",
+      "name": "Spectral Presence",
+      "description": "Pulsing cool tint with adjustable transparency.",
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "tint": { "type": "vec3", "default": [0.48, 0.82, 1.0], "min": 0.0, "max": 1.5 },
+        "pulse": { "type": "float", "default": 1.2, "min": 0.0, "max": 4.0 },
+        "edge": { "type": "float", "default": 0.7, "min": 0.0, "max": 2.0 },
+        "fade": { "type": "float", "default": 0.16, "min": 0.0, "max": 0.8 }
+      },
+      "fragment": "float l__phase = 0.5 + 0.5 * sin(u_time * u__pulse + v_tex_coord.y * 7.0);\nfloat l__radius = length(v_tex_coord - vec2(0.5));\nfloat l__veil = clamp(1.0 - l__radius * (1.1 + u__edge), 0.0, 1.0);\nfloat l__luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));\nvec3 l__spectral = mix(vec3(l__luma), vec3(l__luma) * u__tint, 0.78);\nfloat l__mix = clamp(u__intensity * (0.72 + 0.28 * l__phase) * (0.72 + 0.28 * l__veil), 0.0, 1.0);\ngl_FragColor.rgb = mix(gl_FragColor.rgb, l__spectral, l__mix);\ngl_FragColor.a *= clamp(1.0 - u__fade * u__intensity * (0.65 + 0.35 * l__phase), 0.0, 1.0);"
+    },
+    {
+      "id": "panic_vision",
+      "name": "Panic Vision",
+      "description": "High contrast, a red tint and moving scan bands.",
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "speed": { "type": "float", "default": 2.4, "min": 0.1, "max": 8.0 },
+        "contrast": { "type": "float", "default": 1.35, "min": 0.5, "max": 3.0 },
+        "blood": { "type": "float", "default": 0.58, "min": 0.0, "max": 1.0 },
+        "bands": { "type": "float", "default": 0.22, "min": 0.0, "max": 0.8 }
+      },
+      "fragment": "float l__beat = pow(0.5 + 0.5 * sin(u_time * u__speed), 3.0);\nfloat l__band = 0.5 + 0.5 * sin(v_tex_coord.y * 310.0 + u_time * u__speed * 9.0);\nvec3 l__contrast = (gl_FragColor.rgb - 0.5) * u__contrast + 0.5;\nvec3 l__blood = l__contrast * vec3(1.0 + u__blood * 0.38, 1.0 - u__blood * 0.26, 1.0 - u__blood * 0.34);\nfloat l__mix = clamp(u__intensity * (0.76 + 0.24 * l__beat), 0.0, 1.0);\ngl_FragColor.rgb = mix(gl_FragColor.rgb, l__blood, l__mix);\ngl_FragColor.rgb *= 1.0 - u__intensity * u__bands * l__band;"
+    },
+    {
+      "id": "void_ink",
+      "name": "Void Ink",
+      "description": "Static ink effect that darkens selected tones.",
+      "parameters": {
+        "intensity": { "type": "float", "default": 0.0, "min": 0.0, "max": 1.0 },
+        "threshold": { "type": "float", "default": 0.46, "min": 0.05, "max": 0.95 },
+        "softness": { "type": "float", "default": 0.12, "min": 0.01, "max": 0.5 },
+        "ink": { "type": "vec3", "default": [0.025, 0.008, 0.035], "min": 0.0, "max": 1.0 }
+      },
+      "fragment": "float l__luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));\nfloat l__mask = 1.0 - smoothstep(u__threshold - u__softness, u__threshold + u__softness, l__luma);\nfloat l__mix = clamp(u__intensity * l__mask, 0.0, 1.0);\ngl_FragColor.rgb = mix(gl_FragColor.rgb, u__ink * (0.55 + 0.45 * l__luma), l__mix);"
+    }
+  ]
+}

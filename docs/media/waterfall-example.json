@@ -1,0 +1,67 @@
+{
+  "background_sha256": "0a0b8585acff6c54cae02ca85ba19ba47640f28a834cafa1d97715c4b67f36e0",
+  "source_size": [
+    2560,
+    1440
+  ],
+  "crop_box": [
+    0.0,
+    0.0,
+    2560.0,
+    1440.0
+  ],
+  "sprite_sha256": "da70f20d31d6b106ff29f949d2c1a40cac112ddb6dbfc051b0c736a584b24b83",
+  "shader_sha256": "911e40ee5f3a4f07e6e94c25cf73fd96867a04ebb088e35c90b7dc5873ee62bd",
+  "size": [
+    1920,
+    1080
+  ],
+  "placement": [
+    0.73,
+    1.08,
+    1.02
+  ],
+  "movement_radius": 0.0,
+  "calibration": "Default",
+  "analysis": "Production live GPU analyzer, once per source frame",
+  "changed_pixels": 349520,
+  "frames": 120,
+  "fps": 60.0,
+  "encodings": {
+    "waterfall-example.webp": {
+      "bytes": 26647324,
+      "sha256": "3df8155ea94f60d5b5c62e16d3713e4cdbc164d89e0b04b302db7515413512ba",
+      "frames": 60,
+      "duration_ms": 2000,
+      "frame_durations_ms": [
+        33,
+        34
+      ]
+    },
+    "waterfall-example.mp4": {
+      "bytes": 13641606,
+      "sha256": "b789d94732cc362d65c565a6391a66d5780ce0537a0652f260ff1652e1feed18",
+      "frames": 120,
+      "fps": 60.0
+    },
+    "waterfall-example.gif": {
+      "bytes": 21464965,
+      "sha256": "b056ef9a58409b0d0ce11cb2fba9a5426e5ea9503c521dcb65249fed245c3dde",
+      "frames": 40,
+      "duration_ms": 2000,
+      "frame_durations_ms": [
+        50
+      ]
+    },
+    "waterfall-example-preview.webp": {
+      "bytes": 8655480,
+      "sha256": "0fb76c10b5324ba9cf15529e486ea05502bbd91711b27f33488c6f2ebdafdb00",
+      "frames": 60,
+      "duration_ms": 2000,
+      "frame_durations_ms": [
+        33,
+        34
+      ]
+    }
+  }
+}

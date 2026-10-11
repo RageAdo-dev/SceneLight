@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scenelight-renpy"
+version = "1.0.0"
+description = "Dynamic screen-space 2D sprite relighting for Ren'Py"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "RageAdo-dev" }]
+dependencies = [
+  "numpy==2.2.6",
+  "opencv-python-headless==5.0.0.93",
+  "Pillow==12.3.0",
+  "psutil==7.2.2",
+  "PySide6-Essentials==6.11.2",
+  "PyOpenGL==3.1.10",
+  "imageio-ffmpeg==0.6.0",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Games/Entertainment",
+  "Topic :: Multimedia :: Graphics",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "ruff==0.16.10",
+  "build==1.6.1",
+  "pip-audit==2.10.1",
+  "bandit==1.9.4",
+]
+cuda = ["cupy-cuda12x==14.2.0"]
+preview = [
+  "PyOpenGL==3.1.10",
+]
+
+[project.scripts]
+scenelight = "scenelight.cli:main"
+
+[project.gui-scripts]
+scenelight-setup = "scenelight.setup_gui:main"
+scenelight-preview = "scenelight.preview.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+scenelight = [
+  "runtime/*.rpy",
+  "runtime/*.py",
+  "assets/scenelight.ico",
+  "assets/scenelight.png",
+  "assets/scenelight.svg",
+  "assets/scenelight-launcher.exe",
+  "assets/scenelight-desktop.exe",
+  "assets/scenelight-save-compat.rpy",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
