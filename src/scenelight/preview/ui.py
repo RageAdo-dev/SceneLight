@@ -122,6 +122,7 @@ class _WorkerSignals(QObject):
     temporalReady = Signal(int, int, object)
     temporalComplete = Signal(int, object, object)
     failed = Signal(str, str)
+    mediaFailed = Signal(str, int, str, str)
 
 
 class MainWindow(QMainWindow):
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
         self._signals.temporalReady.connect(self._on_temporal_ready)
         self._signals.temporalComplete.connect(self._on_temporal_complete)
         self._signals.failed.connect(self._on_failed)
+        self._signals.mediaFailed.connect(self._on_media_failed)
         self._scene_generation = 0
         self._form_generation = 0
         self._background_path: Path | None = None
@@ -461,9 +463,13 @@ class MainWindow(QMainWindow):
 
     def _load_background(self, path: Path) -> None:
         diagnostics.event("preview.background", "Opening background", path=str(path))
+        media = None
         try:
             media = MediaClip(path, self._cache.root / "media")
+            first_frame = media.frame_at(0.0)
         except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
+            if media is not None:
+                media.close()
             self._on_failed("Background media", str(error))
             return
         self._stop_preparation()
@@ -473,7 +479,6 @@ class MainWindow(QMainWindow):
             self._background_media.close()
         self._background_media = media
         self._background_animation_epoch = time.perf_counter()
-        first_frame = media.frame_at(0.0)
         self._view.clear_scene()
         self._gpu_live_background = self._view.live_analysis_supported
         self._view.set_live_analysis_enabled(self._gpu_live_background)
@@ -669,9 +674,14 @@ class MainWindow(QMainWindow):
             session = diagnostics.current_session()
             if session is not None:
                 session.exception("preview.background", error)
-            self._signals.failed.emit("Background analysis", str(error))
+            self._signals.mediaFailed.emit("scene", generation, "Background analysis", str(error))
             return
         self._signals.sceneReady.emit(generation, path, artifacts, artifacts.metadata)
+
+    def _on_media_failed(self, kind: str, generation: int, title: str, message: str) -> None:
+        current = self._scene_generation if kind == "scene" else self._form_generation
+        if generation == current:
+            self._on_failed(title, message)
 
     def _on_scene_ready(
         self, generation: int, path: Path, artifacts: SceneArtifacts, metadata: dict
@@ -726,7 +736,9 @@ class MainWindow(QMainWindow):
             future.result()
         except Exception as error:  # noqa: BLE001 - worker failures must reach the GUI.
             if generation == self._scene_generation:
-                self._signals.failed.emit("Animated background analysis", str(error))
+                self._signals.mediaFailed.emit(
+                    "scene", generation, "Animated background analysis", str(error)
+                )
 
     @staticmethod
     def _scene_frame_from_artifacts(artifacts: SceneArtifacts) -> TemporalSceneFrame:
@@ -1006,9 +1018,13 @@ class MainWindow(QMainWindow):
 
     def _load_sprite(self, path: Path) -> None:
         diagnostics.event("preview.sprite", "Opening sprite", path=str(path))
+        media = None
         try:
             media = MediaClip(path, self._cache.root / "media")
+            first_frame = media.frame_at(0.0)
         except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
+            if media is not None:
+                media.close()
             self._on_failed("Sprite media", str(error))
             return
         if media.kind == "video":
@@ -1023,7 +1039,6 @@ class MainWindow(QMainWindow):
         self._sprite_media = media
         self._sprite_animation_epoch = time.perf_counter()
         self._sprite_animation_ready = not media.animated
-        first_frame = media.frame_at(0.0)
         self._view.clear_sprite()
         self._view.set_sprite_frame(first_frame.rgba)
         self._form_generation += 1
@@ -1054,7 +1069,7 @@ class MainWindow(QMainWindow):
             session = diagnostics.current_session()
             if session is not None:
                 session.exception("preview.form", error)
-            self._signals.failed.emit("Sprite analysis", str(error))
+            self._signals.mediaFailed.emit("form", generation, "Sprite analysis", str(error))
             return
         self._signals.formReady.emit(generation, path, artifacts, artifacts.metadata)
 

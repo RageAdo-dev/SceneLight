@@ -365,7 +365,9 @@ class MediaClip:
         # that tiny forward jump can cost hundreds of milliseconds on an MP4;
         # grabbing the intervening decoded frames preserves the exact target
         # frame and keeps 60 fps playback smooth.
-        if 1 < forward_gap <= max(2, round(self.fps * 2.0)):
+        if self._video_frame is None:
+            self._capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+        elif 1 < forward_gap <= max(2, round(self.fps * 2.0)):
             reached = True
             while self._video_index + 1 < index:
                 if not self._capture.grab():
@@ -379,10 +381,11 @@ class MediaClip:
             self._capture.set(cv2.CAP_PROP_POS_FRAMES, index)
         ok, bgr = self._capture.read()
         if not ok or bgr is None:
-            self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self._capture.set(cv2.CAP_PROP_POS_FRAMES, index)
             ok, bgr = self._capture.read()
-            index = 0
         if not ok or bgr is None:
+            self._video_index = -1
+            self._video_frame = None
             raise ValueError(f"Video frame {index} could not be decoded: {self.source}")
         self._video_index = index
         self._video_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)

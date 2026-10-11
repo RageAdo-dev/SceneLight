@@ -11,6 +11,55 @@ from scenelight.calibration import Calibration, CalibrationProfile
 from scenelight.preview import ui
 
 
+@pytest.mark.parametrize("kind", ["background", "sprite"])
+def test_corrupt_first_frame_preserves_open_composition(tmp_path, monkeypatch, kind):
+    from PIL import Image
+
+    source = tmp_path / "truncated.png"
+    pixels = np.random.default_rng(7).integers(0, 256, (64, 64, 4), dtype=np.uint8)
+    Image.fromarray(pixels).save(source)
+    source.write_bytes(source.read_bytes()[:100])
+    opened, closed, errors = [], [], []
+    original = ui.MediaClip
+
+    def candidate(*args):
+        clip = original(*args)
+        opened.append(clip)
+        close = clip.close
+        clip.close = lambda: (closed.append(clip), close())
+        return clip
+
+    monkeypatch.setattr(ui, "MediaClip", candidate)
+    previous = SimpleNamespace(close=lambda: pytest.fail("Existing media must stay open"))
+    window = SimpleNamespace(
+        _cache=SimpleNamespace(root=tmp_path / "cache"),
+        _background_media=previous,
+        _sprite_media=previous,
+        _background_path=tmp_path / "existing.png",
+        _sprite_path=tmp_path / "actor.png",
+        _scene_generation=4,
+        _form_generation=7,
+        _on_failed=lambda *args: errors.append(args),
+    )
+    before = dict(vars(window))
+    getattr(ui.MainWindow, "_load_" + kind)(window, source)
+    assert vars(window) == before
+    assert len(opened) == 1 and closed == opened
+    assert len(errors) == 1 and "media" in errors[0][0]
+
+
+@pytest.mark.parametrize("kind", ["scene", "form"])
+def test_queued_failure_from_replaced_media_is_ignored(kind):
+    errors = []
+    window = SimpleNamespace(
+        _scene_generation=5, _form_generation=5, _on_failed=lambda *args: errors.append(args)
+    )
+    ui.MainWindow._on_media_failed(window, kind, 4, "Analysis", "old failure")
+    assert not errors
+    ui.MainWindow._on_media_failed(window, kind, 5, "Analysis", "current failure")
+    assert errors == [("Analysis", "current failure")]
+
+
 @pytest.mark.parametrize(
     "method,attribute", [("open_background", "_background_path"), ("open_sprite", "_sprite_path")]
 )
