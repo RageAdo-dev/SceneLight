@@ -161,7 +161,7 @@ def package_docs(repository: Path, package: Path) -> None:
             parsed = urlsplit(url)
             if parsed.scheme or parsed.netloc or not parsed.path:
                 return match.group(0)
-            target = (original.parent / unquote(parsed.path)).resolve()
+            target = filesystem_path(original.parent / unquote(parsed.path))
             if repository not in target.parents or not target.is_file():
                 return match.group(0)
             relative = target.relative_to(repository)
