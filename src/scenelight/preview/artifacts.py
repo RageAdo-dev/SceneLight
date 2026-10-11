@@ -15,6 +15,7 @@ from PIL import Image
 
 from ..project import SpriteSpec
 from ..sidecar import storage_root
+from .cache_lock import cache_lock
 from .core import (
     FORM_MAP_VERSION,
     TRANSPORT_CHARACTER_HEIGHT,
@@ -656,23 +657,24 @@ class ArtifactCache:
         started = time.perf_counter()
         key = _digest(source, FORM_CACHE_VERSION)
         root = self.root / "forms" / key
-        existing = _read_complete(root)
-        if existing is not None:
-            return FormArtifacts(root, existing["form"], True, time.perf_counter() - started)
+        with cache_lock(root):
+            existing = _read_complete(root)
+            if existing is not None:
+                return FormArtifacts(root, existing["form"], True, time.perf_counter() - started)
 
-        root.mkdir(parents=True, exist_ok=True)
-        # Match installation's transparent-canvas composition. Hidden RGB in
-        # zero-alpha pixels must not leak into the reconstructed surface.
-        maps = build_sprite_form_maps(SpriteSpec(source.stem, (source,)).compose())
-        maps.normal_noise.save(root / "normal_noise.png", compress_level=1)
-        maps.height_ao_edge.save(root / "height_ao_edge.png", compress_level=1)
-        maps.response.save(root / "response.png", compress_level=1)
-        payload = {
-            "kind": "form",
-            "source": str(source),
-            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-            "form": maps.metadata,
-            "required": ["normal_noise.png", "height_ao_edge.png", "response.png"],
-        }
-        (root / "metadata.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        return FormArtifacts(root, maps.metadata, False, time.perf_counter() - started)
+            root.mkdir(parents=True, exist_ok=True)
+            # Match installation's transparent-canvas composition. Hidden RGB in
+            # zero-alpha pixels must not leak into the reconstructed surface.
+            maps = build_sprite_form_maps(SpriteSpec(source.stem, (source,)).compose())
+            maps.normal_noise.save(root / "normal_noise.png", compress_level=1)
+            maps.height_ao_edge.save(root / "height_ao_edge.png", compress_level=1)
+            maps.response.save(root / "response.png", compress_level=1)
+            payload = {
+                "kind": "form",
+                "source": str(source),
+                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "form": maps.metadata,
+                "required": ["normal_noise.png", "height_ao_edge.png", "response.png"],
+            }
+            (root / "metadata.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return FormArtifacts(root, maps.metadata, False, time.perf_counter() - started)

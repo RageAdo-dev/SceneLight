@@ -58,6 +58,7 @@ from .calibration_dialog import CalibrationEditor
 from .exporter import GIFWriter, MP4Writer, composite_gif_timeline, export_extension
 from .gpu_view import SceneLightGPUView
 from .media import MediaClip, MediaFrame, environment_wrap
+from .media_open import open_media
 from .playback import VideoPlayback
 from .settings_export import SettingsExportPage
 from .temporal import TemporalSceneFrame, interpolated_scene, scene_blend
@@ -470,8 +471,10 @@ class MainWindow(QMainWindow):
         diagnostics.event("preview.background", "Opening background", path=str(path))
         media = None
         try:
-            media = MediaClip(path, self._cache.root / "media")
-            first_frame = media.frame_at(0.0)
+            candidate = open_media(path, self._cache.root / "media", self, factory=MediaClip)
+            if candidate is None:
+                return
+            media, first_frame = candidate
         except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
             if media is not None:
                 media.close()
@@ -1049,8 +1052,10 @@ class MainWindow(QMainWindow):
         diagnostics.event("preview.sprite", "Opening sprite", path=str(path))
         media = None
         try:
-            media = MediaClip(path, self._cache.root / "media")
-            first_frame = media.frame_at(0.0)
+            candidate = open_media(path, self._cache.root / "media", self, factory=MediaClip)
+            if candidate is None:
+                return
+            media, first_frame = candidate
         except Exception as error:  # noqa: BLE001 - decoder errors must reach the GUI.
             if media is not None:
                 media.close()

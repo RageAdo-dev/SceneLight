@@ -14,6 +14,9 @@ from scenelight.preview import ui
 @pytest.mark.parametrize("kind", ["background", "sprite"])
 def test_corrupt_first_frame_preserves_open_composition(tmp_path, monkeypatch, kind):
     from PIL import Image
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
 
     source = tmp_path / "truncated.png"
     pixels = np.random.default_rng(7).integers(0, 256, (64, 64, 4), dtype=np.uint8)
@@ -22,14 +25,18 @@ def test_corrupt_first_frame_preserves_open_composition(tmp_path, monkeypatch, k
     opened, closed, errors = [], [], []
     original = ui.MediaClip
 
-    def candidate(*args):
-        clip = original(*args)
+    def candidate(*args, **kwargs):
+        clip = original(*args, **kwargs)
         opened.append(clip)
         close = clip.close
         clip.close = lambda: (closed.append(clip), close())
         return clip
 
     monkeypatch.setattr(ui, "MediaClip", candidate)
+    opener = ui.open_media
+    monkeypatch.setattr(
+        ui, "open_media", lambda path, cache, parent, **kwargs: opener(path, cache, None, **kwargs)
+    )
     previous = SimpleNamespace(close=lambda: pytest.fail("Existing media must stay open"))
     window = SimpleNamespace(
         _cache=SimpleNamespace(root=tmp_path / "cache"),
@@ -46,6 +53,7 @@ def test_corrupt_first_frame_preserves_open_composition(tmp_path, monkeypatch, k
     assert vars(window) == before
     assert len(opened) == 1 and closed == opened
     assert len(errors) == 1 and "media" in errors[0][0]
+    app.processEvents()
 
 
 @pytest.mark.parametrize("kind", ["scene", "form"])
