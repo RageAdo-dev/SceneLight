@@ -40,7 +40,12 @@ from scenelight.capture import (
     merge_capture,
     preflight_runtime,
 )
-from scenelight.cli import _renderer_attempts, _runtime_capture_launchers
+from scenelight.cli import (
+    _matching_renpy_sdk,
+    _renderer_attempts,
+    _resolve_renpy_executable,
+    _runtime_capture_launchers,
+)
 from scenelight.project import ProjectDiscovery
 from scenelight.sidecar import sync_project
 
@@ -563,6 +568,49 @@ def test_project_without_native_runtime_can_use_sdk(tmp_path: Path) -> None:
     assert _runtime_capture_launchers(managed, sdk) == [(sdk, False, "the selected Ren'Py SDK")]
 
 
+def test_matching_sdk_is_chosen_for_the_project_engine_version(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    project = tmp_path / "Eidolon"
+    project.mkdir()
+    (project / "log.txt").write_text("Ren'Py 8.3.7.25031702\n", encoding="utf-8")
+    for name in ("renpy-8.1.0-sdk", "renpy-8.3.7-sdk", "renpy-7.7.1-sdk"):
+        launcher = tmp_path / name / "renpy.exe"
+        launcher.parent.mkdir()
+        launcher.touch()
+
+    matched = _resolve_renpy_executable(project, None)
+
+    assert matched == (tmp_path / "renpy-8.3.7-sdk" / "renpy.exe").resolve()
+
+
+def test_sdk_from_another_major_is_not_used_for_the_project(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    project = tmp_path / "Eidolon"
+    project.mkdir()
+    (project / "log.txt").write_text("Ren'Py 6.99.12.4\n", encoding="utf-8")
+    for name in ("renpy-7.4.11-sdk", "renpy-8.3.7-sdk"):
+        launcher = tmp_path / name / "renpy.exe"
+        launcher.parent.mkdir()
+        launcher.touch()
+
+    assert _matching_renpy_sdk(project, (6, 99, 12)) is None
+
+
+def test_unknown_engine_version_keeps_the_compatibility_runtime_first(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.delenv("RENPY_SDK", raising=False)
+    monkeypatch.delenv("SCENELIGHT_COMPAT_RENPY", raising=False)
+    project = tmp_path / "unlabelled"
+    project.mkdir()
+    launcher = tmp_path / "renpy-8.3.7-sdk" / "renpy.exe"
+    launcher.parent.mkdir()
+    launcher.touch()
+
+    assert _matching_renpy_sdk(project, None) is None
+
+
 def test_old_renpy_expands_to_automatic_angle_and_gl_attempts(tmp_path: Path) -> None:
     project = tmp_path / "old-game"
     (project / "renpy" / "angle").mkdir(parents=True)
@@ -574,6 +622,9 @@ def test_old_renpy_expands_to_automatic_angle_and_gl_attempts(tmp_path: Path) ->
         (executable, True, "native (automatic renderer)", None),
         (executable, True, "native (angle renderer)", "angle"),
         (executable, True, "native (gl renderer)", "gl"),
+        # Last resort: a pure software process keeps GL textures out of the
+        # compositor that captures character forms.
+        (executable, True, "native (software renderer)", "sw"),
     ]
 
 
@@ -587,6 +638,7 @@ def test_modern_renpy_expands_to_angle2_and_gl2_attempts(tmp_path: Path) -> None
         None,
         "angle2",
         "gl2",
+        "sw",
     ]
 
 
@@ -1075,10 +1127,25 @@ def test_runtime_checkpoint_temp_names_do_not_extend_long_sprite_paths() -> None
     assert 'temporary = marker + ".tmp"' not in helper
     assert "def _scenelight_capture_temporary(filename, purpose, suffix):" in helper
     assert '_scenelight_capture_temporary(filename, "surface", ".png")' in helper
-    assert '_scenelight_capture_temporary(filename, "rgba", ".tmp")' in helper
     assert 'temporary = filename + ".surface.png"' not in helper
     assert 'temporary = filename + ".rgba-checkpoint"' not in helper
     assert 'temporary = filename + ".source-copy.%d"' not in helper
+    # Ren'Py 8 removed the pixel-buffer readback the raw writer relied on, so
+    # the helper must not call it again; old caches are still recognized.
+    assert "image.tostring" not in helper
+    assert "SCENELIGHT_RGBA1" in helper
+
+
+def test_runtime_capture_fits_forms_into_the_framebuffer_limit() -> None:
+    helper = capture_source().read_text(encoding="utf-8")
+
+    assert "def _scenelight_capture_pixel_limit():" in helper
+    assert 'os.environ.get("SCENELIGHT_MAX_CAPTURE_SIZE", "")' in helper
+    assert 'fit="contain", xysize=(fitted_size, fitted_size)' in helper
+    assert '"stage": "capped"' in helper
+    # A form wider than the readback buffer is clipped, so it has to be fitted
+    # before the screenshot, never after.
+    assert helper.index('"stage": "capped"') < helper.index("surface = draw.screenshot(rendered)")
 
 
 def test_host_capture_temp_names_are_compact_and_stay_beside_destination(tmp_path: Path) -> None:
@@ -1119,23 +1186,23 @@ def test_runtime_capture_uses_exact_surface_fast_path_for_static_composites() ->
     assert '"composite_captures": composite_captures' in helper
 
 
-def test_dynamic_sprite_capture_preserves_alpha_before_any_gpu_readback() -> None:
+def test_character_capture_uses_the_gpu_readback_that_keeps_alpha() -> None:
     helper = capture_source().read_text(encoding="utf-8")
     capture = Path(capture_module.__file__).read_text(encoding="utf-8")
 
     assert capture_module.CAPTURE_VERSION == 42
     assert 'preserve_alpha=(kind == "sprite")' in helper
     assert "def _scenelight_save_alpha_surface" in helper
-    assert 'getattr(swdraw_module, "SWDraw", None)' in helper
-    assert "_scenelight_software_draw = [None]" in helper
-    assert "_scenelight_prior_draw = [None]" in helper
-    assert "renpy.display.draw = software_draw" in helper
-    assert "if renpy.display.draw is not software_draw:" in helper
-    switch_path = helper.index("if renpy.display.draw is not software_draw:")
-    draw_swap_path = helper.index("renpy.display.draw = software_draw", switch_path)
-    assert helper.index("renpy.display.render.free_memory()", switch_path) < draw_swap_path
-    assert helper.index("renpy.display.im.free_memory()", switch_path) < draw_swap_path
-    assert "if _scenelight_prior_draw[0] is not None:" in helper
+    # The software compositor stops the engine on any zoomed or rotated
+    # subtree, which every layered character with scaled layers has. Character
+    # capture must stay on the GPU, whose RGBA readback keeps alpha.
+    assert 'raise Exception("SceneLight character capture requires a GPU renderer")' in helper
+    assert "surface = draw.screenshot(rendered)" in helper
+    assert "import renpy.display.swdraw" not in helper
+    assert "renpy.display.draw = software_draw" not in helper
+    assert "_scenelight_software_draw" not in helper
+    assert "_scenelight_prior_draw" not in helper
+    assert "draw_per_virt" in helper
     assert 'return "surface-checkpoint"' in helper
     assert 'return "surface-normalized"' in helper
     assert "_scenelight_mark_surface_checkpoint(filename)" in helper
@@ -1233,6 +1300,135 @@ def test_surface_fast_path_is_normalized_to_renderer_alpha_semantics(tmp_path: P
         ]
     assert not marker.exists()
     assert capture.with_name(capture.name + ".surface-normalized").is_file()
+
+
+def test_duplicate_captures_rewrite_character_candidates(tmp_path: Path) -> None:
+    # A candidate preview may point at the same pixels as a sprite form; when
+    # the duplicate is removed, the candidate has to follow it.
+    first = tmp_path / "sprite_a.png"
+    second = tmp_path / "sprite_b.png"
+    payload_data = b"\x89PNG\r\n\x1a\nsame-pixels"
+    first.write_bytes(payload_data)
+    second.write_bytes(payload_data)
+    payload: dict[str, object] = {
+        "sprites": {"hero idle": first.name, "hero smile": second.name},
+        "character_candidates": {"hero": second.name},
+    }
+
+    capture_module._deduplicate_surface_capture_paths(tmp_path, payload, [first, second])
+
+    assert payload["sprites"]["hero smile"] == payload["sprites"]["hero idle"]
+    assert payload["character_candidates"]["hero"] == payload["sprites"]["hero idle"]
+    assert capture_module._paths_exist(tmp_path, payload)
+
+
+def test_old_engine_matting_pair_rebuilds_alpha_and_premultiplied_colour(
+    tmp_path: Path,
+) -> None:
+    # A form 25% covered: over black it is (40, 20, 10) premultiplied, over white
+    # that plus 75% of the uncovered background.
+    width, height = 4, 1
+    black = Image.new("RGB", (width, height), (0, 0, 0))
+    white = Image.new("RGB", (width, height), (255, 255, 255))
+    black.putpixel((1, 0), (40, 20, 10))
+    white.putpixel((1, 0), (40 + 191, 20 + 191, 10 + 191))
+    output = tmp_path / "sprite.png"
+    output.with_name("sprite.png.black.png").parent.mkdir(parents=True, exist_ok=True)
+    black.save(output.with_name("sprite.png.black.png"))
+    white.save(output.with_name("sprite.png.white.png"))
+    payload: dict[str, object] = {
+        "sprites": {"hero idle": "sprite.png"},
+        "matting_captures": [
+            {
+                "form": "hero idle",
+                "relative": "sprite.png",
+                "size": [width, height],
+                "crop": [width, height],
+            }
+        ],
+    }
+
+    capture_module._combine_matting_captures(tmp_path, payload)
+
+    with Image.open(output) as rebuilt:
+        pixels = list(rebuilt.convert("RGBA").get_flattened_data())
+    assert pixels[1] == (40, 20, 10, 64)
+    assert pixels[0][3] == 0
+    assert not output.with_name("sprite.png.black.png").exists()
+    assert not output.with_name("sprite.png.white.png").exists()
+
+
+def test_old_engine_matting_crop_drops_the_cleared_margin(tmp_path: Path) -> None:
+    # The engine grabs its whole window, so a smaller form carries an opaque
+    # margin that must be cropped away instead of becoming part of the form.
+    black = Image.new("RGB", (6, 2), (255, 255, 255))
+    white = Image.new("RGB", (6, 2), (255, 255, 255))
+    for x in range(2):
+        black.putpixel((x, 0), (10, 10, 10))
+        white.putpixel((x, 0), (10, 10, 10))
+    output = tmp_path / "form.png"
+    black.save(output.with_name("form.png.black.png"))
+    white.save(output.with_name("form.png.white.png"))
+
+    capture_module._combine_matting_captures(
+        tmp_path,
+        {
+            "sprites": {"hero idle": "form.png"},
+            "matting_captures": [
+                {
+                    "form": "hero idle",
+                    "relative": "form.png",
+                    "size": [2, 1],
+                    "crop": [2, 1],
+                }
+            ],
+        },
+    )
+
+    with Image.open(output) as rebuilt:
+        assert rebuilt.size == (2, 1)
+        assert rebuilt.convert("RGBA").getpixel((0, 0))[3] == 255
+
+
+def test_capture_report_summarizes_a_run(tmp_path: Path) -> None:
+    previews = tmp_path / "previews"
+    previews.mkdir()
+    records = [
+        {"stage": "context", "renpy": "Ren'Py 8.3.7", "draw": "GL2Draw", "screen": [800, 600]},
+        {"stage": "stored", "form": "a", "total_seconds": 0.1, "save_seconds": 0.05},
+        {"stage": "stored", "form": "b", "total_seconds": 0.3, "save_seconds": 0.2},
+        {"stage": "error", "error": "sprite c: renderer stopped"},
+    ]
+    (previews / "capture_attempts.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8"
+    )
+
+    report = capture_module._capture_report(
+        previews,
+        {"sprites": {"a": "a.png", "b": "b.png"}, "errors": ["sprite c: renderer stopped"]},
+        1.5,
+        0.5,
+    )
+
+    assert report["engine"] == "Ren'Py 8.3.7"
+    assert report["forms"]["captured"] == 2
+    assert report["forms"]["failed"] == 1
+    assert report["per_form_seconds"]["slowest"][0]["form"] == "b"
+    assert report["stage_seconds"]["save"] == 0.25
+    assert (previews / "capture-report.json").is_file()
+
+
+def test_capture_stall_names_the_form_it_stopped_on(tmp_path: Path) -> None:
+    capture_module._record_capture_stall(
+        tmp_path, {"stage": "form", "current": 12, "total": 40, "item": "c012"}, 45.0
+    )
+    capture_module._record_capture_stall(
+        tmp_path, {"stage": "form", "current": 13, "total": 40, "item": "c013"}, 60.0
+    )
+
+    records = json.loads((tmp_path / "capture-stall.json").read_text(encoding="utf-8"))
+    assert [record["form"] for record in records] == ["c012", "c013"]
+    assert records[0]["stalled_seconds"] == 45.0
 
 
 def test_identical_surface_captures_share_one_normalized_source(tmp_path: Path) -> None:

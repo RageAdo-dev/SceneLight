@@ -278,15 +278,21 @@ def test_capture_plan_roundtrip_uses_host_version_and_rejects_old_inventory(tmp_
     forms = {"sayori turned lateafternoon happy"}
     requests = {"sayori happy": forms}
 
-    functions["_scenelight_save_capture_plan"](destination, "signature", names, forms, requests)
+    functions["_scenelight_save_capture_plan"](
+        destination, "signature", names, forms, requests, CAPTURE_PLAN_VERSION
+    )
     payload = json.loads((tmp_path / "capture_plan.json").read_text())
     assert payload["version"] == CAPTURE_PLAN_VERSION
     assert CAPTURE_PLAN_VERSION > 2
-    assert functions["_scenelight_load_capture_plan"](destination, "signature", names) == (
-        forms,
-        requests,
-    )
+    assert functions["_scenelight_load_capture_plan"](
+        destination, "signature", names, CAPTURE_PLAN_VERSION
+    ) == (forms, requests)
 
     payload["version"] = 2
     (tmp_path / "capture_plan.json").write_text(json.dumps(payload))
-    assert functions["_scenelight_load_capture_plan"](destination, "signature", names) is None
+    assert (
+        functions["_scenelight_load_capture_plan"](
+            destination, "signature", names, CAPTURE_PLAN_VERSION
+        )
+        is None
+    )

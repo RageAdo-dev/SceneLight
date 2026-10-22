@@ -30,6 +30,10 @@ init -999 python:
 
     _scenelight_inventory_wait_started = [None]
     _scenelight_component_cache = {}
+    # Forms whose alpha is recovered by the host from a black/white pair.
+    _scenelight_matting_captures = []
+    # Virtual screen size installed by the matting path, if it grew the screen.
+    _scenelight_capture_screen = [None]
     _scenelight_shared_component_root = [None]
     _scenelight_deferred_composites = [None]
     _scenelight_deferred_composite_stream = [None]
@@ -37,6 +41,118 @@ init -999 python:
     _scenelight_deferred_form_paths = [None]
     _scenelight_deferred_form_stream = [None]
     _scenelight_deferred_form_count = [0]
+
+    # A renderer that dies inside one form cannot report an exception, so the
+    # form is journaled before capture and skipped once it stops the process.
+    # One unreadable form must not fail the whole inventory.
+    _scenelight_form_crash_limit = 1
+
+    def _scenelight_structure_summary(displayable):
+        """List the displayable types under one form, for crash comparison."""
+
+        names = []
+
+        def walk(node, depth):
+            if node is None or depth > 3 or len(names) >= 24:
+                return
+            names.append(type(node).__name__)
+            for attribute in ("child", "target", "displayable"):
+                walk(getattr(node, attribute, None), depth + 1)
+            for child in getattr(node, "children", ()) or ():
+                walk(child, depth + 1)
+
+        try:
+            walk(displayable, 0)
+        except Exception:
+            pass
+        return names
+
+    def _scenelight_process_memory():
+        """Return this process's resident bytes, or None when unavailable."""
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _Counters(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            # ctypes defaults an undeclared return type to C int, which
+            # truncates the -1 pseudo-handle to 32 bits on 64-bit Windows and
+            # makes GetProcessMemoryInfo fail. Declare both signatures.
+            kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+            psapi.GetProcessMemoryInfo.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(_Counters),
+                wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+            counters = _Counters()
+            counters.cb = ctypes.sizeof(_Counters)
+            process = kernel32.GetCurrentProcess()
+            if not psapi.GetProcessMemoryInfo(
+                process, ctypes.byref(counters), counters.cb
+            ):
+                return None
+            return int(counters.WorkingSetSize)
+        except Exception:
+            pass
+        try:
+            import resource
+
+            usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Linux reports kilobytes; macOS reports bytes.
+            return int(usage) * (1024 if sys.platform.startswith("linux") else 1)
+        except Exception:
+            return None
+
+    _scenelight_trace_path = [None]
+
+    def _scenelight_log_capture_attempt(record):
+        """Append one durable line describing the current capture step.
+
+        The engine can be stopped by the renderer at any point, so each step is
+        flushed before the expensive work starts. The host reads this file when
+        a capture dies and puts the tail into the support report, which is the
+        only way to name the failing form.
+        """
+
+        filename = _scenelight_trace_path[0]
+        if not filename:
+            return
+        record["time"] = round(time.time(), 3)
+        record["renpy"] = renpy.version_string
+        record["renderer"] = os.environ.get("RENPY_RENDERER") or "automatic"
+        record.setdefault("screen", [config.screen_width, config.screen_height])
+        record.setdefault("draw", type(getattr(renpy.display, "draw", None)).__name__)
+        memory = _scenelight_process_memory()
+        if memory is not None:
+            record["memory_mb"] = round(memory / 1048576.0, 1)
+        try:
+            stream = open(filename, "a")
+            try:
+                # A renderer crash ends only this process: once the line is
+                # flushed the host can read it, so no sync is required.
+                stream.write(json.dumps(record, sort_keys=True) + "\n")
+                stream.flush()
+            finally:
+                stream.close()
+        except Exception:
+            # Diagnostics must never decide whether a capture succeeds.
+            pass
 
     def _scenelight_probe_texture_cleanup():
         # Exercise the compiled runtime, rather than trusting its version or
@@ -96,7 +212,7 @@ init -999 python:
         sys.stdout.write(message + "\n")
         sys.stdout.flush()
 
-    def _scenelight_load_capture_plan(filename, signature, sprite_names):
+    def _scenelight_load_capture_plan(filename, signature, sprite_names, version=3):
         if not signature or not os.path.isfile(filename):
             return None
         try:
@@ -105,13 +221,13 @@ init -999 python:
                 payload = json.load(stream)
             finally:
                 stream.close()
-            if payload.get("version") != 3 or payload.get("signature") != signature:
+            if payload.get("version") != int(version) or payload.get("signature") != signature:
                 return None
             if payload.get("sprite_names") != sorted(sprite_names):
                 return None
             raw_planned = payload.get("planned_forms")
             raw_requests = payload.get("request_forms")
-            if not isinstance(raw_planned, list) or not isinstance(raw_requests, dict):
+            if not isinstance(raw_planned, list) or not _scenelight_is_mapping(raw_requests):
                 return None
             planned = set()
             for value in raw_planned:
@@ -148,11 +264,12 @@ init -999 python:
         sprite_names,
         planned_forms,
         request_forms,
+        version=3,
     ):
         if not signature:
             return
         payload = {
-            "version": 3,
+            "version": int(version),
             "signature": signature,
             "sprite_names": sorted(sprite_names),
             "planned_forms": sorted(planned_forms),
@@ -243,33 +360,49 @@ init -999 python:
     def _scenelight_save_surface_image_atomic(surface, filename):
         temporary = _scenelight_capture_temporary(filename, "surface", ".png")
         try:
-            renpy.display.scale.image_save_unscaled(surface, temporary)
+            # Encode at the fastest lossless level. The default level costs
+            # about a fifth of the whole capture, and the host re-encodes these
+            # pixels anyway when it normalizes them.
+            saved = False
+            if _scenelight_pygame is not None:
+                save = getattr(getattr(_scenelight_pygame, "image", None), "save", None)
+                if save is not None:
+                    try:
+                        save(surface, temporary, 1)
+                        saved = True
+                    except TypeError:
+                        save(surface, temporary)
+                        saved = True
+            if not saved:
+                renpy.display.scale.image_save_unscaled(surface, temporary)
             _scenelight_atomic_replace(temporary, filename)
         finally:
             if os.path.exists(temporary):
                 os.remove(temporary)
 
     def _scenelight_save_surface_fast(surface, filename):
-        """Write a lossless low-CPU checkpoint for host-side normalization."""
-        if _scenelight_pygame is None:
-            _scenelight_save_surface_image_atomic(surface, filename)
-            return
-        temporary = _scenelight_capture_temporary(filename, "rgba", ".tmp")
+        """Write one captured form as a lossless PNG checkpoint.
+
+        Ren'Py 8's pygame_sdl2 exposes no pixel-buffer readback (``tostring``
+        and ``get_buffer`` are both gone), so the older raw-RGBA shortcut
+        always fell through to a PNG encode anyway. Do the PNG write directly
+        and let the host normalize its alpha.
+        """
+
+        _scenelight_save_surface_image_atomic(surface, filename)
+
+    def _scenelight_is_raw_surface(filename):
+        """Report whether a saved file is a complete SceneLight RGBA surface."""
+
         try:
-            width, height = surface.get_size()
-            raw = _scenelight_pygame.image.tostring(surface, "RGBA", False)
-            destination = open(temporary, "wb")
+            stream = open(filename, "rb")
             try:
-                destination.write(b"SCENELIGHT_RGBA1")
-                destination.write(struct.pack("<III", width, height, len(raw)))
-                destination.write(zlib.compress(raw, 1))
+                header = stream.read(16)
             finally:
-                destination.close()
-            _scenelight_atomic_replace(temporary, filename)
+                stream.close()
         except Exception:
-            if os.path.exists(temporary):
-                os.remove(temporary)
-            _scenelight_save_surface_image_atomic(surface, filename)
+            return False
+        return header[:16] == b"SCENELIGHT_RGBA1" or header[:8] == b"\x89PNG\r\n\x1a\n"
 
     def _scenelight_mark_surface_checkpoint(filename):
         marker = filename + ".surface-checkpoint"
@@ -531,10 +664,9 @@ init -999 python:
             )
             if not safe_tint_wrapper:
                 return None
-            # SceneLight's established alpha-preserving SWDraw capture ignores
-            # a top-level TintMatrix while resolving the same child pixels and
-            # alpha. Unwrapping only this exact static wrapper reproduces that
-            # output byte-for-byte and avoids one fallback render per variant.
+            # An identity TintMatrix wrapper only re-renders the same child
+            # pixels and alpha, so unwrapping it reproduces the identical
+            # output without one extra fallback render per variant.
             displayable = getattr(displayable, "child", None)
         if (
             flatten_type is None
@@ -796,6 +928,15 @@ init -999 python:
             stream.close()
         return result
 
+    def _scenelight_is_mapping(value):
+        """True for a mapping, whichever ``dict`` this engine exposes.
+
+        Ren'Py 7's store replaces ``dict`` with its own revertable type, so
+        ``isinstance(value, dict)`` rejects a plain dict parsed from JSON.
+        """
+
+        return hasattr(value, "get") and hasattr(value, "keys")
+
     def _scenelight_form_key(name):
         """Return Ren'Py's order-independent identity for one image form."""
 
@@ -803,6 +944,45 @@ init -999 python:
         if not parts:
             return ""
         return " ".join([parts[0]] + sorted(set(parts[1:])))
+
+    def _scenelight_load_form_attempts(filename):
+        """Read the crash journal a previous process left behind."""
+
+        try:
+            stream = open(filename, "r")
+            try:
+                value = json.load(stream)
+            finally:
+                stream.close()
+        except Exception:
+            return {}
+        if not _scenelight_is_mapping(value):
+            return {}
+        result = {}
+        for key, count in value.items():
+            try:
+                result[str(key)] = int(count)
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    def _scenelight_save_form_attempts(filename, attempts):
+        # Only a crash leaves an entry behind, so the journal stays tiny.
+        # Diagnostics must never fail a capture, so write errors are ignored.
+        temporary = filename + ".tmp"
+        try:
+            stream = open(temporary, "w")
+            try:
+                json.dump(attempts, stream, sort_keys=True)
+            finally:
+                stream.close()
+            _scenelight_atomic_replace(temporary, filename)
+        except Exception:
+            try:
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            except Exception:
+                pass
 
     def _scenelight_load_deferred_form_paths(filename):
         result = {}
@@ -890,60 +1070,103 @@ init -999 python:
             stream.close()
         _scenelight_atomic_replace(temporary, destination)
 
-    _scenelight_software_draw = [None]
-    _scenelight_prior_draw = [None]
 
-    def _scenelight_save_alpha_surface(displayable, relative):
-        """Render one dynamic sprite without flattening its alpha in the GPU readback.
+    def _scenelight_capture_pixel_limit():
+        """Longest edge, in pixels, that one readback may safely occupy.
 
-        Ren'Py versions before ``render_to_surface`` implement displayable
-        screenshots by drawing into the active window framebuffer. That path
-        reports the framebuffer as opaque and, on a scaled window, can also
-        stretch a square sprite to the window aspect ratio. Ren'Py's bundled
-        software compositor consumes the same resolved Render tree but writes
-        a real alpha-bearing pygame surface. Selecting it for the isolated
-        sprite-capture phase preserves LayeredImage, matrixcolor, ATL, and
-        layout semantics without changing SceneLight's live shader path.
+        Ren'Py renders screenshots into an offscreen framebuffer bounded by
+        GL_MAX_TEXTURE_SIZE and GL_MAX_RENDERBUFFER_SIZE. Drivers report at
+        least 4096 and most report 8192 or more, so 8192 fits every card the
+        engine supports without needlessly shrinking ordinary sprites. Larger
+        forms are fitted into the limit instead of being clipped.
         """
 
-        import renpy.display.swdraw as swdraw_module
+        override = os.environ.get("SCENELIGHT_MAX_CAPTURE_SIZE", "").strip()
+        if override:
+            try:
+                return max(256, int(override))
+            except ValueError:
+                pass
+        return 8192
 
-        software_draw_type = getattr(swdraw_module, "SWDraw", None)
-        if software_draw_type is None:
-            raise Exception("Ren'Py has no alpha-preserving software compositor")
+    def _scenelight_offscreen_readback_available():
+        """Whether this engine can screenshot a render tree into an RGBA buffer.
 
-        software_draw = _scenelight_software_draw[0]
-        if software_draw is None:
-            software_draw = software_draw_type()
-            # Ren'Py 8.5 moved these scale fields from ``reset`` to ``init``.
-            # Calling ``init`` here would replace the game's live OpenGL
-            # window, so provide the identity render-to-texture state directly.
-            if not hasattr(software_draw, "draw_per_virt"):
-                matrix_type = renpy.display.render.Matrix2D
-                software_draw.draw_per_virt = 1.0
-                software_draw.virt_to_draw = matrix_type(1.0, 0.0, 0.0, 1.0)
-                software_draw.draw_to_virt = matrix_type(1.0, 0.0, 0.0, 1.0)
-            if getattr(software_draw, "screen", None) is None:
-                software_draw.screen = swdraw_module.surface(1, 1, True)
-                software_draw.window = software_draw.screen
-                software_draw.fullscreen_surface = software_draw.screen
-            _scenelight_software_draw[0] = software_draw
-        if renpy.display.draw is not software_draw:
-            # Backgrounds are captured before forms. Clear their GPU Render
-            # objects while the GPU renderer still owns them, then switch only
-            # once for the complete sprite batch. Mixing cached GPU Textures
-            # and software Surfaces across thousands of per-form switches can
-            # crash native Ren'Py inside its compiled renderer.
-            renpy.display.render.free_memory()
-            # The image cache can retain renderer-owned textures separately
-            # from the Render cache. Discard them before the handoff as well;
-            # otherwise a later character form can feed a GL texture to the
-            # software compositor and crash inside Ren'Py's compiled draw code.
-            renpy.display.im.free_memory()
-            if _scenelight_prior_draw[0] is None:
-                _scenelight_prior_draw[0] = renpy.display.draw
-            renpy.display.draw = software_draw
+        Ren'Py 8 takes an offscreen screenshot of the tree it is given. Ren'Py 7
+        only ever grabs its window, and clears it opaque, so a form captured that
+        way loses both its size and its alpha.
+        """
 
+        return tuple(renpy.version_tuple[:1]) >= (8,)
+
+    def _scenelight_capture_grow_screen(width, height):
+        """Make the engine's virtual screen at least as large as one form.
+
+        Returns True when the renderer was re-initialized at the new size. A
+        renderer that refuses the new size keeps its old one, and the caller
+        falls back to a window grab that is still correct, just smaller.
+        """
+
+        draw = renpy.display.draw
+        installed = _scenelight_capture_screen[0]
+        if installed is None:
+            installed = (int(config.screen_width), int(config.screen_height))
+        if installed[0] >= width and installed[1] >= height:
+            return False
+        try:
+            target = (int(width), int(height))
+            max_size = (getattr(draw, "info", {}) or {}).get("max_window_size")
+            if max_size:
+                target = (
+                    min(target[0], int(max_size[0])),
+                    min(target[1], int(max_size[1])),
+                )
+            renpy.game.preferences.physical_size = target
+            draw.init(target)
+            _scenelight_capture_screen[0] = target
+            return True
+        except Exception:
+            return False
+
+    def _scenelight_resume_matted(filename):
+        """Reuse a black/white pair an interrupted capture already wrote."""
+
+        sidecar = filename + ".matting.json"
+        black = filename + ".black.png"
+        white = filename + ".white.png"
+        try:
+            if not (
+                os.path.isfile(sidecar)
+                and os.path.isfile(black)
+                and os.path.isfile(white)
+            ):
+                return None
+            if os.path.getsize(black) <= 32 or os.path.getsize(white) <= 32:
+                return None
+            with open(sidecar, "r") as stream:
+                entry = json.load(stream)
+            if not _scenelight_is_mapping(entry) or not entry.get("relative"):
+                return None
+            return entry
+        except Exception:
+            return None
+
+    def _scenelight_capture_matted(displayable, relative, name=None):
+        """Recover a character form's alpha from two opaque grabs.
+
+        A Ren'Py 7 renderer can draw a form but cannot read one back with alpha.
+        Drawing it over pure black returns its premultiplied colour, and over
+        pure white returns that colour plus the uncovered background, so
+
+            alpha  = 1 - (white - black)
+            colour = black / alpha
+
+        recovers the form exactly. Both grabs are written next to the form and
+        combined on the host, which has numpy; the engine only has to draw.
+        """
+
+        filename = os.path.join(config.basedir, relative)
+        draw = renpy.display.draw
         rendered = renpy.render(
             displayable,
             config.screen_width,
@@ -951,17 +1174,262 @@ init -999 python:
             0.0,
             0.0,
         )
-        surface = software_draw.render_to_texture(rendered, True)
+        width = max(1, int(round(rendered.width)))
+        height = max(1, int(round(rendered.height)))
+
+        limit = _scenelight_capture_pixel_limit()
+        if width > limit or height > limit:
+            fitted = min(limit / float(width), limit / float(height))
+            width = max(1, int(width * fitted))
+            height = max(1, int(height * fitted))
+            displayable = renpy.display.transform.Transform(
+                displayable, fit="contain", xysize=(width, height)
+            )
+
+        saved_physical = getattr(renpy.game.preferences, "physical_size", None)
+        started = time.time()
+        try:
+            # A Ren'Py 7 renderer projects virtual pixels into its window, so the
+            # virtual screen bounds how much of a form can be read back at all.
+            # Growing it to the form's own size keeps the capture 1:1.
+            if _scenelight_capture_grow_screen(width, height):
+                pass
+            else:
+                renpy.game.preferences.physical_size = (width, height)
+                if hasattr(draw, "resize"):
+                    draw.resize()
+            if hasattr(draw, "update"):
+                draw.update(force=True)
+
+            grabbed = None
+            solid_type = getattr(getattr(renpy.display, "imagelike", None), "Solid", None)
+            composite_type = getattr(
+                getattr(renpy.display, "layout", None), "Composite", None
+            )
+            # The backdrop covers the whole screen, not just the form. Whatever
+            # the grab holds beyond the form then matches between the two passes
+            # and reads back as fully transparent instead of as a solid band.
+            screen = _scenelight_capture_screen[0] or (
+                int(config.screen_width),
+                int(config.screen_height),
+            )
+            backdrop_width = max(width, screen[0])
+            backdrop_height = max(height, screen[1])
+            for label, colour in (("black", "#000000"), ("white", "#ffffff")):
+                backdrop = composite_type(
+                    (backdrop_width, backdrop_height),
+                    (0, 0),
+                    solid_type(colour),
+                    (0, 0),
+                    displayable,
+                )
+                tree = renpy.render(
+                    backdrop, backdrop_width, backdrop_height, 0.0, 0.0
+                )
+                surface = draw.screenshot(tree)
+                grabbed = surface.get_size()
+                _scenelight_save_surface_fast(
+                    surface, "%s.%s.png" % (filename, label)
+                )
+                tree = None
+                surface = None
+                backdrop = None
+                # Two full-screen draws per form are the largest allocations in
+                # this path; without this the capture grows into gigabytes.
+                try:
+                    renpy.display.render.free_memory()
+                except Exception:
+                    pass
+        finally:
+            # The window stays at the captured size for the rest of the batch;
+            # a disposable capture process never needs the game's own size again.
+            renpy.game.preferences.physical_size = saved_physical
+
+        installed = _scenelight_capture_screen[0] or (
+            int(config.screen_width),
+            int(config.screen_height),
+        )
+        scale = (grabbed[0] / float(installed[0])) if installed[0] else 1.0
+        crop = (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        )
+
+        # The host rebuilds the form from the pair, so the checkpoint records
+        # that this form's pixels are on disk rather than that the file exists.
+        _scenelight_mark_surface_checkpoint(filename)
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "matted",
+                "form": name,
+                "size": [width, height],
+                "grab": list(grabbed or (width, height)),
+                "crop": list(crop),
+                "seconds": round(time.time() - started, 4),
+            }
+        )
+        entry = {
+            "form": name,
+            "relative": relative.replace(os.sep, "/"),
+            "size": [width, height],
+            "grab": list(grabbed or (width, height)),
+            "crop": list(crop),
+        }
+        try:
+            with open(filename + ".matting.json", "w") as stream:
+                json.dump(entry, stream)
+        except Exception:
+            pass
+        _scenelight_matting_captures.append(entry)
+
+    def _scenelight_save_alpha_surface(displayable, relative, name=None):
+        """Render one character form through the engine's own GPU renderer.
+
+        The software compositor was used here because it returns a surface with
+        a real alpha channel. It also stops the engine on any subtree that
+        carries a zoom or rotation (Ren'Py's compiled transformed blit), which
+        is exactly what a layered character with scaled wings uses. The GPU
+        renderer resolves those transforms the same way gameplay does, and its
+        RGBA readback keeps the alpha channel, un-premultiplied by Ren'Py, so
+        there is no reason to hand character forms to software at all.
+        """
+
+        draw = renpy.display.draw
+        if type(draw).__name__ == "SWDraw":
+            # Software readback only returns the window, never the form, so a
+            # GPU-less machine cannot capture characters at all.
+            raise Exception("SceneLight character capture requires a GPU renderer")
+
+        if not _scenelight_offscreen_readback_available():
+            _scenelight_capture_matted(displayable, relative, name)
+            return
+
+        render_started = time.time()
+        _scenelight_log_capture_attempt(
+            {"stage": "rendering", "form": name, "target": type(displayable).__name__}
+        )
+        rendered = renpy.render(
+            displayable,
+            config.screen_width,
+            config.screen_height,
+            0.0,
+            0.0,
+        )
+        render_done = time.time()
+
+        # Ren'Py reads back through its offscreen framebuffer, which the driver
+        # caps at GL_MAX_TEXTURE_SIZE / GL_MAX_RENDERBUFFER_SIZE. A form drawn
+        # larger than that is clipped, and the clipped margin reads back
+        # transparent. Fitting oversized forms into the cap keeps every machine
+        # producing a complete form; the on-screen scale is unchanged.
+        scale = float(getattr(draw, "draw_per_virt", 1.0) or 1.0)
+        limit = _scenelight_capture_pixel_limit()
+        if scale > 0 and limit:
+            if rendered.width * scale > limit or rendered.height * scale > limit:
+                fitted_size = max(1, int(limit / scale))
+                rendered = renpy.render(
+                    renpy.display.transform.Transform(
+                        displayable, fit="contain", xysize=(fitted_size, fitted_size)
+                    ),
+                    config.screen_width,
+                    config.screen_height,
+                    0.0,
+                    0.0,
+                )
+                _scenelight_log_capture_attempt(
+                    {
+                        "stage": "capped",
+                        "form": name,
+                        "size": [rendered.width, rendered.height],
+                        "limit": limit,
+                        "scale": round(scale, 3),
+                    }
+                )
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "rendered",
+                "form": name,
+                "size": [rendered.width, rendered.height],
+                "render_seconds": round(time.time() - render_started, 4),
+            }
+        )
+        surface = draw.screenshot(rendered)
+        readback_done = time.time()
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "composited",
+                "form": name,
+                "surface": list(surface.get_size()),
+                "readback_seconds": round(readback_done - render_done, 4),
+            }
+        )
+
+        # The readback is at the drawable resolution; normalize it back to
+        # virtual pixels so every form shares one pixel scale.
+        scale_seconds = 0.0
+        try:
+            scale = float(getattr(draw, "draw_per_virt", 1.0) or 1.0)
+        except Exception:
+            scale = 1.0
+        if scale <= 0:
+            scale = 1.0
+
+        # A renderer that ignores the render tree hands back its window instead
+        # of the form. Older engines do exactly that, and a window-sized grab
+        # written as a character form is worse than a visible failure: it looks
+        # like a successful scan and lights the wrong pixels.
+        expected_width = int(round(rendered.width * scale))
+        expected_height = int(round(rendered.height * scale))
+        if (
+            abs(surface.get_width() - expected_width) > 2
+            or abs(surface.get_height() - expected_height) > 2
+        ):
+            raise Exception(
+                "SceneLight capture needs offscreen readback; this engine "
+                "returned a %dx%d window grab for a %dx%d form"
+                % (
+                    surface.get_width(),
+                    surface.get_height(),
+                    expected_width,
+                    expected_height,
+                )
+            )
+
+        if scale != 1.0:
+            try:
+                width = int(round(surface.get_width() / scale))
+                height = int(round(surface.get_height() / scale))
+                scale_started = time.time()
+                surface = renpy.display.scale.smoothscale(surface, (width, height))
+                scale_seconds = time.time() - scale_started
+            except Exception:
+                pass
 
         filename = os.path.join(config.basedir, relative)
+        save_started = time.time()
         _scenelight_save_surface_fast(surface, filename)
         _scenelight_mark_surface_checkpoint(filename)
+        save_seconds = time.time() - save_started
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "stored",
+                "form": name,
+                "scale_seconds": round(scale_seconds, 4),
+                "save_seconds": round(save_seconds, 4),
+                "total_seconds": round(time.time() - render_started, 4),
+            }
+        )
+        try:
+            renpy.display.render.free_memory()
+        except Exception:
+            pass
 
     def _scenelight_render_to_file(
         displayable,
         relative,
         composite_captures,
         preserve_alpha=False,
+        name=None,
     ):
         # Static Ren'Py image manipulators already have an exact, alpha-bearing
         # surface in the engine's image cache. Saving that surface avoids an
@@ -1012,8 +1480,17 @@ init -999 python:
                 and os.path.isfile(marker)
             ):
                 return "surface-checkpoint"
-            _scenelight_save_alpha_surface(displayable, relative)
-            return "surface"
+            if not _scenelight_offscreen_readback_available():
+                resumed = _scenelight_resume_matted(filename)
+                if resumed is not None:
+                    _scenelight_matting_captures.append(resumed)
+                    return "matted"
+            _scenelight_save_alpha_surface(displayable, relative, name)
+            if _scenelight_offscreen_readback_available():
+                return "surface"
+            # The host builds this one from the black/white pair, so the file
+            # does not exist yet and must not be queued for normalization.
+            return "matted"
 
         render_to_file = getattr(renpy, "render_to_file", None)
         if render_to_file is not None:
@@ -1399,8 +1876,18 @@ init -999 python:
                 plan_form(requested_name, " ".join(canonical))
 
     def _scenelight_capture_filename(kind, name):
+        # Hash the order-independent form key, not the spelling. Ren'Py treats
+        # "yuri gj wings6 1" and "yuri 1 gj wings6" as the same form, and a plan
+        # that picks a different representative spelling must still restore the
+        # pixels captured by the previous process. Character paths carry nothing
+        # but that digest: readable prefixes and the composite job hash both
+        # depend on the spelling, which is what made restores miss the files.
+        digest = hashlib.sha256(
+            _scenelight_form_key(name).encode("utf-8")
+        ).hexdigest()[:16]
+        if kind == "sprite":
+            return "sprite_%s.png" % digest
         readable = "_".join(part for part in name.lower().split() if part)[:52]
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
         return "%s_%s_%s.png" % (kind, readable, digest)
 
     def _scenelight_require_resolved_capture(displayable, name):
@@ -1579,6 +2066,41 @@ init -999 python:
                 json.dump(payload, stream)
                 stream.write("\n")
             _scenelight_atomic_replace(temporary_progress_path, progress_path)
+
+        trace_path = os.path.join(output_root, "capture_attempts.jsonl")
+
+        def _scenelight_trim_capture_trace(path, limit=1500):
+            """Keep the trace bounded across resumed attempts."""
+
+            try:
+                if os.path.getsize(path) <= 8 * 1024 * 1024:
+                    return
+                stream = open(path, "r")
+                try:
+                    lines = stream.readlines()
+                finally:
+                    stream.close()
+                stream = open(path, "w")
+                try:
+                    stream.writelines(lines[-limit:])
+                finally:
+                    stream.close()
+            except Exception:
+                pass
+
+        _scenelight_trace_path[0] = trace_path
+        _scenelight_trim_capture_trace(trace_path)
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "context",
+                "project": config.basedir,
+                "output": output_relative,
+                "request": request_path,
+                "explicit_forms": len(request.get("explicit_forms") or ()),
+                "review_only": bool(request.get("review_only")),
+                "defer_composites": bool(request.get("defer_composites")),
+            }
+        )
 
         character_tags = set(str(tag).split()[0] for tag in request.get("character_tags", ()))
         explicit_character_tags = set(
@@ -1867,6 +2389,7 @@ init -999 python:
         )
 
         def capture(kind, name):
+            capture_started = time.time()
             filename = _scenelight_capture_filename(kind, name)
             relative = os.path.join(output_relative, filename)
             capture_mode = None
@@ -1919,6 +2442,28 @@ init -999 python:
                     if kind == "sprite"
                     else None
                 )
+                if kind == "sprite":
+                    sources = []
+                    try:
+                        for source in _scenelight_visible_sources(displayable)[:24]:
+                            sources.append(str(source))
+                    except Exception:
+                        sources = []
+                    _scenelight_log_capture_attempt(
+                        {
+                            "stage": "resolved",
+                            "form": name,
+                            "displayable": type(displayable).__name__,
+                            "tree": _scenelight_structure_summary(displayable),
+                            "sources": sources,
+                            "structure": (
+                                structure_signature[:16]
+                                if isinstance(structure_signature, str)
+                                else None
+                            ),
+                            "output": relative.replace(os.sep, "/"),
+                        }
+                    )
                 structure_relative = structure_index.get(structure_signature)
                 if structure_relative is not None:
                     structure_absolute = os.path.join(
@@ -1944,6 +2489,7 @@ init -999 python:
                         relative,
                         composite_captures,
                         preserve_alpha=(kind == "sprite"),
+                        name=name,
                     )
                     normalized_relative = relative.replace(os.sep, "/")
                     if structure_signature is not None and capture_mode in (
@@ -1967,9 +2513,38 @@ init -999 python:
                     normalized_captures.add(normalized_relative)
                 if kind == "scene" and capture_mode == "renderer":
                     _scenelight_mark_scene_checkpoint(absolute_filename)
+                if kind == "sprite":
+                    try:
+                        saved_bytes = os.path.getsize(
+                            os.path.join(
+                                config.basedir,
+                                normalized_relative.replace("/", os.sep),
+                            )
+                        )
+                    except OSError:
+                        saved_bytes = None
+                    _scenelight_log_capture_attempt(
+                        {
+                            "seconds": round(time.time() - capture_started, 3),
+                            "stage": "saved",
+                            "form": name,
+                            "capture_mode": capture_mode,
+                            "output": normalized_relative,
+                            "bytes": saved_bytes,
+                        }
+                    )
                 return normalized_relative
             except Exception:
-                capture_failures[(kind, name)] = traceback.format_exc().splitlines()[-1]
+                detail = traceback.format_exc().splitlines()[-1]
+                capture_failures[(kind, name)] = detail
+                _scenelight_log_capture_attempt(
+                    {
+                        "stage": "error",
+                        "kind": kind,
+                        "form": name,
+                        "error": detail,
+                    }
+                )
                 return None
 
         def capture_sprite(name):
@@ -1985,6 +2560,8 @@ init -999 python:
             _scenelight_record_deferred_form(normalized, relative)
             return True
 
+        restore_stats = {"exact": 0, "recovered": 0, "unmarked": 0, "missing": 0}
+
         def restore_sprite_checkpoint(name):
             normalized = " ".join(name.lower().split())
             filename = _scenelight_capture_filename("sprite", normalized)
@@ -1996,29 +2573,59 @@ init -999 python:
                 candidates.append(saved)
             if deterministic not in candidates:
                 candidates.append(deterministic)
+            # The filename keeps a readable copy of the planned spelling, which
+            # can change between processes even when the form itself is the
+            # same. Match the stable digest suffix so earlier pixels are found.
+            digest = hashlib.sha256(
+                _scenelight_form_key(normalized).encode("utf-8")
+            ).hexdigest()[:12]
+            try:
+                directory = os.path.join(config.basedir, output_relative)
+                suffix = "_%s.png" % digest
+                for entry in os.listdir(directory):
+                    if not entry.startswith("sprite_") or not entry.endswith(suffix):
+                        continue
+                    candidate = os.path.join(output_relative, entry).replace(os.sep, "/")
+                    if candidate not in candidates:
+                        candidates.append(candidate)
+            except OSError:
+                pass
+            seen_file = False
             for relative in candidates:
                 absolute = os.path.join(config.basedir, relative.replace("/", os.sep))
                 composite_job = _scenelight_composite_job_path(relative)
-                if (
-                    os.path.isfile(absolute)
-                    and os.path.getsize(absolute) > 32
-                    and os.path.isfile(absolute + ".surface-checkpoint")
-                ):
+                present = os.path.isfile(absolute) and os.path.getsize(absolute) > 32
+                if present:
+                    seen_file = True
+                if present and os.path.isfile(absolute + ".surface-checkpoint"):
                     surface_captures.add(relative)
-                elif (
-                    os.path.isfile(absolute)
-                    and os.path.getsize(absolute) > 32
-                    and os.path.isfile(absolute + ".surface-normalized")
-                ):
+                elif present and os.path.isfile(absolute + ".surface-normalized"):
                     normalized_captures.add(relative)
+                elif present and _scenelight_is_raw_surface(absolute) and not (
+                    os.path.isfile(absolute + ".composite-normalized")
+                    or os.path.isfile(composite_job)
+                    or relative in composite_captures
+                ):
+                    # The renderer can stop after the atomic pixel write but
+                    # before the marker. Those pixels are complete, so keep the
+                    # form and mark it instead of rendering it again and hitting
+                    # the same stop on every restart.
+                    surface_captures.add(relative)
+                    try:
+                        _scenelight_mark_surface_checkpoint(absolute)
+                    except Exception:
+                        pass
+                    restore_stats["recovered"] += 1
                 elif not (
                     os.path.isfile(absolute + ".composite-normalized")
                     or os.path.isfile(composite_job)
                     or relative in composite_captures
                 ):
                     continue
+                restore_stats["exact"] += 1
                 captures["sprites"][normalized] = relative
                 return True
+            restore_stats["unmarked" if seen_file else "missing"] += 1
             return False
 
         def plan_form(requested_name, actual_name):
@@ -2092,7 +2699,12 @@ init -999 python:
         cached_plan = (
             None
             if explicit_forms is not None
-            else _scenelight_load_capture_plan(plan_path, plan_signature, sprite_names)
+            else _scenelight_load_capture_plan(
+                plan_path,
+                plan_signature,
+                sprite_names,
+                request.get("plan_version", 3),
+            )
         )
         if explicit_forms is not None:
             for explicit_form in sorted(explicit_forms):
@@ -2136,6 +2748,7 @@ init -999 python:
                 sprite_names,
                 planned_forms,
                 request_forms,
+                request.get("plan_version", 3),
             )
 
         _scenelight_log(
@@ -2167,7 +2780,77 @@ init -999 python:
                     restore_index,
                     len(ordered_planned_forms),
                 )
+        if ordered_planned_forms:
+            _scenelight_log(
+                "SceneLight restore detail: %d ready (%d recovered), %d missing of %d."
+                % (
+                    restore_stats["exact"],
+                    restore_stats["recovered"],
+                    restore_stats["missing"],
+                    len(ordered_planned_forms),
+                )
+            )
+            _scenelight_log_capture_attempt(
+                {
+                    "stage": "restore",
+                    "ready": restore_stats["exact"],
+                    "recovered": restore_stats["recovered"],
+                    "missing": restore_stats["missing"],
+                    "total": len(ordered_planned_forms),
+                }
+            )
+        # A crash exits the process before the failing form can be recorded, so
+        # the journal written ahead of each capture is the only evidence of it.
+        # Skipping that one form keeps the rest of the inventory captureable.
         restored_forms = len(ordered_planned_forms) - len(pending_forms)
+        host_skips = set(
+            " ".join(str(skipped_name).lower().split())
+            for skipped_name in (request.get("skip_forms") or ())
+        )
+        if host_skips:
+            # The controller records the form that was in flight when a process
+            # died, which is more reliable than this process's own journal.
+            for skipped_name in sorted(host_skips):
+                errors.append(
+                    "sprite %s: the renderer stopped while capturing this form"
+                    % skipped_name
+                )
+            pending_forms = [
+                actual_name
+                for actual_name in pending_forms
+                if actual_name not in host_skips
+            ]
+            _scenelight_log(
+                "SceneLight skipped %d form(s) that had already stopped the renderer."
+                % len(host_skips)
+            )
+        attempt_path = os.path.join(output_root, "form_attempts.json")
+        attempt_counts = _scenelight_load_form_attempts(attempt_path)
+        quarantined_names = [
+            actual_name
+            for actual_name in pending_forms
+            if attempt_counts.get(_scenelight_form_key(actual_name), 0)
+            >= _scenelight_form_crash_limit
+        ]
+        if quarantined_names:
+            quarantined_keys = set(
+                _scenelight_form_key(actual_name) for actual_name in quarantined_names
+            )
+            for quarantined_name in quarantined_names:
+                errors.append(
+                    "sprite %s: the renderer stopped while capturing this form"
+                    % quarantined_name
+                )
+            pending_forms = [
+                actual_name
+                for actual_name in pending_forms
+                if _scenelight_form_key(actual_name) not in quarantined_keys
+            ]
+            _scenelight_log(
+                "SceneLight skipped %d form(s) that stopped the renderer: %s"
+                % (len(quarantined_names), ", ".join(sorted(quarantined_names)))
+            )
+
         if ordered_planned_forms:
             publish_progress(
                 "planned",
@@ -2185,9 +2868,46 @@ init -999 python:
                 "SceneLight restored %d/%d completed sprite forms; %d remain."
                 % (restored_forms, len(ordered_planned_forms), len(pending_forms))
             )
+        previous_form_started = [None]
         for index, actual_name in enumerate(pending_forms, 1):
-            capture_sprite(actual_name)
             completed = restored_forms + index
+            # Publish the form before rendering it. A native crash leaves this
+            # as the last progress record, which names the offending image in
+            # the support report instead of the form that finished before it.
+            publish_progress(
+                "form.start",
+                completed,
+                len(ordered_planned_forms),
+                item=actual_name,
+            )
+            attempt_started = time.time()
+            _scenelight_log_capture_attempt(
+                {
+                    "stage": "attempt",
+                    "form": actual_name,
+                    "index": completed,
+                    "total": len(ordered_planned_forms),
+                    "output": os.path.join(
+                        output_relative,
+                        _scenelight_capture_filename("sprite", actual_name),
+                    ).replace(os.sep, "/"),
+                    "seconds_since_previous_form": (
+                        round(attempt_started - previous_form_started[0], 3)
+                        if previous_form_started[0] is not None
+                        else None
+                    ),
+                }
+            )
+            previous_form_started[0] = attempt_started
+            form_key = _scenelight_form_key(actual_name)
+            attempt_counts[form_key] = attempt_counts.get(form_key, 0) + 1
+            _scenelight_save_form_attempts(attempt_path, attempt_counts)
+            capture_sprite(actual_name)
+            # Reaching this line means the renderer survived the form, so the
+            # journal entry must not count against the next attempt.
+            if form_key in attempt_counts:
+                del attempt_counts[form_key]
+                _scenelight_save_form_attempts(attempt_path, attempt_counts)
             if index == 1 or index % 25 == 0 or index == len(pending_forms):
                 _scenelight_log(
                     "SceneLight resolver form %d/%d"
@@ -2221,9 +2941,6 @@ init -999 python:
             renpy.display.im.free_memory()
         except Exception:
             pass
-        if _scenelight_prior_draw[0] is not None:
-            renpy.display.draw = _scenelight_prior_draw[0]
-            _scenelight_prior_draw[0] = None
 
         character_candidates = {}
         for tag in sorted(review_tags):
@@ -2265,6 +2982,7 @@ init -999 python:
             "scene_frame_sources": scene_frame_sources,
             "sprites": captures["sprites"],
             "surface_captures": sorted(surface_captures),
+            "matting_captures": list(_scenelight_matting_captures),
             "normalized_captures": sorted(normalized_captures),
             "composite_captures": composite_captures,
             "resolved_requests": sorted(resolved_requests),
