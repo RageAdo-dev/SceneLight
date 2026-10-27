@@ -42,10 +42,14 @@ from .sidecar import STATE_NAME, managed_project_root, renpy_runtime_command
 from .source_types import VISUAL_SOURCE_SUFFIXES
 
 CAPTURE_VERSION = 42
-CAPTURE_PLAN_VERSION = 3
+CAPTURE_PLAN_VERSION = 5
 CAPTURE_PIXEL_VERSION = 2
 CAPTURE_PROCESS_RESUME_LIMIT = 32
 CAPTURE_PROCESS_BATCH_SIZE = 512
+# Character review renders every form in software. Restarting the engine
+# keeps its render and image caches bounded, which is where a native stop
+# on layered forms comes from.
+REVIEW_PROCESS_BATCH_SIZE = 16
 # Parallel workers checkpoint every form and normally stay alive until their
 # chunk finishes. If a renderer crashes, the worker resumes from those durable
 # checkpoints. A fixed form limit made healthy workers restart in lockstep,
@@ -192,6 +196,93 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
                 digest.update(chunk)
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _form_key(name: str) -> str:
+    """Return Ren'Py's order-independent identity for one image form."""
+
+    parts = " ".join(str(name).lower().split()).split()
+    if not parts:
+        return ""
+    return " ".join([parts[0]] + sorted(set(parts[1:])))
+
+
+def _last_attempted_form(progress_path: Path) -> str | None:
+    """Return the sprite form that was rendering when the process stopped."""
+
+    try:
+        payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("stage") != "form.start":
+        return None
+    item = payload.get("item")
+    return str(item) if isinstance(item, str) and item.strip() else None
+
+
+def _add_request_skip_form(request_path: Path, name: str) -> bool:
+    """Record a form the renderer cannot survive, so the next run leaves it out."""
+
+    try:
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    skip = payload.get("skip_forms")
+    skip = [str(value) for value in skip] if isinstance(skip, list) else []
+    normalized = " ".join(name.lower().split())
+    if normalized in skip:
+        return False
+    skip.append(normalized)
+    payload["skip_forms"] = skip
+    try:
+        request_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def _with_plan_version(request: dict) -> dict:
+    """Tell the helper which capture plan version this controller speaks."""
+
+    request["plan_version"] = CAPTURE_PLAN_VERSION
+    return request
+
+
+def _reset_request_skips(request_path: Path) -> None:
+    """Give a new backend a clean chance at the forms the last one lost."""
+
+    try:
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(payload, dict) and payload.pop("skip_forms", None) is not None:
+        try:
+            request_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            return
+
+
+def _prune_stale_capture_caches(parent: Path, current: Path) -> None:
+    """Delete review caches left by an older resolver or capture plan.
+
+    The directory name includes the protocol and plan versions, so a changed
+    capture implementation starts from a fresh cache. Removing the siblings
+    keeps the old checkpoints from accumulating on disk after an upgrade.
+    """
+
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry == current or not entry.is_dir():
+            continue
+        try:
+            shutil.rmtree(entry)
+        except OSError:
+            continue
 
 
 def _project_signature(discovery: ProjectDiscovery, *, content_signature: str | None = None) -> str:
@@ -757,12 +848,14 @@ def _deduplicate_surface_capture_paths(
     if not aliases:
         return unique_paths
 
-    for group_name in ("scenes", "sprites"):
+    for group_name in ("scenes", "sprites", "character_candidates"):
         group = payload.get(group_name, {})
         if not isinstance(group, dict):
             continue
         for key, raw_value in list(group.items()):
-            value = (project_root / str(raw_value)).resolve()
+            if raw_value is None:
+                continue
+            value = (project_root / str(raw_value).replace("\\", "/")).resolve()
             master = aliases.get(value)
             if master is not None:
                 group[key] = master.relative_to(project_root).as_posix()
@@ -805,6 +898,338 @@ def _composite_pipeline_worker_count(item_count: int) -> int:
     # workers run native NumPy/Pillow code. The same CPU/memory scheduler is a
     # better throughput bound than reserving one full logical CPU.
     return _surface_normalization_worker_count(item_count)
+
+
+def _matting_alpha(black: np.ndarray, white: np.ndarray) -> np.ndarray:
+    """Recover alpha from one form drawn over black and over white.
+
+    The renderer composites premultiplied colour onto an opaque background, so
+    the black grab is the premultiplied colour and the white grab is that colour
+    plus whatever the form did not cover. Their difference is exactly the
+    uncovered share, which inverts to alpha.
+    """
+
+    return np.clip(255.0 - (white - black).mean(axis=2), 0.0, 255.0)
+
+
+def _combine_matting_capture(
+    project_root: Path,
+    entry: dict[str, object],
+) -> Path | None:
+    """Build one form's RGBA image from its black/white capture pair."""
+
+    relative = str(entry.get("relative") or "").replace("\\", "/")
+    if not relative:
+        return None
+    root = project_root.resolve()
+    output = (root / relative).resolve()
+    try:
+        output.relative_to(root)
+    except ValueError as error:
+        raise ValueError("SceneLight matting capture escaped the project directory") from error
+
+    black_path = output.with_name(output.name + ".black.png")
+    white_path = output.with_name(output.name + ".white.png")
+    sidecar_path = output.with_name(output.name + ".matting.json")
+    if output.is_file():
+        black_path.unlink(missing_ok=True)
+        white_path.unlink(missing_ok=True)
+        sidecar_path.unlink(missing_ok=True)
+        return output
+    if not (black_path.is_file() and white_path.is_file()):
+        return None
+
+    black = np.asarray(Image.open(black_path).convert("RGB"), dtype=np.float32)
+    white = np.asarray(Image.open(white_path).convert("RGB"), dtype=np.float32)
+    if black.shape != white.shape:
+        raise ValueError("SceneLight matting captures disagree on size")
+
+    # A form smaller than the engine's screen sits in the top-left corner of a
+    # larger grab, and the cleared margin would otherwise read as opaque.
+    crop = entry.get("crop")
+    if isinstance(crop, (list, tuple)) and len(crop) == 2:
+        crop_width, crop_height = int(crop[0]), int(crop[1])
+        if 0 < crop_width <= black.shape[1] and 0 < crop_height <= black.shape[0]:
+            black = black[:crop_height, :crop_width]
+            white = white[:crop_height, :crop_width]
+
+    alpha = _matting_alpha(black, white)
+    # The black grab already holds the form's colour multiplied by its own
+    # alpha, which is exactly what the normalizer stores for every other path.
+    image = Image.fromarray(
+        np.dstack([black, alpha]).astype(np.uint8),
+        "RGBA",
+    )
+    size = entry.get("size")
+    if isinstance(size, (list, tuple)) and len(size) == 2:
+        width, height = int(size[0]), int(size[1])
+        if width > 0 and height > 0 and image.size != (width, height):
+            image = image.resize((width, height), Image.LANCZOS)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".slcm-", suffix=".tmp", dir=str(output.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        image.save(temporary, format="PNG", compress_level=1)
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    black_path.unlink(missing_ok=True)
+    white_path.unlink(missing_ok=True)
+    sidecar_path.unlink(missing_ok=True)
+    return output
+
+
+def _combine_matting_captures(project_root: Path, payload: dict[str, object]) -> None:
+    """Rebuild every form an old engine captured as a black/white pair."""
+
+    entries = payload.get("matting_captures") or []
+    if not isinstance(entries, list):
+        raise ValueError("Invalid SceneLight matting capture list")
+    work = [entry for entry in entries if isinstance(entry, dict)]
+    if not work:
+        return
+    root = project_root.resolve()
+    workers = _surface_normalization_worker_count(len(work))
+    # NumPy releases the GIL, so decoding and combining pairs overlaps well
+    # without the copy cost and failure modes of another process pool.
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        outputs = [
+            output
+            for output in executor.map(
+                lambda entry: _combine_matting_capture(root, entry), work
+            )
+            if output is not None
+        ]
+    if len(outputs) > 1:
+        # Old-engine captures are rebuilt here, after the runtime has already
+        # handed back its deduplicated list, so collapse identical forms now.
+        _deduplicate_surface_capture_paths(root, payload, outputs)
+
+
+def _record_capture_stall(
+    capture_root: Path | None,
+    progress: dict[str, object] | None,
+    stalled_seconds: float,
+) -> None:
+    """Persist which form a stalled capture was working on.
+
+    A hung renderer leaves no exception and no traceback, so the only durable
+    evidence is the progress record it last wrote. Without this, a report says
+    "the scan stopped" and nothing about where.
+    """
+
+    if capture_root is None:
+        return
+    record: dict[str, object] = {
+        "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "stalled_seconds": round(stalled_seconds, 1),
+        "form": None,
+        "stage": None,
+        "current": None,
+        "total": None,
+    }
+    if isinstance(progress, dict):
+        record["form"] = progress.get("item")
+        record["stage"] = progress.get("stage")
+        record["current"] = progress.get("current")
+        record["total"] = progress.get("total")
+    path = capture_root / "capture-stall.json"
+    records: list[object] = []
+    try:
+        if path.is_file():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(existing, list):
+                records = existing
+    except (OSError, ValueError):
+        records = []
+    records.append(record)
+    try:
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        return
+    print(
+        "SceneLight capture stalled on %s (%s %s/%s) after %.0fs; wrote %s"
+        % (
+            record["form"] or "an unknown form",
+            record["stage"] or "an unknown stage",
+            record["current"] if record["current"] is not None else "?",
+            record["total"] if record["total"] is not None else "?",
+            stalled_seconds,
+            path,
+        ),
+        flush=True,
+    )
+
+
+def _capture_trace_path(capture_root: Path) -> Path | None:
+    """Find a run's attempt trace, whichever directory the caller was given."""
+
+    direct = capture_root / "capture_attempts.jsonl"
+    if direct.is_file():
+        return direct
+    nested = capture_root / "previews" / "capture_attempts.jsonl"
+    if nested.is_file():
+        return nested
+    try:
+        matches = sorted(
+            capture_root.glob("*/previews/capture_attempts.jsonl"),
+            key=lambda path: path.stat().st_mtime,
+        )
+    except OSError:
+        return None
+    return matches[-1] if matches else None
+
+
+def _capture_report(
+    capture_root: Path,
+    payload: dict[str, object],
+    capture_seconds: float,
+    normalization_seconds: float,
+) -> dict[str, object]:
+    """Summarize one capture run into a single file a bug report can attach."""
+
+    trace = _capture_trace_path(capture_root)
+    records: list[dict[str, object]] = []
+    if trace is not None:
+        try:
+            with trace.open("r", encoding="utf-8") as stream:
+                for line in stream:
+                    try:
+                        value = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(value, dict):
+                        records.append(value)
+        except OSError:
+            pass
+
+    context = next((r for r in records if r.get("stage") == "context"), {})
+    stored = [r for r in records if r.get("stage") == "stored"]
+    matted = [r for r in records if r.get("stage") == "matted"]
+    errors = [str(error) for error in (payload.get("errors") or [])]
+
+    timings: list[tuple[float, str]] = []
+    for record in stored:
+        seconds = record.get("total_seconds")
+        if isinstance(seconds, (int, float)):
+            timings.append((float(seconds), str(record.get("form") or "")))
+    for record in matted:
+        seconds = record.get("seconds")
+        if isinstance(seconds, (int, float)):
+            timings.append((float(seconds), str(record.get("form") or "")))
+    timings.sort(reverse=True)
+
+    def percentile(values: list[float], share: float) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        index = min(len(ordered) - 1, int(round(share * (len(ordered) - 1))))
+        return ordered[index]
+
+    def stage_total(field: str) -> float:
+        return sum(
+            float(record[field])
+            for record in records
+            if isinstance(record.get(field), (int, float))
+        )
+
+    def record_total(stage: str, field: str) -> float:
+        return sum(
+            float(record[field])
+            for record in records
+            if record.get("stage") == stage and isinstance(record.get(field), (int, float))
+        )
+
+    memories = [
+        float(record["memory_mb"])
+        for record in records
+        if isinstance(record.get("memory_mb"), (int, float))
+    ]
+    stalls: list[object] = []
+    stall_path = capture_root / "capture-stall.json"
+    try:
+        if stall_path.is_file():
+            existing = json.loads(stall_path.read_text(encoding="utf-8"))
+            if isinstance(existing, list):
+                stalls = existing
+    except (OSError, ValueError):
+        stalls = []
+
+    report: dict[str, object] = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "scene_light": _scenelight_version(),
+        "engine": context.get("renpy"),
+        "renderer": context.get("draw") or context.get("renderer"),
+        "screen": context.get("screen"),
+        "capture_seconds": round(capture_seconds, 2),
+        "normalization_seconds": round(normalization_seconds, 2),
+        "forms": {
+            "captured": len(stored),
+            "matted": len(matted),
+            "requested": len(payload.get("sprites") or {}),
+            "failed": len(errors),
+        },
+        "per_form_seconds": {
+            "mean": round(sum(value for value, _ in timings) / len(timings), 4)
+            if timings
+            else 0.0,
+            "p95": round(percentile([value for value, _ in timings], 0.95), 4),
+            "slowest": [
+                {"form": form, "seconds": round(value, 3)}
+                for value, form in timings[:5]
+            ],
+        },
+        "stage_seconds": {
+            "render": round(stage_total("render_seconds"), 2),
+            "readback": round(stage_total("readback_seconds"), 2),
+            "scale": round(stage_total("scale_seconds"), 2),
+            "save": round(stage_total("save_seconds"), 2),
+            "matting": round(record_total("matted", "seconds"), 2),
+        },
+        "memory_mb": {"peak": round(max(memories), 1) if memories else None},
+        "stalls": stalls,
+        "errors": errors[:50],
+    }
+    path = capture_root / "capture-report.json"
+    try:
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        return report
+
+    slowest = report["per_form_seconds"]["slowest"]  # type: ignore[index]
+    slowest_note = (
+        " slowest %.2fs (%s)" % (slowest[0]["seconds"], slowest[0]["form"]) if slowest else ""
+    )
+    print(
+        "SceneLight capture report: %d forms, mean %.2fs, p95 %.2fs,%s, %d failed -> %s"
+        % (
+            report["forms"]["captured"] + report["forms"]["matted"],  # type: ignore[index,operator]
+            report["per_form_seconds"]["mean"],  # type: ignore[index]
+            report["per_form_seconds"]["p95"],  # type: ignore[index]
+            slowest_note,
+            report["forms"]["failed"],  # type: ignore[index]
+            path,
+        ),
+        flush=True,
+    )
+    return report
+
+
+def _scenelight_version() -> str:
+    try:
+        from . import __version__
+
+        return __version__
+    except Exception:  # noqa: BLE001 - diagnostics must never fail a capture
+        return "unknown"
 
 
 def _normalize_surface_capture_file(path: Path) -> None:
@@ -1153,6 +1578,33 @@ def _runtime_diagnostic(
     return diagnosis + "".join(sections)
 
 
+def _capture_trace_tail(capture_root: Path | None, limit: int = 8) -> str:
+    """Return the last in-engine capture steps, one JSON record per line."""
+
+    if capture_root is None:
+        return ""
+    path = capture_root / "capture_attempts.jsonl"
+    if not path.is_file():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    records: list[str] = []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            value = json.loads(line)
+        except ValueError:
+            records.append(line[:400])
+            continue
+        if isinstance(value, dict):
+            records.append(json.dumps(value, sort_keys=True))
+    return "\n".join(records)
+
+
 def _fresh_script_error(project_root: Path, before: dict[str, tuple[int, int, int]]) -> bool:
     """Ignore old error screens and require a newly written Ren'Py parse report."""
     path = project_root / "errors.txt"
@@ -1383,6 +1835,7 @@ def _run_capture_request(
         deadline = time.monotonic() + timeout_seconds
         timed_out = False
         last_runtime_progress: tuple[object, ...] | None = None
+        progress_payload: dict[str, object] | None = None
         exit_grace_deadline: float | None = None
         composite_executor: ProcessPoolExecutor | None = None
         composite_futures = []
@@ -1564,6 +2017,11 @@ def _run_capture_request(
                     break
             elif now >= deadline:
                 timed_out = True
+                _record_capture_stall(
+                    checkpoint_root,
+                    progress_payload,
+                    timeout_seconds,
+                )
                 if process.poll() is None:
                     process.terminate()
                     try:
@@ -1610,6 +2068,23 @@ def _run_capture_request(
         if batch_yielded:
             return False
         detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
+        trace = _capture_trace_tail(checkpoint_root)
+        locations = [f"project: {discovery.project_root}"]
+        if checkpoint_root is not None:
+            locations.append(f"capture root: {checkpoint_root}")
+        locations.extend(
+            (
+                f"request: {request_path}",
+                f"result: {result_path}",
+                f"engine log: {discovery.project_root / 'log.txt'}",
+                f"script errors: {discovery.project_root / 'errors.txt'}",
+                f"traceback: {discovery.project_root / 'traceback.txt'}",
+            )
+        )
+        evidence = ""
+        if trace:
+            evidence += "\n\n--- last capture steps ---\n" + trace
+        evidence += "\n\n--- capture paths ---\n" + "\n".join(locations)
         session = diagnostics.current_session()
         if session is not None:
             session.event(
@@ -1621,9 +2096,11 @@ def _run_capture_request(
                 exit_code=returncode,
                 timed_out=timed_out,
                 last_progress=last_runtime_progress,
+                capture_root=str(checkpoint_root) if checkpoint_root is not None else None,
+                request=str(request_path),
                 project=str(discovery.project_root),
             )
-            session.attach_text(discovery.project_root.name + "-engine-failure", detail)
+            session.attach_text(discovery.project_root.name + "-engine-failure", detail + evidence)
         if _is_instance_conflict(detail):
             raise CaptureInstanceConflict(
                 "The mod's single-instance protection blocked SceneLight capture. "
@@ -1636,7 +2113,17 @@ def _run_capture_request(
             reason = f"timed out after {timeout_seconds} seconds"
         else:
             reason = f"exit {returncode}"
-        raise RuntimeError(f"Ren'Py could not {purpose} ({reason}).{detail}")
+        if (
+            isinstance(last_runtime_progress, tuple)
+            and len(last_runtime_progress) == 4
+            and last_runtime_progress[0] == "form.start"
+            and isinstance(last_runtime_progress[3], str)
+            and last_runtime_progress[3]
+        ):
+            # The renderer died while this form was on screen. Name it, because
+            # a native crash never gets far enough to report an exception.
+            reason += f" while capturing {last_runtime_progress[3]!r}"
+        raise RuntimeError(f"Ren'Py could not {purpose} ({reason}).{evidence}{detail}")
 
 
 def _capture_progress_line(
@@ -1670,6 +2157,14 @@ def _capture_progress_line(
         suffix = f": {item}" if isinstance(item, str) and item else ""
         return (stage, current, total, item), (
             f"SceneLight resolver form {current}/{total}{suffix}"
+        )
+    if stage == "form.start":
+        # Published before the form renders, so the last record after a native
+        # crash is the image that stopped the renderer.
+        item = payload.get("item")
+        suffix = f": {item}" if isinstance(item, str) and item else ""
+        return (stage, current, total, item), (
+            f"SceneLight resolver capturing form {current}/{total}{suffix}"
         )
     if stage == "planned":
         requests = payload.get("requests")
@@ -1723,7 +2218,9 @@ def preflight_runtime(
         "inventory_characters": False,
         "probe_texture_cleanup": True,
     }
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    request_path.write_text(
+        json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+    )
     _run_capture_request(
         discovery,
         renpy_executable,
@@ -1771,6 +2268,7 @@ def capture_runtime_review(
         excluded_character_tags=[],
         character_selection="automatic",
     )
+    review_started = time.perf_counter()
     signature = _project_signature(review_discovery)
     cache_root = discovery.project_root / ".scenelight_cache" / "review" / signature[:16]
     preview_root = cache_root / "previews"
@@ -1778,6 +2276,7 @@ def capture_runtime_review(
     result_path = cache_root / "result.json"
     state_path = cache_root / "state.json"
     progress_path = cache_root / "progress.json"
+    _prune_stale_capture_caches(cache_root.parent, cache_root)
     preview_root.mkdir(parents=True, exist_ok=True)
 
     if state_path.is_file() and result_path.is_file():
@@ -1810,9 +2309,35 @@ def capture_runtime_review(
         "inventory_characters": True,
         "review_only": True,
     }
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    # A form that stopped one backend will stop the next one too. Carry the
+    # recorded skips forward instead of rediscovering them on every renderer.
+    carried_skips: list[str] = []
+    if request_path.is_file():
+        try:
+            previous_request = json.loads(request_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous_request = {}
+        previous_skips = (
+            previous_request.get("skip_forms") if isinstance(previous_request, dict) else None
+        )
+        if isinstance(previous_skips, list):
+            carried_skips = [str(value) for value in previous_skips if str(value).strip()]
+    request_path.write_text(
+        json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+    )
+    for carried_name in carried_skips:
+        _add_request_skip_form(request_path, carried_name)
+    if carried_skips:
+        print(
+            f"SceneLight keeping {len(carried_skips)} previously skipped sprite form(s) "
+            "out of this attempt.",
+            flush=True,
+        )
     progress_path.unlink(missing_ok=True)
-    _run_capture_request(
+    # Review and installation capture share the same restart contract: a native
+    # renderer crash keeps every finished form and resumes from it instead of
+    # replaying the whole inventory on the next backend.
+    _run_capture_request_resumable(
         discovery,
         renpy_executable,
         request_path=request_path,
@@ -1823,16 +2348,44 @@ def capture_runtime_review(
         progress_path=progress_path,
         composite_job_root=preview_root / "composite_jobs",
         renderer=renderer,
+        capture_root=preview_root,
+        checkpoint_limit=REVIEW_PROCESS_BATCH_SIZE,
     )
+    capture_phase = time.perf_counter() - review_started
+    print(f"SceneLight capture phase: {capture_phase:.1f}s", flush=True)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     if payload.get("version") != CAPTURE_VERSION:
         raise ValueError("Ren'Py wrote an incompatible SceneLight review result")
     _merge_composite_capture_jobs(discovery.project_root, preview_root / "composite_jobs", payload)
     _materialize_composite_captures(discovery.project_root, payload)
+    _combine_matting_captures(discovery.project_root, payload)
     if not _paths_exist(discovery.project_root, payload):
         raise FileNotFoundError("Ren'Py did not write every SceneLight review preview")
     _deduplicate_normalized_captures(discovery.project_root, payload)
     _normalize_surface_captures(discovery.project_root, payload)
+    print(
+        f"SceneLight normalization phase: {time.perf_counter() - review_started - capture_phase:.1f}s",
+        flush=True,
+    )
+    _capture_report(
+        preview_root,
+        payload,
+        capture_phase,
+        time.perf_counter() - review_started - capture_phase,
+    )
+    skipped = sorted(
+        set(_asset_capture_errors(payload.get("errors"), "sprite"))
+        - set(payload.get("sprites", {}))
+    )
+    if skipped:
+        preview = ", ".join(skipped[:12])
+        if len(skipped) > 12:
+            preview += ", ..."
+        print(
+            f"SceneLight review skipped {len(skipped)} sprite form(s): {preview}",
+            flush=True,
+        )
+        _record_capture_outcome(payload, discovery.project_root, "Review skips")
     _write_capture_result(result_path, payload)
     state_path.write_text(
         json.dumps({"version": CAPTURE_VERSION, "signature": signature}, indent=2) + "\n",
@@ -2221,9 +2774,8 @@ def _saved_worker_progress(project_root: Path, worker_root: Path, forms: list[st
     count = 0
     root = worker_root.resolve()
     for name in forms:
-        stem = "_".join(name.lower().split())[:52]
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
-        raw = paths.get(name, str(root / f"sprite_{stem}_{digest}.png"))
+        digest = hashlib.sha256(_form_key(name).encode("utf-8")).hexdigest()[:16]
+        raw = paths.get(name, str(root / f"sprite_{digest}.png"))
         try:
             path = Path(raw).resolve()
             if not path.is_relative_to(root):
@@ -2378,7 +2930,9 @@ def _run_parallel_capture_workers(
             "inventory_backgrounds": False,
             "inventory_characters": False,
         }
-        request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+        request_path.write_text(
+            json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+        )
         progress_path.unlink(missing_ok=True)
         renderer_root = worker_executable.parent / "renpy"
         worker_renderers = _capture_worker_renderers(renderer, renderer_root)
@@ -2566,7 +3120,9 @@ def capture_runtime_assets(
     }
     if _capture_form_worker_count(CAPTURE_PARALLEL_MIN_FORMS) > 1:
         request["plan_only_threshold"] = CAPTURE_PARALLEL_MIN_FORMS
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    request_path.write_text(
+        json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+    )
     progress_path.unlink(missing_ok=True)
 
     result_payload: dict[str, object] | None = None
@@ -2693,6 +3249,46 @@ def _capture_exit_grace_seconds(
     return 10.0
 
 
+def _capture_failure_detail(result_path: Path, capture_root: Path | None = None) -> str:
+    """Return the runtime's own reason for a capture batch that saved nothing."""
+
+    try:
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        for error in payload.get("errors") or []:
+            text = str(error).strip()
+            if text:
+                return text
+
+    # A raised exception aborts the runtime before it writes a result, but it
+    # still logs the form that failed and why.
+    if capture_root is None:
+        return ""
+    trace = _capture_trace_path(capture_root)
+    if trace is None:
+        return ""
+    try:
+        with trace.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 65536))
+            tail = stream.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    for line in reversed(tail.splitlines()):
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and value.get("stage") == "error":
+            text = str(value.get("error") or "").strip()
+            if text:
+                return text
+    return ""
+
+
 def _durable_form_checkpoint_count(capture_root: Path) -> int:
     """Count semantic form checkpoints without confusing aliases or orderings."""
 
@@ -2714,6 +3310,24 @@ def _durable_form_checkpoint_count(capture_root: Path) -> int:
         except OSError:
             pass
     return max(len(keys), _surface_checkpoint_count(capture_root))
+
+
+def _pending_form_crash(capture_root: Path) -> bool:
+    """Report whether a renderer died inside a form that is still journaled."""
+
+    journal = capture_root / "form_attempts.json"
+    if not journal.is_file():
+        return False
+    try:
+        attempts = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(attempts, dict):
+        return False
+    return any(
+        isinstance(count, int) and not isinstance(count, bool) and count > 0
+        for count in attempts.values()
+    )
 
 
 def _run_capture_request_resumable(
@@ -2739,6 +3353,7 @@ def _run_capture_request_resumable(
     progress_state = _CaptureProgressState()
     low_yield_crashes = 0
     crash_retries = 0
+    stalled_retries = 0
     completed_batches = 0
     while True:
         before = _durable_form_checkpoint_count(capture_root)
@@ -2766,7 +3381,11 @@ def _run_capture_request_resumable(
                 return
             after = _durable_form_checkpoint_count(capture_root)
             if after <= before:
-                raise RuntimeError("Ren'Py ended a capture batch without saving a sprite form.")
+                detail = _capture_failure_detail(result_path, capture_root)
+                message = "Ren'Py ended a capture batch without saving a sprite form."
+                if detail:
+                    message = "%s %s" % (message, detail)
+                raise RuntimeError(message)
             completed_batches += 1
             progress_path.unlink(missing_ok=True)
             print(
@@ -2779,11 +3398,40 @@ def _run_capture_request_resumable(
         except RuntimeError as error:
             after = _durable_form_checkpoint_count(capture_root)
             crashed = "(exit " in str(error)
-            if not crashed or after <= before or crash_retries >= CAPTURE_PROCESS_RESUME_LIMIT:
+            # A crash inside a form saves no checkpoint. Record that form in the
+            # request so the next process leaves it out and keeps the rest of
+            # the inventory moving; the engine's own journal proved unreliable.
+            attempted = _last_attempted_form(progress_path) if crashed else None
+            added_skip = bool(attempted) and _add_request_skip_form(request_path, attempted)
+            # A crash inside a form saves no checkpoint, but it does leave that
+            # form in the in-engine attempt journal. Retry anyway: the next
+            # process skips it and keeps the rest of the inventory.
+            in_flight = crashed and (attempted is not None or _pending_form_crash(capture_root))
+            if (
+                not crashed
+                or (after <= before and not in_flight)
+                or crash_retries >= CAPTURE_PROCESS_RESUME_LIMIT
+            ):
                 raise
             crash_retries += 1
-            saved = after - before
-            if saved < CAPTURE_LOW_YIELD_FORM_THRESHOLD:
+            saved = max(after - before, 0)
+            if saved == 0 and not added_skip:
+                # Two processes in a row that save nothing and add no new skip
+                # mean the loop is not progressing. Stop instead of spinning.
+                stalled_retries += 1
+                if stalled_retries >= 2:
+                    raise RuntimeError(
+                        "Ren'Py keeps stopping on the same sprite forms without saving new "
+                        "pixels; another renderer is required."
+                    ) from error
+            else:
+                stalled_retries = 0
+            if in_flight:
+                # The engine journaled the form it died on, so the next process
+                # skips it and keeps going. That is progress, not a broken
+                # renderer, and must not consume the low-yield allowance.
+                low_yield_crashes = 0
+            elif saved < CAPTURE_LOW_YIELD_FORM_THRESHOLD:
                 low_yield_crashes += 1
             else:
                 low_yield_crashes = 0
