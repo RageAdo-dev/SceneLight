@@ -333,6 +333,55 @@ def renpy_runtime_major(runtime: Path | None) -> int | None:
     return None
 
 
+_RENPY_LOG_VERSION = re.compile(r"Ren['\u2019]Py (\d+)\.(\d+)\.(\d+)")
+
+
+def detect_project_renpy_version(project_root: Path) -> tuple[int, int, int] | None:
+    """Read the engine version a project was built or last launched with.
+
+    A mod that ships no runtime of its own still records the engine it ran
+    under. SceneLight needs that version because its fallback is the Ren'Py 7
+    compatibility runtime, which cannot inventory a Ren'Py 8 game reliably.
+    """
+
+    root = project_root.expanduser().resolve()
+    for relative in ("game/script_version.txt", "script_version.txt"):
+        try:
+            text = (root / relative).read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        match = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", text)
+        if match:
+            return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
+
+    # The launcher's own log names the engine that actually ran this game.
+    for relative in ("log.txt", "game/log.txt", "traceback.txt", "game/traceback.txt"):
+        try:
+            text = (root / relative).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match = _RENPY_LOG_VERSION.search(text)
+        if match:
+            return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+    # A distributed game can bundle its runtime without ever writing a log.
+    try:
+        text = (root / "renpy" / "vc_version.py").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    match = re.search(
+        r"(?m)^\s*version\s*=\s*[uU]?['\"](\d+)\.(\d+)(?:\.(\d+))?",
+        text,
+    )
+    if match:
+        return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
+
+    major = renpy_runtime_major(root)
+    if major is not None:
+        return (major, 0, 0)
+    return None
+
+
 def renpy_sdk_prefix(runtime: Path) -> tuple[Path, ...]:
     """Return the supported command prefix for an unpacked Ren'Py SDK."""
 
