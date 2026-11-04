@@ -4,7 +4,9 @@
 
 - **Windows:** the downloadable app includes its own Python and Preview components.
 - **Ren’Py:** compatible Ren’Py 7 and 8 projects. Some older games can use the
-  bundled Ren’Py 7.7.1 compatibility runtime.
+  bundled Ren’Py 7.7.1 compatibility runtime. Python 2 projects capture a few
+  times slower than Ren’Py 8 projects, because those engines have no offscreen
+  screenshot and every character form is captured twice.
 - **Graphics:** OpenGL 3.3 or OpenGL ES 3.0 with supported floating-point rendering.
   A dedicated graphics card is not required.
 

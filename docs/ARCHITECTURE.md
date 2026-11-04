@@ -57,6 +57,31 @@ working copy. It captures raw character forms, not final lit frames. A working
 copy protects source files from normal analysis writes; it is not a security
 sandbox for game code.
 
+Character forms are rasterized by the game's own GPU renderer and read back as
+RGBA. Ren'Py unpremultiplies that readback, so the alpha channel survives without
+a separate compositor. Ren'Py's software compositor must never touch a character
+form: its transformed blit stops the engine on any subtree carrying a zoom or a
+rotation, which every layered character with scaled layers has. The capture keeps
+the process on the GPU for the whole inventory and normalizes each readback back
+to virtual pixels before writing it.
+
+The readback shares the engine's offscreen framebuffer, which the driver bounds by
+`GL_MAX_TEXTURE_SIZE` and `GL_MAX_RENDERBUFFER_SIZE`. A form drawn larger than that
+buffer is clipped, and the clipped margin reads back transparent, so the runtime
+fits an oversized form into the cap before taking the screenshot. Ordinary
+characters never reach the cap; a very large form on an old driver is captured
+complete at reduced resolution instead of partially captured at full resolution.
+`SCENELIGHT_MAX_CAPTURE_SIZE` overrides the cap for support.
+
+Ren'Py 7 predates offscreen screenshots: its renderer can only grab its own
+window, and it always clears that window opaque, so a plain grab loses both the
+form's size and its alpha. Those engines capture every form twice instead, over
+pure black and over pure white, and the host recovers the pixels with
+`alpha = 1 - (white - black)`. The form is fitted into a virtual screen grown to
+its own size, which keeps the pair 1:1 with the form rather than with the game's
+window. This path costs two draws and two encodes per form, so a Python 2 project
+captures a few times slower than a Ren'Py 8 project of the same size.
+
 Large captures use isolated workers with separate writable state and bounded
 concurrency. Completed forms are journaled by image tag and normalized attribute
 set so interrupted workers can resume. Plan, pixel and protocol versions are
