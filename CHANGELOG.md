@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.12
+
+### Fixes
+
+- Track the form that was rendering when a process stopped, and leave it out of the next run from the controller, so a repeated stop cannot block the whole character inventory.
+
 ## 1.0.11
 
 ### Fixes

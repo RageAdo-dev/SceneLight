@@ -203,6 +203,42 @@ def _form_key(name: str) -> str:
     return " ".join([parts[0]] + sorted(set(parts[1:])))
 
 
+def _last_attempted_form(progress_path: Path) -> str | None:
+    """Return the sprite form that was rendering when the process stopped."""
+
+    try:
+        payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("stage") != "form.start":
+        return None
+    item = payload.get("item")
+    return str(item) if isinstance(item, str) and item.strip() else None
+
+
+def _add_request_skip_form(request_path: Path, name: str) -> bool:
+    """Record a form the renderer cannot survive, so the next run leaves it out."""
+
+    try:
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    skip = payload.get("skip_forms")
+    skip = [str(value) for value in skip] if isinstance(skip, list) else []
+    normalized = " ".join(name.lower().split())
+    if normalized in skip:
+        return False
+    skip.append(normalized)
+    payload["skip_forms"] = skip
+    try:
+        request_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 def _prune_stale_capture_caches(parent: Path, current: Path) -> None:
     """Delete review caches left by an older resolver or capture plan.
 
@@ -2909,10 +2945,15 @@ def _run_capture_request_resumable(
         except RuntimeError as error:
             after = _durable_form_checkpoint_count(capture_root)
             crashed = "(exit " in str(error)
+            # A crash inside a form saves no checkpoint. Record that form in the
+            # request so the next process leaves it out and keeps the rest of
+            # the inventory moving; the engine's own journal proved unreliable.
+            attempted = _last_attempted_form(progress_path) if crashed else None
+            added_skip = bool(attempted) and _add_request_skip_form(request_path, attempted)
             # A crash inside a form saves no checkpoint, but it does leave that
             # form in the in-engine attempt journal. Retry anyway: the next
             # process skips it and keeps the rest of the inventory.
-            in_flight = crashed and _pending_form_crash(capture_root)
+            in_flight = crashed and (attempted is not None or _pending_form_crash(capture_root))
             if (
                 not crashed
                 or (after <= before and not in_flight)
@@ -2921,9 +2962,9 @@ def _run_capture_request_resumable(
                 raise
             crash_retries += 1
             saved = max(after - before, 0)
-            if saved == 0:
-                # Two processes in a row that save nothing mean the journaled
-                # form is not actually being skipped. Stop instead of looping.
+            if saved == 0 and not added_skip:
+                # Two processes in a row that save nothing and add no new skip
+                # mean the loop is not progressing. Stop instead of spinning.
                 stalled_retries += 1
                 if stalled_retries >= 2:
                     raise RuntimeError(

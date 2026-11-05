@@ -2472,6 +2472,27 @@ init -999 python:
         # the journal written ahead of each capture is the only evidence of it.
         # Skipping that one form keeps the rest of the inventory captureable.
         restored_forms = len(ordered_planned_forms) - len(pending_forms)
+        host_skips = set(
+            " ".join(str(skipped_name).lower().split())
+            for skipped_name in (request.get("skip_forms") or ())
+        )
+        if host_skips:
+            # The controller records the form that was in flight when a process
+            # died, which is more reliable than this process's own journal.
+            for skipped_name in sorted(host_skips):
+                errors.append(
+                    "sprite %s: the renderer stopped while capturing this form"
+                    % skipped_name
+                )
+            pending_forms = [
+                actual_name
+                for actual_name in pending_forms
+                if actual_name not in host_skips
+            ]
+            _scenelight_log(
+                "SceneLight skipped %d form(s) that had already stopped the renderer."
+                % len(host_skips)
+            )
         attempt_path = os.path.join(output_root, "form_attempts.json")
         attempt_counts = _scenelight_load_form_attempts(attempt_path)
         quarantined_names = [

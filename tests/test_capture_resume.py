@@ -198,6 +198,23 @@ def test_partial_composite_progress_uses_published_journal_and_existing_layers(t
     assert capture._saved_worker_progress(tmp_path, worker, ["hero layered"]) == 0
 
 
+def test_crash_records_the_in_flight_form_so_the_next_run_skips_it(tmp_path):
+    progress = tmp_path / "progress.json"
+    progress.write_text(
+        json.dumps({"stage": "form.start", "current": 7, "total": 98, "item": "Andres"}),
+        encoding="utf-8",
+    )
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 42}), encoding="utf-8")
+
+    assert capture._last_attempted_form(progress) == "Andres"
+    assert capture._add_request_skip_form(request, "Andres") is True
+    assert json.loads(request.read_text(encoding="utf-8"))["skip_forms"] == ["andres"]
+    assert capture._add_request_skip_form(request, "andres") is False
+    progress.write_text(json.dumps({"stage": "form", "current": 7}), encoding="utf-8")
+    assert capture._last_attempted_form(progress) is None
+
+
 def test_capture_trace_tail_keeps_the_last_steps_and_their_paths(tmp_path):
     (tmp_path / "capture_attempts.jsonl").write_text(
         "\n".join(
