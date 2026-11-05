@@ -1035,6 +1035,31 @@ init -999 python:
             0.0,
             0.0,
         )
+        if rendered.width > config.screen_width or rendered.height > config.screen_height:
+            # Layered images may place zoomed children outside their declared
+            # canvas (for example a 1680x960 ``always`` Null with a 1.2x layer
+            # at xpos 800). Those children blit outside the software surface
+            # and stop the engine. Fit the whole tree to the screen first so
+            # every layer stays inside it, and keep the alpha channel.
+            try:
+                transform_module = getattr(renpy.display, "transform", None)
+                if transform_module is None:
+                    import renpy.display.transform as transform_module
+                fit = transform_module.Transform(
+                    displayable,
+                    xysize=(config.screen_width, config.screen_height),
+                    fit="contain",
+                )
+                fitted = renpy.render(
+                    fit,
+                    config.screen_width,
+                    config.screen_height,
+                    0.0,
+                    0.0,
+                )
+                rendered = fitted
+            except Exception:
+                pass
         surface = software_draw.render_to_texture(rendered, True)
 
         filename = os.path.join(config.basedir, relative)

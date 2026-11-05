@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5
+
+### Fixes
+
+- Fit layered images that place zoomed children outside their canvas into the capture surface, so those wings and overlays keep their lighting instead of stopping the renderer.
+
 ## 1.0.4
 
 ### Fixes
