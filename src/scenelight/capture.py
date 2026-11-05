@@ -999,9 +999,7 @@ def _combine_matting_captures(project_root: Path, payload: dict[str, object]) ->
     with ThreadPoolExecutor(max_workers=workers) as executor:
         outputs = [
             output
-            for output in executor.map(
-                lambda entry: _combine_matting_capture(root, entry), work
-            )
+            for output in executor.map(lambda entry: _combine_matting_capture(root, entry), work)
             if output is not None
         ]
     if len(outputs) > 1:
@@ -1176,14 +1174,9 @@ def _capture_report(
             "failed": len(errors),
         },
         "per_form_seconds": {
-            "mean": round(sum(value for value, _ in timings) / len(timings), 4)
-            if timings
-            else 0.0,
+            "mean": round(sum(value for value, _ in timings) / len(timings), 4) if timings else 0.0,
             "p95": round(percentile([value for value, _ in timings], 0.95), 4),
-            "slowest": [
-                {"form": form, "seconds": round(value, 3)}
-                for value, form in timings[:5]
-            ],
+            "slowest": [{"form": form, "seconds": round(value, 3)} for value, form in timings[:5]],
         },
         "stage_seconds": {
             "render": round(stage_total("render_seconds"), 2),
