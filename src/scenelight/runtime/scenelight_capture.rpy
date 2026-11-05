@@ -83,6 +83,41 @@ init -999 python:
         except Exception:
             return None
 
+    _scenelight_trace_path = [None]
+
+    def _scenelight_log_capture_attempt(record):
+        """Append one durable line describing the current capture step.
+
+        The engine can be stopped by the renderer at any point, so each step is
+        flushed before the expensive work starts. The host reads this file when
+        a capture dies and puts the tail into the support report, which is the
+        only way to name the failing form.
+        """
+
+        filename = _scenelight_trace_path[0]
+        if not filename:
+            return
+        record["time"] = round(time.time(), 3)
+        record["renpy"] = renpy.version_string
+        record["renderer"] = os.environ.get("RENPY_RENDERER") or "automatic"
+        record.setdefault("screen", [config.screen_width, config.screen_height])
+        record.setdefault("draw", type(getattr(renpy.display, "draw", None)).__name__)
+        memory = _scenelight_process_memory()
+        if memory is not None:
+            record["memory_mb"] = round(memory / 1048576.0, 1)
+        try:
+            stream = open(filename, "a")
+            try:
+                # A renderer crash ends only this process: once the line is
+                # flushed the host can read it, so no sync is required.
+                stream.write(json.dumps(record, sort_keys=True) + "\n")
+                stream.flush()
+            finally:
+                stream.close()
+        except Exception:
+            # Diagnostics must never decide whether a capture succeeds.
+            pass
+
     def _scenelight_probe_texture_cleanup():
         # Exercise the compiled runtime, rather than trusting its version or
         # bundled source. Some Ren'Py 7 binaries omit Texture's finalizer.
@@ -990,7 +1025,7 @@ init -999 python:
     _scenelight_software_draw = [None]
     _scenelight_prior_draw = [None]
 
-    def _scenelight_save_alpha_surface(displayable, relative):
+    def _scenelight_save_alpha_surface(displayable, relative, name=None):
         """Render one dynamic sprite without flattening its alpha in the GPU readback.
 
         Ren'Py versions before ``render_to_surface`` implement displayable
@@ -1041,45 +1076,43 @@ init -999 python:
                 _scenelight_prior_draw[0] = renpy.display.draw
             renpy.display.draw = software_draw
 
+        # Wrap the form before the first render. Rendering the raw LayeredImage
+        # can hand Ren'Py's software compositor a tree of layer transforms that
+        # it cannot blit, which is what stopped the renderer on a subset of
+        # forms. A containing transform renders one flat tree at screen size.
+        target = displayable
+        try:
+            transform_module = getattr(renpy.display, "transform", None)
+            if transform_module is None:
+                import renpy.display.transform as transform_module
+            target = transform_module.Transform(
+                displayable,
+                xysize=(config.screen_width, config.screen_height),
+                fit="contain",
+            )
+        except Exception:
+            target = displayable
+        _scenelight_log_capture_attempt(
+            {"stage": "rendering", "form": name, "target": type(target).__name__}
+        )
         rendered = renpy.render(
-            displayable,
+            target,
             config.screen_width,
             config.screen_height,
             0.0,
             0.0,
         )
-        layered = type(displayable).__name__ in ("MultiBox", "LayeredImage")
-        if (
-            rendered.width > config.screen_width
-            or rendered.height > config.screen_height
-            or layered
-        ):
-            # Layered images may place zoomed children outside their declared
-            # canvas (for example a 1680x960 ``always`` Null with a 1.2x layer
-            # at xpos 800), and Ren'Py's software compositor can stop on those
-            # child transforms even when the canvas fits. Fit the whole tree to
-            # the screen so every layer stays inside it, and keep the alpha
-            # channel so the form still gets lighting.
-            try:
-                transform_module = getattr(renpy.display, "transform", None)
-                if transform_module is None:
-                    import renpy.display.transform as transform_module
-                fit = transform_module.Transform(
-                    displayable,
-                    xysize=(config.screen_width, config.screen_height),
-                    fit="contain",
-                )
-                fitted = renpy.render(
-                    fit,
-                    config.screen_width,
-                    config.screen_height,
-                    0.0,
-                    0.0,
-                )
-                rendered = fitted
-            except Exception:
-                pass
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "rendered",
+                "form": name,
+                "size": [rendered.width, rendered.height],
+            }
+        )
         surface = software_draw.render_to_texture(rendered, True)
+        _scenelight_log_capture_attempt(
+            {"stage": "composited", "form": name, "surface": list(surface.get_size())}
+        )
 
         filename = os.path.join(config.basedir, relative)
         _scenelight_save_surface_fast(surface, filename)
@@ -1090,6 +1123,7 @@ init -999 python:
         relative,
         composite_captures,
         preserve_alpha=False,
+        name=None,
     ):
         # Static Ren'Py image manipulators already have an exact, alpha-bearing
         # surface in the engine's image cache. Saving that surface avoids an
@@ -1140,7 +1174,7 @@ init -999 python:
                 and os.path.isfile(marker)
             ):
                 return "surface-checkpoint"
-            _scenelight_save_alpha_surface(displayable, relative)
+            _scenelight_save_alpha_surface(displayable, relative, name)
             return "surface"
 
         render_to_file = getattr(renpy, "render_to_file", None)
@@ -1739,36 +1773,7 @@ init -999 python:
             except Exception:
                 pass
 
-        def _scenelight_log_capture_attempt(record):
-            """Append one durable line describing the current capture step.
-
-            The engine can be stopped by the renderer at any point, so each
-            step is flushed before the expensive work starts. The host reads
-            this file when a capture dies and puts the tail into the support
-            report, which is the only way to name the failing form.
-            """
-
-            record["time"] = round(time.time(), 3)
-            record["renpy"] = renpy.version_string
-            record["renderer"] = os.environ.get("RENPY_RENDERER") or "automatic"
-            record.setdefault("screen", [config.screen_width, config.screen_height])
-            record.setdefault("draw", type(getattr(renpy.display, "draw", None)).__name__)
-            memory = _scenelight_process_memory()
-            if memory is not None:
-                record["memory_mb"] = round(memory / 1048576.0, 1)
-            try:
-                stream = open(trace_path, "a")
-                try:
-                    # A renderer crash ends only this process: once the line is
-                    # flushed the host can read it, so no sync is required.
-                    stream.write(json.dumps(record, sort_keys=True) + "\n")
-                    stream.flush()
-                finally:
-                    stream.close()
-            except Exception:
-                # Diagnostics must never decide whether a capture succeeds.
-                pass
-
+        _scenelight_trace_path[0] = trace_path
         _scenelight_trim_capture_trace(trace_path)
         _scenelight_log_capture_attempt(
             {
@@ -2167,6 +2172,7 @@ init -999 python:
                         relative,
                         composite_captures,
                         preserve_alpha=(kind == "sprite"),
+                        name=name,
                     )
                     normalized_relative = relative.replace(os.sep, "/")
                     if structure_signature is not None and capture_mode in (

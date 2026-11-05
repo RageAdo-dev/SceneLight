@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.14
+
+### Fixes
+
+- Wrap every character form in the containing transform before the first render, so Ren'Py never rasterizes the raw layered tree that stopped the renderer.
+- Record the render stage for each form, so a stopped capture reports whether it died in the render tree, the software blit, or the pixel write.
+
 ## 1.0.13
 
 ### Fixes

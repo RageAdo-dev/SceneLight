@@ -30,7 +30,16 @@ def test_helper_recovers_pixels_that_lost_their_checkpoint_marker():
     assert 'restore_stats["recovered"] += 1' in text
 
 
-def test_controller_form_key_matches_the_helper_definition():
+def test_helper_records_each_render_stage_for_a_stopped_form():
+    text = HELPER.read_text(encoding="utf-8")
+
+    # A crash between these records says whether Ren'Py died in the render
+    # tree, in the software blit, or while saving the pixels.
+    for stage in ('"stage": "rendering"', '"stage": "rendered"', '"stage": "composited"'):
+        assert stage in text
+
+
+def test_helper_controller_form_key_matches_the_helper_definition():
     # The helper builds tag + sorted(unique attributes), lowercased.
     assert capture._form_key("Yuri  GJ  wings6 1") == "yuri 1 gj wings6"
     assert capture._form_key("andres") == "andres"
