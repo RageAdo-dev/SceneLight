@@ -20,7 +20,7 @@ DEPENDENCIES = {
 BASE_REQUIREMENTS = (
     "numpy==2.2.6",
     "opencv-python-headless==5.0.0.93",
-    "Pillow==12.3.0",
+    "Pillow==13.0.0",
     "psutil==7.2.2",
     "PySide6-Essentials==6.11.2",
     "imageio-ffmpeg==0.6.0",

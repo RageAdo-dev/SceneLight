@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+### Fixes
+
+- Update Pillow to 13.0.0, clearing the published advisories that now block a signed build.
+- Require Python 3.11 to 3.13 for source installs, so an unsupported interpreter fails early instead of trying to compile NumPy from source.
+
 ## 1.0.1
 
 ### Fixes

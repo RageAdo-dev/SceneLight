@@ -523,7 +523,7 @@ def test_private_environment_bootstrap_tools_are_security_pinned() -> None:
 def test_preview_dependency_action_includes_base_analysis_components() -> None:
     assert PREVIEW_DEPENDENCIES["numpy"] == "numpy==2.2.6"
     assert PREVIEW_DEPENDENCIES["cv2"] == "opencv-python-headless==5.0.0.93"
-    assert PREVIEW_DEPENDENCIES["PIL"] == "Pillow==12.3.0"
+    assert PREVIEW_DEPENDENCIES["PIL"] == "Pillow==13.0.0"
     assert PREVIEW_DEPENDENCIES["psutil"] == "psutil==7.2.2"
     assert set(BASE_REQUIREMENTS) <= set(PREVIEW_DEPENDENCIES.values())
 
