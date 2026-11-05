@@ -37,7 +37,8 @@ def test_versionless_install_is_explicitly_pre_release() -> None:
 
 def test_release_relation_handles_rc_upgrade_and_newer_downgrade() -> None:
     assert classify_release("1.0.0-rc.2").kind == "upgrade"
-    assert classify_release("1.0.0").kind == "current"
+    # The public baseline must still be offered every later patch.
+    assert classify_release(FIRST_PUBLIC_VERSION).kind == "upgrade"
     assert classify_release(__version__).kind == "current"
     assert classify_release("1.1.0").kind == "downgrade"
     assert classify_release("1.1.1").kind == "downgrade"

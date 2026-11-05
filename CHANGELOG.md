@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0
+## 1.0.1
 
 ### Fixes
 
@@ -9,6 +9,11 @@
 - Record each capture step with its image sources, output path and memory use so a stopped renderer can be diagnosed from the support export.
 - Skip a sprite form that stops the renderer twice instead of failing the whole character inventory.
 - Name the bundled Ren'Py 7 runtime as such instead of reporting it as the selected Ren'Py SDK.
+
+## 1.0.0
+
+### Fixes
+
 - Finish stopping background operations when Setup closes.
 - Stop the active operation on close even when an earlier cancellation is still finishing.
 - Prevent simultaneous projects from interrupting a shared compatibility-runtime download.
