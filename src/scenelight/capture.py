@@ -239,6 +239,13 @@ def _add_request_skip_form(request_path: Path, name: str) -> bool:
     return True
 
 
+def _with_plan_version(request: dict) -> dict:
+    """Tell the helper which capture plan version this controller speaks."""
+
+    request["plan_version"] = CAPTURE_PLAN_VERSION
+    return request
+
+
 def _prune_stale_capture_caches(parent: Path, current: Path) -> None:
     """Delete review caches left by an older resolver or capture plan.
 
@@ -1853,7 +1860,9 @@ def preflight_runtime(
         "inventory_characters": False,
         "probe_texture_cleanup": True,
     }
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    request_path.write_text(
+        json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+    )
     _run_capture_request(
         discovery,
         renpy_executable,
@@ -1941,7 +1950,30 @@ def capture_runtime_review(
         "inventory_characters": True,
         "review_only": True,
     }
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    # A form that stopped one backend will stop the next one too. Carry the
+    # recorded skips forward instead of rediscovering them on every renderer.
+    carried_skips: list[str] = []
+    if request_path.is_file():
+        try:
+            previous_request = json.loads(request_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous_request = {}
+        previous_skips = (
+            previous_request.get("skip_forms") if isinstance(previous_request, dict) else None
+        )
+        if isinstance(previous_skips, list):
+            carried_skips = [str(value) for value in previous_skips if str(value).strip()]
+    request_path.write_text(
+        json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+    )
+    for carried_name in carried_skips:
+        _add_request_skip_form(request_path, carried_name)
+    if carried_skips:
+        print(
+            f"SceneLight keeping {len(carried_skips)} previously skipped sprite form(s) "
+            "out of this attempt.",
+            flush=True,
+        )
     progress_path.unlink(missing_ok=True)
     # Review and installation capture share the same restart contract: a native
     # renderer crash keeps every finished form and resumes from it instead of
@@ -2525,7 +2557,9 @@ def _run_parallel_capture_workers(
             "inventory_backgrounds": False,
             "inventory_characters": False,
         }
-        request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+        request_path.write_text(
+            json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+        )
         progress_path.unlink(missing_ok=True)
         renderer_root = worker_executable.parent / "renpy"
         worker_renderers = _capture_worker_renderers(renderer, renderer_root)
@@ -2713,7 +2747,9 @@ def capture_runtime_assets(
     }
     if _capture_form_worker_count(CAPTURE_PARALLEL_MIN_FORMS) > 1:
         request["plan_only_threshold"] = CAPTURE_PARALLEL_MIN_FORMS
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    request_path.write_text(
+        json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
+    )
     progress_path.unlink(missing_ok=True)
 
     result_payload: dict[str, object] | None = None

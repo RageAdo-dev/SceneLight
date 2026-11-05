@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.13
+
+### Fixes
+
+- Carry the recorded skipped forms into the next renderer attempt instead of rediscovering them on every backend.
+- Send the capture plan version with each request so the helper's cached plan can never disagree with the controller.
+
 ## 1.0.12
 
 ### Fixes

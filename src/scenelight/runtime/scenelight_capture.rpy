@@ -141,7 +141,7 @@ init -999 python:
         sys.stdout.write(message + "\n")
         sys.stdout.flush()
 
-    def _scenelight_load_capture_plan(filename, signature, sprite_names):
+    def _scenelight_load_capture_plan(filename, signature, sprite_names, version=3):
         if not signature or not os.path.isfile(filename):
             return None
         try:
@@ -150,7 +150,7 @@ init -999 python:
                 payload = json.load(stream)
             finally:
                 stream.close()
-            if payload.get("version") != 3 or payload.get("signature") != signature:
+            if payload.get("version") != int(version) or payload.get("signature") != signature:
                 return None
             if payload.get("sprite_names") != sorted(sprite_names):
                 return None
@@ -193,11 +193,12 @@ init -999 python:
         sprite_names,
         planned_forms,
         request_forms,
+        version=3,
     ):
         if not signature:
             return
         payload = {
-            "version": 3,
+            "version": int(version),
             "signature": signature,
             "sprite_names": sorted(sprite_names),
             "planned_forms": sorted(planned_forms),
@@ -2374,7 +2375,12 @@ init -999 python:
         cached_plan = (
             None
             if explicit_forms is not None
-            else _scenelight_load_capture_plan(plan_path, plan_signature, sprite_names)
+            else _scenelight_load_capture_plan(
+                plan_path,
+                plan_signature,
+                sprite_names,
+                request.get("plan_version", 3),
+            )
         )
         if explicit_forms is not None:
             for explicit_form in sorted(explicit_forms):
@@ -2418,6 +2424,7 @@ init -999 python:
                 sprite_names,
                 planned_forms,
                 request_forms,
+                request.get("plan_version", 3),
             )
 
         _scenelight_log(

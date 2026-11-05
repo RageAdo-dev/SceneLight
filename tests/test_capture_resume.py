@@ -1,6 +1,7 @@
 """Interrupted captures retain usable batches without trusting damaged output."""
 
 import json
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -196,6 +197,136 @@ def test_partial_composite_progress_uses_published_journal_and_existing_layers(t
     assert capture._saved_worker_progress(tmp_path, worker, ["other"]) == 0
     layer.unlink()
     assert capture._saved_worker_progress(tmp_path, worker, ["hero layered"]) == 0
+
+
+def _simulator(tmp_path: Path, forms: list[str], crashing: set[str]):
+    """Fake the engine: honour skip_forms, save the good forms, die on the bad."""
+
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 42}), encoding="utf-8")
+
+    def capture_request(*_args, **kwargs):
+        payload = json.loads(request.read_text(encoding="utf-8"))
+        skip = set(payload.get("skip_forms", []))
+        pending = [
+            name
+            for name in forms
+            if name not in skip
+            and not (tmp_path / f"sprite_{name}.png.surface-checkpoint").is_file()
+        ]
+        for name in pending:
+            if name in crashing:
+                kwargs["progress_path"].write_text(
+                    json.dumps(
+                        {
+                            "stage": "form.start",
+                            "current": forms.index(name) + 1,
+                            "total": len(forms),
+                            "item": name,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                raise RuntimeError("Ren'Py could not inventory (exit 3221225477).")
+            (tmp_path / f"sprite_{name}.png.surface-checkpoint").write_text("raw", encoding="utf-8")
+        return True
+
+    return request, capture_request
+
+
+def _resume(tmp_path: Path, discovery: ProjectDiscovery) -> None:
+    capture._run_capture_request_resumable(
+        discovery,
+        tmp_path / "sdk.exe",
+        request_path=tmp_path / "request.json",
+        result_path=tmp_path / "result.json",
+        native_runtime=False,
+        timeout_seconds=5,
+        purpose="inventory",
+        progress_path=tmp_path / "progress.json",
+        composite_job_root=tmp_path / "composites",
+        renderer=None,
+        capture_root=tmp_path,
+    )
+
+
+def test_a_crashing_form_is_skipped_and_the_rest_finish(tmp_path, monkeypatch):
+    (tmp_path / "game").mkdir()
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    forms = ["adam", "andres", "bruce"]
+    request, capture_request = _simulator(tmp_path, forms, {"andres"})
+    monkeypatch.setattr(capture, "_run_capture_request", capture_request)
+
+    _resume(tmp_path, discovery)
+
+    assert json.loads(request.read_text(encoding="utf-8"))["skip_forms"] == ["andres"]
+    assert (tmp_path / "sprite_adam.png.surface-checkpoint").is_file()
+    assert (tmp_path / "sprite_bruce.png.surface-checkpoint").is_file()
+    assert not (tmp_path / "sprite_andres.png.surface-checkpoint").exists()
+
+
+def test_every_crashing_form_is_recorded_once_and_the_run_completes(tmp_path, monkeypatch):
+    (tmp_path / "game").mkdir()
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    forms = ["adam", "andres", "bruce", "yuri wings"]
+    request, capture_request = _simulator(tmp_path, forms, set(forms))
+    monkeypatch.setattr(capture, "_run_capture_request", capture_request)
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return capture_request(*args, **kwargs)
+
+    monkeypatch.setattr(capture, "_run_capture_request", counted)
+
+    _resume(tmp_path, discovery)
+
+    assert sorted(json.loads(request.read_text(encoding="utf-8"))["skip_forms"]) == sorted(forms)
+    assert len(calls) == len(forms) + 1
+
+
+def test_a_crash_without_progress_still_stops_instead_of_spinning(tmp_path, monkeypatch):
+    (tmp_path / "game").mkdir()
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    request, _capture_request = _simulator(tmp_path, ["adam"], {"adam"})
+
+    def no_progress(*_args, **_kwargs):
+        (tmp_path / "progress.json").write_text(
+            json.dumps({"stage": "plan", "current": 1, "total": 2}), encoding="utf-8"
+        )
+        raise RuntimeError("Ren'Py could not inventory (exit 3221225477).")
+
+    monkeypatch.setattr(capture, "_run_capture_request", no_progress)
+
+    with pytest.raises(RuntimeError, match="exit 3221225477"):
+        _resume(tmp_path, discovery)
+    assert "skip_forms" not in json.loads(request.read_text(encoding="utf-8"))
+
+
+def test_review_keeps_recorded_skips_for_the_next_renderer(tmp_path, monkeypatch):
+    project = tmp_path / "proj"
+    (project / "game").mkdir(parents=True)
+    discovery = ProjectDiscovery(project, project / "game", {}, {}, [])
+    requests: list[dict] = []
+
+    def stop(*_args, request_path, **_kwargs):
+        requests.append(json.loads(request_path.read_text(encoding="utf-8")))
+        raise RuntimeError("stopped for the test")
+
+    monkeypatch.setattr(capture, "_run_capture_request_resumable", stop)
+
+    with pytest.raises(RuntimeError):
+        capture.capture_runtime_review(discovery, tmp_path / "renpy.exe")
+    cache_dir = next((project / ".scenelight_cache" / "review").iterdir())
+    request_path = cache_dir / "request.json"
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    payload["skip_forms"] = ["andres"]
+    request_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        capture.capture_runtime_review(discovery, tmp_path / "renpy-gl2.exe", renderer="gl2")
+
+    assert requests[-1]["skip_forms"] == ["andres"]
 
 
 def test_crash_records_the_in_flight_form_so_the_next_run_skips_it(tmp_path):
