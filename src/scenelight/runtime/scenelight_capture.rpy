@@ -39,9 +39,9 @@ init -999 python:
     _scenelight_deferred_form_count = [0]
 
     # A renderer that dies inside one form cannot report an exception, so the
-    # form is journaled before capture and skipped once it stops the process
-    # twice. One unreadable form must not fail the whole inventory.
-    _scenelight_form_crash_limit = 2
+    # form is journaled before capture and skipped once it stops the process.
+    # One unreadable form must not fail the whole inventory.
+    _scenelight_form_crash_limit = 1
 
     def _scenelight_process_memory():
         """Return this process's resident bytes, or None when unavailable."""

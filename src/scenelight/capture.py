@@ -2877,7 +2877,12 @@ def _run_capture_request_resumable(
                 raise
             crash_retries += 1
             saved = max(after - before, 0)
-            if saved < CAPTURE_LOW_YIELD_FORM_THRESHOLD:
+            if in_flight:
+                # The engine journaled the form it died on, so the next process
+                # skips it and keeps going. That is progress, not a broken
+                # renderer, and must not consume the low-yield allowance.
+                low_yield_crashes = 0
+            elif saved < CAPTURE_LOW_YIELD_FORM_THRESHOLD:
                 low_yield_crashes += 1
             else:
                 low_yield_crashes = 0

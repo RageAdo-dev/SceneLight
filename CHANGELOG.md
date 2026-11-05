@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4
+
+### Fixes
+
+- Skip a sprite form after a single renderer stop instead of retrying it, so a family of layered images that crashes Ren'Py is left out instead of ending the scan.
+- Stop counting a skipped form against the renderer, which previously abandoned the backend two crashes into a scan.
+
 ## 1.0.3
 
 ### Fixes
