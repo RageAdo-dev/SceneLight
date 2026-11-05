@@ -1,11 +1,18 @@
 # Changelog
 
+## 1.0.3
+
+### Fixes
+
+- Retry a component install with the newest compatible versions when the running Python has no wheel for a pinned one, instead of failing on a missing C compiler.
+- Name the package and the Python version in the setup failure message and the activity log.
+
 ## 1.0.2
 
 ### Fixes
 
 - Update Pillow to 13.0.0, clearing the published advisories that now block a signed build.
-- Require Python 3.11 to 3.13 for source installs, so an unsupported interpreter fails early instead of trying to compile NumPy from source.
+- Require Python 3.11 or newer for source installs.
 
 ## 1.0.1
 
