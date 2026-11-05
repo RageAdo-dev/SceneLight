@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.11
+
+### Fixes
+
+- Name every character capture by its form digest alone, so saved pixels and layered-composite jobs are found again when a later plan spells the same form differently.
+
 ## 1.0.10
 
 ### Fixes

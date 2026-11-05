@@ -1526,14 +1526,18 @@ init -999 python:
                 plan_form(requested_name, " ".join(canonical))
 
     def _scenelight_capture_filename(kind, name):
-        readable = "_".join(part for part in name.lower().split() if part)[:52]
         # Hash the order-independent form key, not the spelling. Ren'Py treats
         # "yuri gj wings6 1" and "yuri 1 gj wings6" as the same form, and a plan
         # that picks a different representative spelling must still restore the
-        # pixels captured by the previous process.
+        # pixels captured by the previous process. Character paths carry nothing
+        # but that digest: readable prefixes and the composite job hash both
+        # depend on the spelling, which is what made restores miss the files.
         digest = hashlib.sha256(
             _scenelight_form_key(name).encode("utf-8")
-        ).hexdigest()[:12]
+        ).hexdigest()[:16]
+        if kind == "sprite":
+            return "sprite_%s.png" % digest
+        readable = "_".join(part for part in name.lower().split() if part)[:52]
         return "%s_%s_%s.png" % (kind, readable, digest)
 
     def _scenelight_require_resolved_capture(displayable, name):

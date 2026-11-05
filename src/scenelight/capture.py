@@ -42,7 +42,7 @@ from .sidecar import STATE_NAME, managed_project_root, renpy_runtime_command
 from .source_types import VISUAL_SOURCE_SUFFIXES
 
 CAPTURE_VERSION = 42
-CAPTURE_PLAN_VERSION = 4
+CAPTURE_PLAN_VERSION = 5
 CAPTURE_PIXEL_VERSION = 2
 CAPTURE_PROCESS_RESUME_LIMIT = 32
 CAPTURE_PROCESS_BATCH_SIZE = 512
@@ -192,6 +192,15 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
                 digest.update(chunk)
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _form_key(name: str) -> str:
+    """Return Ren'Py's order-independent identity for one image form."""
+
+    parts = " ".join(str(name).lower().split()).split()
+    if not parts:
+        return ""
+    return " ".join([parts[0]] + sorted(set(parts[1:])))
 
 
 def _prune_stale_capture_caches(parent: Path, current: Path) -> None:
@@ -2324,9 +2333,8 @@ def _saved_worker_progress(project_root: Path, worker_root: Path, forms: list[st
     count = 0
     root = worker_root.resolve()
     for name in forms:
-        stem = "_".join(name.lower().split())[:52]
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
-        raw = paths.get(name, str(root / f"sprite_{stem}_{digest}.png"))
+        digest = hashlib.sha256(_form_key(name).encode("utf-8")).hexdigest()[:16]
+        raw = paths.get(name, str(root / f"sprite_{digest}.png"))
         try:
             path = Path(raw).resolve()
             if not path.is_relative_to(root):

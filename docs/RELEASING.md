@@ -58,7 +58,7 @@ creates the draft. The workflow leaves existing releases unchanged.
 Build the complete ZIP first, then run:
 
 ```text
-python tools/build_online_installer.py dist/SceneLight-v1.0.10-Windows.zip --release-tag v1.0.10
+python tools/build_online_installer.py dist/SceneLight-v1.0.11-Windows.zip --release-tag v1.0.11
 ```
 
 Publish both ZIPs under that tag. The online installer pins the complete package’s
