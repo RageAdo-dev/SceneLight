@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7
+
+### Fixes
+
+- Start a fresh capture cache when the resolver changes, and delete the superseded review caches automatically, so an upgrade needs no manual cleanup.
+
 ## 1.0.6
 
 ### Fixes

@@ -42,7 +42,7 @@ from .sidecar import STATE_NAME, managed_project_root, renpy_runtime_command
 from .source_types import VISUAL_SOURCE_SUFFIXES
 
 CAPTURE_VERSION = 42
-CAPTURE_PLAN_VERSION = 3
+CAPTURE_PLAN_VERSION = 4
 CAPTURE_PIXEL_VERSION = 2
 CAPTURE_PROCESS_RESUME_LIMIT = 32
 CAPTURE_PROCESS_BATCH_SIZE = 512
@@ -192,6 +192,27 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
                 digest.update(chunk)
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _prune_stale_capture_caches(parent: Path, current: Path) -> None:
+    """Delete review caches left by an older resolver or capture plan.
+
+    The directory name includes the protocol and plan versions, so a changed
+    capture implementation starts from a fresh cache. Removing the siblings
+    keeps the old checkpoints from accumulating on disk after an upgrade.
+    """
+
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry == current or not entry.is_dir():
+            continue
+        try:
+            shutil.rmtree(entry)
+        except OSError:
+            continue
 
 
 def _project_signature(discovery: ProjectDiscovery, *, content_signature: str | None = None) -> str:
@@ -1842,6 +1863,7 @@ def capture_runtime_review(
     result_path = cache_root / "result.json"
     state_path = cache_root / "state.json"
     progress_path = cache_root / "progress.json"
+    _prune_stale_capture_caches(cache_root.parent, cache_root)
     preview_root.mkdir(parents=True, exist_ok=True)
 
     if state_path.is_file() and result_path.is_file():
