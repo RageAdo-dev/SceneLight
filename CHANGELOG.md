@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.10
+
+### Fixes
+
+- List the sprite forms that were skipped when the character review finishes, so a missing lighting family is named in Activity and the support report.
+
 ## 1.0.9
 
 ### Fixes

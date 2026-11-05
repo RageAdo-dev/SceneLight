@@ -1923,6 +1923,19 @@ def capture_runtime_review(
         raise FileNotFoundError("Ren'Py did not write every SceneLight review preview")
     _deduplicate_normalized_captures(discovery.project_root, payload)
     _normalize_surface_captures(discovery.project_root, payload)
+    skipped = sorted(
+        set(_asset_capture_errors(payload.get("errors"), "sprite"))
+        - set(payload.get("sprites", {}))
+    )
+    if skipped:
+        preview = ", ".join(skipped[:12])
+        if len(skipped) > 12:
+            preview += ", ..."
+        print(
+            f"SceneLight review skipped {len(skipped)} sprite form(s): {preview}",
+            flush=True,
+        )
+        _record_capture_outcome(payload, discovery.project_root, "Review skips")
     _write_capture_result(result_path, payload)
     state_path.write_text(
         json.dumps({"version": CAPTURE_VERSION, "signature": signature}, indent=2) + "\n",
