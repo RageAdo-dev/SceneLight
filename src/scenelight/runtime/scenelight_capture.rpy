@@ -316,6 +316,18 @@ init -999 python:
                 os.remove(temporary)
             _scenelight_save_surface_image_atomic(surface, filename)
 
+    def _scenelight_is_raw_surface(filename):
+        """Report whether a saved file is a complete SceneLight RGBA surface."""
+
+        try:
+            stream = open(filename, "rb")
+            try:
+                return stream.read(16) == b"SCENELIGHT_RGBA1"
+            finally:
+                stream.close()
+        except Exception:
+            return False
+
     def _scenelight_mark_surface_checkpoint(filename):
         marker = filename + ".surface-checkpoint"
         normalized_marker = filename + ".surface-normalized"
@@ -2219,6 +2231,8 @@ init -999 python:
             _scenelight_record_deferred_form(normalized, relative)
             return True
 
+        restore_stats = {"exact": 0, "recovered": 0, "unmarked": 0, "missing": 0}
+
         def restore_sprite_checkpoint(name):
             normalized = " ".join(name.lower().split())
             filename = _scenelight_capture_filename("sprite", normalized)
@@ -2247,29 +2261,42 @@ init -999 python:
                         candidates.append(candidate)
             except OSError:
                 pass
+            seen_file = False
             for relative in candidates:
                 absolute = os.path.join(config.basedir, relative.replace("/", os.sep))
                 composite_job = _scenelight_composite_job_path(relative)
-                if (
-                    os.path.isfile(absolute)
-                    and os.path.getsize(absolute) > 32
-                    and os.path.isfile(absolute + ".surface-checkpoint")
-                ):
+                present = os.path.isfile(absolute) and os.path.getsize(absolute) > 32
+                if present:
+                    seen_file = True
+                if present and os.path.isfile(absolute + ".surface-checkpoint"):
                     surface_captures.add(relative)
-                elif (
-                    os.path.isfile(absolute)
-                    and os.path.getsize(absolute) > 32
-                    and os.path.isfile(absolute + ".surface-normalized")
-                ):
+                elif present and os.path.isfile(absolute + ".surface-normalized"):
                     normalized_captures.add(relative)
+                elif present and _scenelight_is_raw_surface(absolute) and not (
+                    os.path.isfile(absolute + ".composite-normalized")
+                    or os.path.isfile(composite_job)
+                    or relative in composite_captures
+                ):
+                    # The renderer can stop after the atomic pixel write but
+                    # before the marker. Those pixels are complete, so keep the
+                    # form and mark it instead of rendering it again and hitting
+                    # the same stop on every restart.
+                    surface_captures.add(relative)
+                    try:
+                        _scenelight_mark_surface_checkpoint(absolute)
+                    except Exception:
+                        pass
+                    restore_stats["recovered"] += 1
                 elif not (
                     os.path.isfile(absolute + ".composite-normalized")
                     or os.path.isfile(composite_job)
                     or relative in composite_captures
                 ):
                     continue
+                restore_stats["exact"] += 1
                 captures["sprites"][normalized] = relative
                 return True
+            restore_stats["unmarked" if seen_file else "missing"] += 1
             return False
 
         def plan_form(requested_name, actual_name):
@@ -2418,6 +2445,25 @@ init -999 python:
                     restore_index,
                     len(ordered_planned_forms),
                 )
+        if ordered_planned_forms:
+            _scenelight_log(
+                "SceneLight restore detail: %d ready (%d recovered), %d missing of %d."
+                % (
+                    restore_stats["exact"],
+                    restore_stats["recovered"],
+                    restore_stats["missing"],
+                    len(ordered_planned_forms),
+                )
+            )
+            _scenelight_log_capture_attempt(
+                {
+                    "stage": "restore",
+                    "ready": restore_stats["exact"],
+                    "recovered": restore_stats["recovered"],
+                    "missing": restore_stats["missing"],
+                    "total": len(ordered_planned_forms),
+                }
+            )
         # A crash exits the process before the failing form can be recorded, so
         # the journal written ahead of each capture is the only evidence of it.
         # Skipping that one form keeps the rest of the inventory captureable.

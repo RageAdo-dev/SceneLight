@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.9
+
+### Fixes
+
+- Keep a sprite form whose pixels were written but whose checkpoint marker was lost when the renderer stopped, instead of rendering it again.
+- Record how many forms restored, recovered and were missing, so a stopped capture explains itself in one line.
+
 ## 1.0.8
 
 ### Fixes
