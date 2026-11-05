@@ -1092,12 +1092,12 @@ init -999 python:
     def _scenelight_offscreen_readback_available():
         """Whether this engine can screenshot a render tree into an RGBA buffer.
 
-        Ren'Py 8 takes an offscreen screenshot of the tree it is given. Ren'Py 7
-        only ever grabs its window, and clears it opaque, so a form captured that
-        way loses both its size and its alpha.
+        Ren'Py added the offscreen screenshot in 8.3. Earlier engines, including
+        the 8.0-8.2 line, only ever grab their window and clear it opaque, so a
+        form captured that way loses both its size and its alpha.
         """
 
-        return tuple(renpy.version_tuple[:1]) >= (8,)
+        return tuple(renpy.version_tuple[:2]) >= (8, 3)
 
     def _scenelight_capture_grow_screen(width, height):
         """Make the engine's virtual screen at least as large as one form.
