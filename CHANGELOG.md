@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6
+
+### Fixes
+
+- Fit every layered character form into the capture surface, so teeth, wing and charge layers that use their own offsets keep their lighting instead of stopping the renderer.
+
 ## 1.0.5
 
 ### Fixes

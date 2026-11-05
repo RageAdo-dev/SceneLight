@@ -2825,6 +2825,7 @@ def _run_capture_request_resumable(
     progress_state = _CaptureProgressState()
     low_yield_crashes = 0
     crash_retries = 0
+    stalled_retries = 0
     completed_batches = 0
     while True:
         before = _durable_form_checkpoint_count(capture_root)
@@ -2877,6 +2878,17 @@ def _run_capture_request_resumable(
                 raise
             crash_retries += 1
             saved = max(after - before, 0)
+            if saved == 0:
+                # Two processes in a row that save nothing mean the journaled
+                # form is not actually being skipped. Stop instead of looping.
+                stalled_retries += 1
+                if stalled_retries >= 2:
+                    raise RuntimeError(
+                        "Ren'Py keeps stopping on the same sprite forms without saving new "
+                        "pixels; another renderer is required."
+                    ) from error
+            else:
+                stalled_retries = 0
             if in_flight:
                 # The engine journaled the form it died on, so the next process
                 # skips it and keeps going. That is progress, not a broken

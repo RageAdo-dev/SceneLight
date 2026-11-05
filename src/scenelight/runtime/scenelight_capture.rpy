@@ -1035,12 +1035,18 @@ init -999 python:
             0.0,
             0.0,
         )
-        if rendered.width > config.screen_width or rendered.height > config.screen_height:
+        layered = type(displayable).__name__ in ("MultiBox", "LayeredImage")
+        if (
+            rendered.width > config.screen_width
+            or rendered.height > config.screen_height
+            or layered
+        ):
             # Layered images may place zoomed children outside their declared
             # canvas (for example a 1680x960 ``always`` Null with a 1.2x layer
-            # at xpos 800). Those children blit outside the software surface
-            # and stop the engine. Fit the whole tree to the screen first so
-            # every layer stays inside it, and keep the alpha channel.
+            # at xpos 800), and Ren'Py's software compositor can stop on those
+            # child transforms even when the canvas fits. Fit the whole tree to
+            # the screen so every layer stays inside it, and keep the alpha
+            # channel so the form still gets lighting.
             try:
                 transform_module = getattr(renpy.display, "transform", None)
                 if transform_module is None:
@@ -1509,7 +1515,13 @@ init -999 python:
 
     def _scenelight_capture_filename(kind, name):
         readable = "_".join(part for part in name.lower().split() if part)[:52]
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+        # Hash the order-independent form key, not the spelling. Ren'Py treats
+        # "yuri gj wings6 1" and "yuri 1 gj wings6" as the same form, and a plan
+        # that picks a different representative spelling must still restore the
+        # pixels captured by the previous process.
+        digest = hashlib.sha256(
+            _scenelight_form_key(name).encode("utf-8")
+        ).hexdigest()[:12]
         return "%s_%s_%s.png" % (kind, readable, digest)
 
     def _scenelight_require_resolved_capture(displayable, name):
