@@ -47,6 +47,27 @@ BASE_DEPENDENCIES = {
 CUDA_REQUIREMENT = "cupy-cuda12x==14.2.0"
 
 
+# Source installs run pip twice: the locked pins first, then the same packages
+# without their upper pin when this interpreter has no wheel for them. Without
+# the retry, one missing wheel turns into a compiler error the user cannot act
+# on. Kept as a string so the GUI still launches one shell-free command.
+ADAPTIVE_INSTALL_SCRIPT = """\
+import subprocess, sys
+python, requirements, *extra = sys.argv[1:]
+if subprocess.call([python, "-m", "pip", "install", "--disable-pip-version-check", "-r", requirements, *extra]) == 0:
+    raise SystemExit(0)
+print("SceneLight: a pinned component has no build for this Python. Retrying with the newest compatible versions.", flush=True)
+relaxed = []
+for line in open(requirements, encoding="utf-8"):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    name, separator, version = line.partition("==")
+    relaxed.append(name + ">=" + version if separator else line)
+raise SystemExit(subprocess.call([python, "-m", "pip", "install", "--disable-pip-version-check", *relaxed, *extra]))
+"""
+
+
 PREVIEW_DEPENDENCIES = {
     **BASE_DEPENDENCIES,
     "PySide6.QtOpenGLWidgets": "PySide6-Essentials==6.11.2",

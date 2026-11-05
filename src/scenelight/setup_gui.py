@@ -34,6 +34,7 @@ from .release import (
     release_content_sha256_from_manifest,
     release_version_from_manifest,
 )
+from .setup_dependencies import ADAPTIVE_INSTALL_SCRIPT as ADAPTIVE_INSTALL_SCRIPT
 from .setup_dependencies import BASE_DEPENDENCIES as BASE_DEPENDENCIES
 from .setup_dependencies import BASE_REQUIREMENTS as BASE_REQUIREMENTS
 from .setup_dependencies import CUDA_REQUIREMENT as CUDA_REQUIREMENT
@@ -413,6 +414,24 @@ def describe_operation_failure(output: str) -> tuple[str, str]:
     """Extract the failure reason from CLI output for the Setup window."""
 
     lowered = output.lower()
+    if "metadata-generation-failed" in lowered or "unknown compiler(s)" in lowered:
+        # pip reports the package on the last line of its error block.
+        package = ""
+        for line in output.splitlines():
+            marker = line.find("╰─>")
+            if marker != -1:
+                package = line[marker + 3 :].strip()
+                break
+        return (
+            f"No build of {package} for this Python"
+            if package
+            else "No component build for this Python",
+            "SceneLight could not install "
+            f"{package or 'a required component'} because this Python version has no prebuilt "
+            "package for it and no C compiler is available. Use the packaged SceneLight.exe, "
+            "which includes its own runtime, or install Python 3.12 and run SceneLight.bat "
+            "with it. Nothing in the selected game was changed.",
+        )
     if "capturescripterror:" in lowered or "could not compile the game scripts" in lowered:
         return (
             "The game scripts could not be compiled",
@@ -542,6 +561,21 @@ def dependency_install_commands(
         )
     else:
         installer_python = host_python
+    if source and not offline and selected_requirements.is_file():
+        # Online source installs retry with relaxed pins when this interpreter
+        # has no wheel for a locked version, instead of failing on a compiler.
+        extra = [CUDA_REQUIREMENT] if include_cuda else []
+        commands.append(
+            [
+                str(host_python),
+                "-c",
+                ADAPTIVE_INSTALL_SCRIPT,
+                str(installer_python),
+                str(selected_requirements),
+                *extra,
+            ]
+        )
+        return commands
     install = [
         str(installer_python),
         "-m",
@@ -3154,6 +3188,17 @@ class SceneLightSetup(tk.Tk):
             )
         if approved:
             self._continue_after_components = continue_setup
+            # Record the interpreter before pip runs: a support report otherwise
+            # cannot tell which Python chose the wheels that failed.
+            diagnostics.event(
+                "components",
+                "Installing SceneLight components",
+                python=sys.version.split()[0],
+                executable=sys.executable,
+                include_preview=include_preview,
+                include_cuda=include_cuda,
+                source_install=source_install,
+            )
             self._start_operation(
                 "preview-components" if include_preview else "components",
                 dependency_install_commands(

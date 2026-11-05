@@ -7,7 +7,7 @@ name = "scenelight-renpy"
 version = "1.0.2"
 description = "Dynamic screen-space 2D sprite relighting for Ren'Py"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "RageAdo-dev" }]
 dependencies = [

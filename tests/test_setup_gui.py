@@ -819,6 +819,17 @@ def test_native_access_violation_is_not_mislabeled_as_a_progress_line() -> None:
     assert "form 1/10731" not in message
 
 
+def test_component_build_failure_names_the_package_and_the_packaged_app() -> None:
+    title, message = describe_operation_failure(
+        "error: metadata-generation-failed\n"
+        "..\\meson.build:1:0: ERROR: Unknown compiler(s): [['cl'], ['gcc']]\n"
+        "╰─> numpy\n"
+    )
+
+    assert title == "No build of numpy for this Python"
+    assert "packaged SceneLight.exe" in message
+
+
 def test_update_operation_uses_a_product_name_instead_of_internal_api_wording() -> None:
     title, subtitle, status = operation_copy("refresh")
 
@@ -882,12 +893,10 @@ def test_source_dependency_install_is_a_shell_free_private_environment_batch(
             *PACKAGING_REQUIREMENTS,
         ],
         [
+            "host-python.exe",
+            "-c",
+            setup_gui.ADAPTIVE_INSTALL_SCRIPT,
             str(private_python),
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "-r",
             str(requirements),
             CUDA_REQUIREMENT,
         ],
