@@ -1110,6 +1110,15 @@ def _capture_report(
     context = next((r for r in records if r.get("stage") == "context"), {})
     stored = [r for r in records if r.get("stage") == "stored"]
     matted = [r for r in records if r.get("stage") == "matted"]
+    # A form copied straight from a PNG source never writes a pixel record, so
+    # count the forms the runtime reported saving rather than the pixel path.
+    # Matted forms are counted separately, so leave them out of this tally.
+    matted_forms = {str(record.get("form")) for record in matted if record.get("form")}
+    saved_forms = {
+        str(record.get("form"))
+        for record in records
+        if record.get("stage") == "saved" and record.get("form")
+    } - matted_forms
     errors = [str(error) for error in (payload.get("errors") or [])]
 
     timings: list[tuple[float, str]] = []
@@ -1168,7 +1177,7 @@ def _capture_report(
         "capture_seconds": round(capture_seconds, 2),
         "normalization_seconds": round(normalization_seconds, 2),
         "forms": {
-            "captured": len(stored),
+            "captured": len({str(r.get("form")) for r in stored if r.get("form")} | saved_forms),
             "matted": len(matted),
             "requested": len(payload.get("sprites") or {}),
             "failed": len(errors),
