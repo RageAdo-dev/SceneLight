@@ -40,7 +40,12 @@ from scenelight.capture import (
     merge_capture,
     preflight_runtime,
 )
-from scenelight.cli import _renderer_attempts, _runtime_capture_launchers
+from scenelight.cli import (
+    _matching_renpy_sdk,
+    _renderer_attempts,
+    _resolve_renpy_executable,
+    _runtime_capture_launchers,
+)
 from scenelight.project import ProjectDiscovery
 from scenelight.sidecar import sync_project
 
@@ -561,6 +566,49 @@ def test_project_without_native_runtime_can_use_sdk(tmp_path: Path) -> None:
     sdk.touch()
 
     assert _runtime_capture_launchers(managed, sdk) == [(sdk, False, "the selected Ren'Py SDK")]
+
+
+def test_matching_sdk_is_chosen_for_the_project_engine_version(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    project = tmp_path / "Eidolon"
+    project.mkdir()
+    (project / "log.txt").write_text("Ren'Py 8.3.7.25031702\n", encoding="utf-8")
+    for name in ("renpy-8.1.0-sdk", "renpy-8.3.7-sdk", "renpy-7.7.1-sdk"):
+        launcher = tmp_path / name / "renpy.exe"
+        launcher.parent.mkdir()
+        launcher.touch()
+
+    matched = _resolve_renpy_executable(project, None)
+
+    assert matched == (tmp_path / "renpy-8.3.7-sdk" / "renpy.exe").resolve()
+
+
+def test_sdk_from_another_major_is_not_used_for_the_project(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    project = tmp_path / "Eidolon"
+    project.mkdir()
+    (project / "log.txt").write_text("Ren'Py 6.99.12.4\n", encoding="utf-8")
+    for name in ("renpy-7.4.11-sdk", "renpy-8.3.7-sdk"):
+        launcher = tmp_path / name / "renpy.exe"
+        launcher.parent.mkdir()
+        launcher.touch()
+
+    assert _matching_renpy_sdk(project, (6, 99, 12)) is None
+
+
+def test_unknown_engine_version_keeps_the_compatibility_runtime_first(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.delenv("RENPY_SDK", raising=False)
+    monkeypatch.delenv("SCENELIGHT_COMPAT_RENPY", raising=False)
+    project = tmp_path / "unlabelled"
+    project.mkdir()
+    launcher = tmp_path / "renpy-8.3.7-sdk" / "renpy.exe"
+    launcher.parent.mkdir()
+    launcher.touch()
+
+    assert _matching_renpy_sdk(project, None) is None
 
 
 def test_old_renpy_expands_to_automatic_angle_and_gl_attempts(tmp_path: Path) -> None:

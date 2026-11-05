@@ -4,6 +4,11 @@
 
 ### Fixes
 
+- Use the Ren'Py SDK that matches the version a project was built with instead of quietly scanning newer games with the bundled Ren'Py 7 runtime.
+- Keep completed sprite forms when a renderer stops mid-capture, and name the form it stopped on in the support report.
+- Record each capture step with its image sources, output path and memory use so a stopped renderer can be diagnosed from the support export.
+- Skip a sprite form that stops the renderer twice instead of failing the whole character inventory.
+- Name the bundled Ren'Py 7 runtime as such instead of reporting it as the selected Ren'Py SDK.
 - Finish stopping background operations when Setup closes.
 - Stop the active operation on close even when an earlier cancellation is still finishing.
 - Prevent simultaneous projects from interrupting a shared compatibility-runtime download.

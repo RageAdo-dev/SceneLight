@@ -439,8 +439,8 @@ def describe_operation_failure(output: str) -> tuple[str, str]:
         return (
             "No compatible renderer worked",
             "SceneLight automatically tried every graphics backend bundled with this game and "
-            "any selected SDK, but none could start here. The activity log lists each attempted "
-            "backend. The selected game or mod was not changed.",
+            "any selected SDK, but character capture stopped partway through on each one. The "
+            "activity log lists each attempted backend. The selected game or mod was not changed.",
         )
     if "number of texture units: 0" in lowered or "can't find a workable environment" in lowered:
         return (

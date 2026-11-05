@@ -196,3 +196,103 @@ def test_partial_composite_progress_uses_published_journal_and_existing_layers(t
     assert capture._saved_worker_progress(tmp_path, worker, ["other"]) == 0
     layer.unlink()
     assert capture._saved_worker_progress(tmp_path, worker, ["hero layered"]) == 0
+
+
+def test_capture_trace_tail_keeps_the_last_steps_and_their_paths(tmp_path):
+    (tmp_path / "capture_attempts.jsonl").write_text(
+        "\n".join(
+            (
+                json.dumps({"stage": "attempt", "form": "hero a", "output": "previews/a.png"}),
+                json.dumps({"stage": "resolved", "form": "hero a", "sources": ["images/a.png"]}),
+                "{not json",
+            )
+        )
+        + "\n"
+    )
+
+    lines = capture._capture_trace_tail(tmp_path, limit=2).splitlines()
+
+    assert len(lines) == 2
+    assert '"stage": "resolved"' in lines[0]
+    assert "images/a.png" in lines[0]
+    assert lines[1] == "{not json"
+    assert capture._capture_trace_tail(None) == ""
+
+
+def test_progress_names_the_form_that_is_still_rendering():
+    key, line = capture._capture_progress_line(
+        {"stage": "form.start", "current": 65, "total": 98, "item": "yuri 1 aw"}
+    )
+
+    assert key == ("form.start", 65, 98, "yuri 1 aw")
+    assert line == "SceneLight resolver capturing form 65/98: yuri 1 aw"
+
+
+def test_crash_inside_a_journaled_form_resumes_until_the_form_is_skipped(tmp_path, monkeypatch):
+    (tmp_path / "game").mkdir()
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    calls = []
+
+    def crash(*_args, **_kwargs):
+        calls.append(len(calls) + 1)
+        attempt = len(calls)
+        if attempt == 1:
+            for index in range(capture.CAPTURE_LOW_YIELD_FORM_THRESHOLD):
+                (tmp_path / f"sprite_{index}.png.surface-checkpoint").write_text("raw")
+            (tmp_path / "form_attempts.json").write_text(json.dumps({"yuri 1 aw": 1}))
+            raise RuntimeError("Ren'Py could not inventory (exit 3221225477).")
+        if attempt == 2:
+            (
+                tmp_path
+                / f"sprite_{capture.CAPTURE_LOW_YIELD_FORM_THRESHOLD}.png.surface-checkpoint"
+            ).write_text("raw")
+            (tmp_path / "form_attempts.json").write_text(json.dumps({"yuri 1 aw": 2}))
+            raise RuntimeError("Ren'Py could not inventory (exit 3221225477).")
+        # The third process skips the journaled form and finishes.
+        (tmp_path / "form_attempts.json").write_text("{}")
+        return True
+
+    monkeypatch.setattr(capture, "_run_capture_request", crash)
+    capture._run_capture_request_resumable(
+        discovery,
+        tmp_path / "sdk.exe",
+        request_path=tmp_path / "request.json",
+        result_path=tmp_path / "result.json",
+        native_runtime=False,
+        timeout_seconds=5,
+        purpose="inventory",
+        progress_path=tmp_path / "progress.json",
+        composite_job_root=tmp_path / "composites",
+        renderer=None,
+        capture_root=tmp_path,
+    )
+
+    assert len(calls) == 3
+
+
+def test_crash_without_saved_forms_or_a_journaled_form_fails_immediately(tmp_path, monkeypatch):
+    (tmp_path / "game").mkdir()
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    calls = []
+
+    def crash(*_args, **_kwargs):
+        calls.append(1)
+        raise RuntimeError("Ren'Py could not inventory (exit 3221225477).")
+
+    monkeypatch.setattr(capture, "_run_capture_request", crash)
+    with pytest.raises(RuntimeError, match="exit 3221225477"):
+        capture._run_capture_request_resumable(
+            discovery,
+            tmp_path / "sdk.exe",
+            request_path=tmp_path / "request.json",
+            result_path=tmp_path / "result.json",
+            native_runtime=False,
+            timeout_seconds=5,
+            purpose="inventory",
+            progress_path=tmp_path / "progress.json",
+            composite_job_root=tmp_path / "composites",
+            renderer=None,
+            capture_root=tmp_path,
+        )
+
+    assert len(calls) == 1

@@ -38,6 +38,51 @@ init -999 python:
     _scenelight_deferred_form_stream = [None]
     _scenelight_deferred_form_count = [0]
 
+    # A renderer that dies inside one form cannot report an exception, so the
+    # form is journaled before capture and skipped once it stops the process
+    # twice. One unreadable form must not fail the whole inventory.
+    _scenelight_form_crash_limit = 2
+
+    def _scenelight_process_memory():
+        """Return this process's resident bytes, or None when unavailable."""
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _Counters(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            counters = _Counters()
+            counters.cb = ctypes.sizeof(_Counters)
+            process = ctypes.windll.kernel32.GetCurrentProcess()
+            if not ctypes.windll.psapi.GetProcessMemoryInfo(
+                process, ctypes.byref(counters), counters.cb
+            ):
+                return None
+            return int(counters.WorkingSetSize)
+        except Exception:
+            pass
+        try:
+            import resource
+
+            usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Linux reports kilobytes; macOS reports bytes.
+            return int(usage) * (1024 if sys.platform.startswith("linux") else 1)
+        except Exception:
+            return None
+
     def _scenelight_probe_texture_cleanup():
         # Exercise the compiled runtime, rather than trusting its version or
         # bundled source. Some Ren'Py 7 binaries omit Texture's finalizer.
@@ -803,6 +848,45 @@ init -999 python:
         if not parts:
             return ""
         return " ".join([parts[0]] + sorted(set(parts[1:])))
+
+    def _scenelight_load_form_attempts(filename):
+        """Read the crash journal a previous process left behind."""
+
+        try:
+            stream = open(filename, "r")
+            try:
+                value = json.load(stream)
+            finally:
+                stream.close()
+        except Exception:
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        result = {}
+        for key, count in value.items():
+            try:
+                result[str(key)] = int(count)
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    def _scenelight_save_form_attempts(filename, attempts):
+        # Only a crash leaves an entry behind, so the journal stays tiny.
+        # Diagnostics must never fail a capture, so write errors are ignored.
+        temporary = filename + ".tmp"
+        try:
+            stream = open(temporary, "w")
+            try:
+                json.dump(attempts, stream, sort_keys=True)
+            finally:
+                stream.close()
+            _scenelight_atomic_replace(temporary, filename)
+        except Exception:
+            try:
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            except Exception:
+                pass
 
     def _scenelight_load_deferred_form_paths(filename):
         result = {}
@@ -1580,6 +1664,70 @@ init -999 python:
                 stream.write("\n")
             _scenelight_atomic_replace(temporary_progress_path, progress_path)
 
+        trace_path = os.path.join(output_root, "capture_attempts.jsonl")
+
+        def _scenelight_trim_capture_trace(path, limit=1500):
+            """Keep the trace bounded across resumed attempts."""
+
+            try:
+                if os.path.getsize(path) <= 8 * 1024 * 1024:
+                    return
+                stream = open(path, "r")
+                try:
+                    lines = stream.readlines()
+                finally:
+                    stream.close()
+                stream = open(path, "w")
+                try:
+                    stream.writelines(lines[-limit:])
+                finally:
+                    stream.close()
+            except Exception:
+                pass
+
+        def _scenelight_log_capture_attempt(record):
+            """Append one durable line describing the current capture step.
+
+            The engine can be stopped by the renderer at any point, so each
+            step is flushed before the expensive work starts. The host reads
+            this file when a capture dies and puts the tail into the support
+            report, which is the only way to name the failing form.
+            """
+
+            record["time"] = round(time.time(), 3)
+            record["renpy"] = renpy.version_string
+            record["renderer"] = os.environ.get("RENPY_RENDERER") or "automatic"
+            record.setdefault("screen", [config.screen_width, config.screen_height])
+            record.setdefault("draw", type(getattr(renpy.display, "draw", None)).__name__)
+            memory = _scenelight_process_memory()
+            if memory is not None:
+                record["memory_mb"] = round(memory / 1048576.0, 1)
+            try:
+                stream = open(trace_path, "a")
+                try:
+                    # A renderer crash ends only this process: once the line is
+                    # flushed the host can read it, so no sync is required.
+                    stream.write(json.dumps(record, sort_keys=True) + "\n")
+                    stream.flush()
+                finally:
+                    stream.close()
+            except Exception:
+                # Diagnostics must never decide whether a capture succeeds.
+                pass
+
+        _scenelight_trim_capture_trace(trace_path)
+        _scenelight_log_capture_attempt(
+            {
+                "stage": "context",
+                "project": config.basedir,
+                "output": output_relative,
+                "request": request_path,
+                "explicit_forms": len(request.get("explicit_forms") or ()),
+                "review_only": bool(request.get("review_only")),
+                "defer_composites": bool(request.get("defer_composites")),
+            }
+        )
+
         character_tags = set(str(tag).split()[0] for tag in request.get("character_tags", ()))
         explicit_character_tags = set(
             str(tag).split()[0] for tag in request.get("explicit_character_tags", ())
@@ -1919,6 +2067,27 @@ init -999 python:
                     if kind == "sprite"
                     else None
                 )
+                if kind == "sprite":
+                    sources = []
+                    try:
+                        for source in _scenelight_visible_sources(displayable)[:24]:
+                            sources.append(str(source))
+                    except Exception:
+                        sources = []
+                    _scenelight_log_capture_attempt(
+                        {
+                            "stage": "resolved",
+                            "form": name,
+                            "displayable": type(displayable).__name__,
+                            "sources": sources,
+                            "structure": (
+                                structure_signature[:16]
+                                if isinstance(structure_signature, str)
+                                else None
+                            ),
+                            "output": relative.replace(os.sep, "/"),
+                        }
+                    )
                 structure_relative = structure_index.get(structure_signature)
                 if structure_relative is not None:
                     structure_absolute = os.path.join(
@@ -1967,9 +2136,37 @@ init -999 python:
                     normalized_captures.add(normalized_relative)
                 if kind == "scene" and capture_mode == "renderer":
                     _scenelight_mark_scene_checkpoint(absolute_filename)
+                if kind == "sprite":
+                    try:
+                        saved_bytes = os.path.getsize(
+                            os.path.join(
+                                config.basedir,
+                                normalized_relative.replace("/", os.sep),
+                            )
+                        )
+                    except OSError:
+                        saved_bytes = None
+                    _scenelight_log_capture_attempt(
+                        {
+                            "stage": "saved",
+                            "form": name,
+                            "capture_mode": capture_mode,
+                            "output": normalized_relative,
+                            "bytes": saved_bytes,
+                        }
+                    )
                 return normalized_relative
             except Exception:
-                capture_failures[(kind, name)] = traceback.format_exc().splitlines()[-1]
+                detail = traceback.format_exc().splitlines()[-1]
+                capture_failures[(kind, name)] = detail
+                _scenelight_log_capture_attempt(
+                    {
+                        "stage": "error",
+                        "kind": kind,
+                        "form": name,
+                        "error": detail,
+                    }
+                )
                 return None
 
         def capture_sprite(name):
@@ -2167,7 +2364,37 @@ init -999 python:
                     restore_index,
                     len(ordered_planned_forms),
                 )
+        # A crash exits the process before the failing form can be recorded, so
+        # the journal written ahead of each capture is the only evidence of it.
+        # Skipping that one form keeps the rest of the inventory captureable.
         restored_forms = len(ordered_planned_forms) - len(pending_forms)
+        attempt_path = os.path.join(output_root, "form_attempts.json")
+        attempt_counts = _scenelight_load_form_attempts(attempt_path)
+        quarantined_names = [
+            actual_name
+            for actual_name in pending_forms
+            if attempt_counts.get(_scenelight_form_key(actual_name), 0)
+            >= _scenelight_form_crash_limit
+        ]
+        if quarantined_names:
+            quarantined_keys = set(
+                _scenelight_form_key(actual_name) for actual_name in quarantined_names
+            )
+            for quarantined_name in quarantined_names:
+                errors.append(
+                    "sprite %s: the renderer stopped while capturing this form"
+                    % quarantined_name
+                )
+            pending_forms = [
+                actual_name
+                for actual_name in pending_forms
+                if _scenelight_form_key(actual_name) not in quarantined_keys
+            ]
+            _scenelight_log(
+                "SceneLight skipped %d form(s) that stopped the renderer: %s"
+                % (len(quarantined_names), ", ".join(sorted(quarantined_names)))
+            )
+
         if ordered_planned_forms:
             publish_progress(
                 "planned",
@@ -2185,9 +2412,46 @@ init -999 python:
                 "SceneLight restored %d/%d completed sprite forms; %d remain."
                 % (restored_forms, len(ordered_planned_forms), len(pending_forms))
             )
+        previous_form_started = [None]
         for index, actual_name in enumerate(pending_forms, 1):
-            capture_sprite(actual_name)
             completed = restored_forms + index
+            # Publish the form before rendering it. A native crash leaves this
+            # as the last progress record, which names the offending image in
+            # the support report instead of the form that finished before it.
+            publish_progress(
+                "form.start",
+                completed,
+                len(ordered_planned_forms),
+                item=actual_name,
+            )
+            attempt_started = time.time()
+            _scenelight_log_capture_attempt(
+                {
+                    "stage": "attempt",
+                    "form": actual_name,
+                    "index": completed,
+                    "total": len(ordered_planned_forms),
+                    "output": os.path.join(
+                        output_relative,
+                        _scenelight_capture_filename("sprite", actual_name),
+                    ).replace(os.sep, "/"),
+                    "seconds_since_previous_form": (
+                        round(attempt_started - previous_form_started[0], 3)
+                        if previous_form_started[0] is not None
+                        else None
+                    ),
+                }
+            )
+            previous_form_started[0] = attempt_started
+            form_key = _scenelight_form_key(actual_name)
+            attempt_counts[form_key] = attempt_counts.get(form_key, 0) + 1
+            _scenelight_save_form_attempts(attempt_path, attempt_counts)
+            capture_sprite(actual_name)
+            # Reaching this line means the renderer survived the form, so the
+            # journal entry must not count against the next attempt.
+            if form_key in attempt_counts:
+                del attempt_counts[form_key]
+                _scenelight_save_form_attempts(attempt_path, attempt_counts)
             if index == 1 or index % 25 == 0 or index == len(pending_forms):
                 _scenelight_log(
                     "SceneLight resolver form %d/%d"

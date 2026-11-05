@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,7 @@ from .release import release_record
 from .script_cache import preserve_playback_bytecode
 from .sidecar import (
     analysis_cache_root,
+    detect_project_renpy_version,
     find_native_executable,
     managed_project_root,
     remove_analysis_cache,
@@ -190,42 +192,179 @@ def _install_runtime_files(game_root: Path, *, inspector: bool = True) -> None:
             (game_root / "scenelight_runtime" / name).unlink(missing_ok=True)
 
 
+def _renpy_sdk_launchers(project_root: Path) -> list[Path]:
+    """Return SDK launchers near the project and in the usual download spots."""
+
+    home = Path.home()
+    search_roots = [
+        project_root,
+        *list(project_root.parents)[:3],
+        Path.cwd().resolve(),
+        home,
+        home / "Downloads",
+        home / "Desktop",
+        home / "Documents",
+    ]
+    launchers: list[Path] = []
+    seen: set[Path] = set()
+    for root in search_roots:
+        try:
+            folders = sorted(root.glob("renpy-*-sdk"), reverse=True)
+            # Extracted archives are often one folder deeper than the root.
+            folders.extend(sorted(root.glob("*/renpy-*-sdk"), reverse=True))
+        except OSError:
+            continue
+        for folder in folders:
+            launcher = folder / "renpy.exe"
+            if not launcher.is_file():
+                continue
+            try:
+                resolved = launcher.resolve()
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            launchers.append(resolved)
+    return launchers
+
+
+def _renpy_sdk_version(executable: Path) -> tuple[int, int, int] | None:
+    """Read a version from an SDK folder named like ``renpy-8.3.7-sdk``."""
+
+    match = re.search(
+        r"renpy-(\d+)\.(\d+)(?:\.(\d+))?",
+        executable.parent.name,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
+
+
+def _matching_renpy_sdk(project_root: Path, wanted: tuple[int, int, int] | None) -> Path | None:
+    """Pick the SDK that best matches the engine the project was built with."""
+
+    launchers = _renpy_sdk_launchers(project_root)
+    if not launchers or wanted is None:
+        # Without a known engine version, keep the historical order: the
+        # verified compatibility runtime first, then any nearby SDK.
+        return None
+
+    def rank(executable: Path) -> tuple[int, tuple[int, int, int]]:
+        version = _renpy_sdk_version(executable) or (0, 0, 0)
+        if version == wanted:
+            affinity = 0
+        elif version[:2] == wanted[:2]:
+            affinity = 1
+        elif version[0] == wanted[0]:
+            affinity = 2
+        else:
+            affinity = 3
+        return (affinity, tuple(-part for part in version))
+
+    best = min(launchers, key=rank)
+    # A different major version cannot inventory this project; fall back to the
+    # bundled compatibility runtime instead of pretending the SDK fits.
+    return best if rank(best)[0] < 3 else None
+
+
 def _resolve_renpy_executable(project_root: Path, explicit: Path | None) -> Path | None:
-    candidates: list[Path] = []
+    def first_existing(candidates: list[Path]) -> Path | None:
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+        return None
+
+    def launcher_for(requested: Path) -> Path:
+        return requested / "renpy.exe" if requested.is_dir() else requested
+
     if explicit is not None:
-        requested = explicit.expanduser().resolve()
-        candidates.append(requested if requested.is_file() else requested / "renpy.exe")
+        found = first_existing([launcher_for(explicit.expanduser().resolve())])
+        if found is not None:
+            return found
 
-    environment_sdk = os.environ.get("RENPY_SDK")
-    if environment_sdk:
-        requested = Path(environment_sdk).expanduser().resolve()
-        candidates.append(requested if requested.is_file() else requested / "renpy.exe")
+    for variable in ("RENPY_SDK", "SCENELIGHT_COMPAT_RENPY"):
+        value = os.environ.get(variable)
+        if not value:
+            continue
+        found = first_existing([launcher_for(Path(value).expanduser().resolve())])
+        if found is not None:
+            return found
 
-    compatibility_runtime = os.environ.get("SCENELIGHT_COMPAT_RENPY")
-    if compatibility_runtime:
-        requested = Path(compatibility_runtime).expanduser().resolve()
-        candidates.append(requested if requested.is_file() else requested / "renpy.exe")
+    # Prefer the engine the project was built with, wherever its SDK landed.
+    # Without this the scanned game silently runs on Ren'Py 7.7.1 while the
+    # game itself runs Ren'Py 8, which is where native capture crashes start.
+    matched = _matching_renpy_sdk(project_root, detect_project_renpy_version(project_root))
+    if matched is not None:
+        return matched
 
     source_root = Path(__file__).resolve().parents[2]
     cached_compatibility = cached_renpy_executable()
-    candidates.extend(
-        (
-            source_root / "compatibility-runtime" / "renpy.exe",
-            Path(sys.executable).resolve().parent / "compatibility-runtime" / "renpy.exe",
-        )
-    )
+    compatibility_candidates = [
+        source_root / "compatibility-runtime" / "renpy.exe",
+        Path(sys.executable).resolve().parent / "compatibility-runtime" / "renpy.exe",
+    ]
     if cached_compatibility is not None:
-        candidates.append(cached_compatibility)
+        compatibility_candidates.append(cached_compatibility)
+    found = first_existing(compatibility_candidates)
+    if found is not None:
+        return found
 
-    search_roots = [project_root, *list(project_root.parents)[:3], Path.cwd().resolve()]
-    for root in search_roots:
-        candidates.extend(
-            candidate / "renpy.exe" for candidate in sorted(root.glob("renpy-*-sdk"), reverse=True)
+    return first_existing(
+        [
+            candidate / "renpy.exe"
+            for root in (project_root, *list(project_root.parents)[:3], Path.cwd().resolve())
+            for candidate in sorted(root.glob("renpy-*-sdk"), reverse=True)
+        ]
+    )
+
+
+def _report_runtime_choice(project_root: Path, runtime: Path | None) -> None:
+    """Print the engine that will inventory the project, and flag a mismatch."""
+
+    if runtime is None:
+        return
+    version = _renpy_sdk_version(runtime)
+    runtime_major = renpy_runtime_major(runtime)
+    if version:
+        label = f" (Ren'Py {version[0]}.{version[1]}.{version[2]})"
+    elif runtime_major is not None:
+        label = f" (Ren'Py {runtime_major}.x)"
+    else:
+        label = ""
+    print(f"SceneLight engine: {runtime}{label}", flush=True)
+    project_version = detect_project_renpy_version(project_root)
+    if (
+        project_version is not None
+        and runtime_major is not None
+        and runtime_major != project_version[0]
+        and find_native_executable(project_root) is None
+    ):
+        print(
+            "SceneLight warning: this project runs on Ren'Py "
+            f"{project_version[0]}.{project_version[1]}.{project_version[2]} but the "
+            f"available runtime is Ren'Py {runtime_major}. Character capture can stop "
+            "unexpectedly; choose a matching Ren'Py SDK for this project.",
+            flush=True,
         )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-    return None
+
+
+def _is_compatibility_runtime(executable: Path) -> bool:
+    """Report whether a resolved executable is SceneLight's bundled fallback."""
+
+    candidates = [
+        Path(__file__).resolve().parents[2] / "compatibility-runtime" / "renpy.exe",
+        Path(sys.executable).resolve().parent / "compatibility-runtime" / "renpy.exe",
+    ]
+    cached = cached_renpy_executable()
+    if cached is not None:
+        candidates.append(cached)
+    try:
+        resolved = executable.resolve()
+    except OSError:
+        return False
+    return any(candidate.is_file() and resolved == candidate.resolve() for candidate in candidates)
 
 
 def _runtime_capture_launchers(
@@ -257,7 +396,15 @@ def _runtime_capture_launchers(
             or (native_major is not None and sdk_major is not None and native_major == sdk_major)
         )
     ):
-        launchers.append((sdk_executable, False, "the selected Ren'Py SDK"))
+        # The fallback search also finds the bundled runtime when no SDK was
+        # chosen. Naming it "the selected SDK" hides the engine mismatch that
+        # matters most when a newer game is inventoried with an older runtime.
+        label = (
+            "SceneLight's Ren'Py 7 compatibility runtime"
+            if _is_compatibility_runtime(sdk_executable)
+            else "the selected Ren'Py SDK"
+        )
+        launchers.append((sdk_executable, False, label))
     return launchers
 
 
@@ -500,6 +647,7 @@ def _scan_runtime_review(
     managed_root = synced.managed
     source_native = find_native_executable(project_root)
     sdk_executable = _resolve_renpy_executable(project_root, renpy_sdk)
+    _report_runtime_choice(project_root, source_native or sdk_executable)
     native_major = renpy_runtime_major(source_native)
     if native_major is not None and native_major < 7:
         sdk_major = renpy_runtime_major(sdk_executable)
@@ -564,7 +712,8 @@ def _scan_runtime_review(
             )
         raise RuntimeError(
             "SceneLight tried every compatible graphics backend bundled with the game "
-            f"and any selected SDK, but none initialized.\n\n{detail}"
+            "and any selected SDK, but the character capture stopped partway through "
+            f"on each one.\n\n{detail}"
         )
     if not attempts and discovery.requires_runtime_inventory:
         raise FileNotFoundError(
@@ -771,6 +920,7 @@ def _install_managed(
     discover_project(project_root, config)
     source_native = find_native_executable(project_root)
     sdk_executable = _resolve_renpy_executable(project_root, renpy_sdk)
+    _report_runtime_choice(project_root, source_native or sdk_executable)
     native_major = renpy_runtime_major(source_native)
     if native_major is not None and native_major < 7:
         sdk_major = renpy_runtime_major(sdk_executable)

@@ -1153,6 +1153,33 @@ def _runtime_diagnostic(
     return diagnosis + "".join(sections)
 
 
+def _capture_trace_tail(capture_root: Path | None, limit: int = 8) -> str:
+    """Return the last in-engine capture steps, one JSON record per line."""
+
+    if capture_root is None:
+        return ""
+    path = capture_root / "capture_attempts.jsonl"
+    if not path.is_file():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    records: list[str] = []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            value = json.loads(line)
+        except ValueError:
+            records.append(line[:400])
+            continue
+        if isinstance(value, dict):
+            records.append(json.dumps(value, sort_keys=True))
+    return "\n".join(records)
+
+
 def _fresh_script_error(project_root: Path, before: dict[str, tuple[int, int, int]]) -> bool:
     """Ignore old error screens and require a newly written Ren'Py parse report."""
     path = project_root / "errors.txt"
@@ -1610,6 +1637,23 @@ def _run_capture_request(
         if batch_yielded:
             return False
         detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
+        trace = _capture_trace_tail(checkpoint_root)
+        locations = [f"project: {discovery.project_root}"]
+        if checkpoint_root is not None:
+            locations.append(f"capture root: {checkpoint_root}")
+        locations.extend(
+            (
+                f"request: {request_path}",
+                f"result: {result_path}",
+                f"engine log: {discovery.project_root / 'log.txt'}",
+                f"script errors: {discovery.project_root / 'errors.txt'}",
+                f"traceback: {discovery.project_root / 'traceback.txt'}",
+            )
+        )
+        evidence = ""
+        if trace:
+            evidence += "\n\n--- last capture steps ---\n" + trace
+        evidence += "\n\n--- capture paths ---\n" + "\n".join(locations)
         session = diagnostics.current_session()
         if session is not None:
             session.event(
@@ -1621,9 +1665,11 @@ def _run_capture_request(
                 exit_code=returncode,
                 timed_out=timed_out,
                 last_progress=last_runtime_progress,
+                capture_root=str(checkpoint_root) if checkpoint_root is not None else None,
+                request=str(request_path),
                 project=str(discovery.project_root),
             )
-            session.attach_text(discovery.project_root.name + "-engine-failure", detail)
+            session.attach_text(discovery.project_root.name + "-engine-failure", detail + evidence)
         if _is_instance_conflict(detail):
             raise CaptureInstanceConflict(
                 "The mod's single-instance protection blocked SceneLight capture. "
@@ -1636,7 +1682,17 @@ def _run_capture_request(
             reason = f"timed out after {timeout_seconds} seconds"
         else:
             reason = f"exit {returncode}"
-        raise RuntimeError(f"Ren'Py could not {purpose} ({reason}).{detail}")
+        if (
+            isinstance(last_runtime_progress, tuple)
+            and len(last_runtime_progress) == 4
+            and last_runtime_progress[0] == "form.start"
+            and isinstance(last_runtime_progress[3], str)
+            and last_runtime_progress[3]
+        ):
+            # The renderer died while this form was on screen. Name it, because
+            # a native crash never gets far enough to report an exception.
+            reason += f" while capturing {last_runtime_progress[3]!r}"
+        raise RuntimeError(f"Ren'Py could not {purpose} ({reason}).{evidence}{detail}")
 
 
 def _capture_progress_line(
@@ -1670,6 +1726,14 @@ def _capture_progress_line(
         suffix = f": {item}" if isinstance(item, str) and item else ""
         return (stage, current, total, item), (
             f"SceneLight resolver form {current}/{total}{suffix}"
+        )
+    if stage == "form.start":
+        # Published before the form renders, so the last record after a native
+        # crash is the image that stopped the renderer.
+        item = payload.get("item")
+        suffix = f": {item}" if isinstance(item, str) and item else ""
+        return (stage, current, total, item), (
+            f"SceneLight resolver capturing form {current}/{total}{suffix}"
         )
     if stage == "planned":
         requests = payload.get("requests")
@@ -1812,7 +1876,10 @@ def capture_runtime_review(
     }
     request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
     progress_path.unlink(missing_ok=True)
-    _run_capture_request(
+    # Review and installation capture share the same restart contract: a native
+    # renderer crash keeps every finished form and resumes from it instead of
+    # replaying the whole inventory on the next backend.
+    _run_capture_request_resumable(
         discovery,
         renpy_executable,
         request_path=request_path,
@@ -1823,6 +1890,7 @@ def capture_runtime_review(
         progress_path=progress_path,
         composite_job_root=preview_root / "composite_jobs",
         renderer=renderer,
+        capture_root=preview_root,
     )
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     if payload.get("version") != CAPTURE_VERSION:
@@ -2716,6 +2784,24 @@ def _durable_form_checkpoint_count(capture_root: Path) -> int:
     return max(len(keys), _surface_checkpoint_count(capture_root))
 
 
+def _pending_form_crash(capture_root: Path) -> bool:
+    """Report whether a renderer died inside a form that is still journaled."""
+
+    journal = capture_root / "form_attempts.json"
+    if not journal.is_file():
+        return False
+    try:
+        attempts = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(attempts, dict):
+        return False
+    return any(
+        isinstance(count, int) and not isinstance(count, bool) and count > 0
+        for count in attempts.values()
+    )
+
+
 def _run_capture_request_resumable(
     discovery: ProjectDiscovery,
     renpy_executable: Path,
@@ -2779,10 +2865,18 @@ def _run_capture_request_resumable(
         except RuntimeError as error:
             after = _durable_form_checkpoint_count(capture_root)
             crashed = "(exit " in str(error)
-            if not crashed or after <= before or crash_retries >= CAPTURE_PROCESS_RESUME_LIMIT:
+            # A crash inside a form saves no checkpoint, but it does leave that
+            # form in the in-engine attempt journal. Retry anyway: the next
+            # process skips it and keeps the rest of the inventory.
+            in_flight = crashed and _pending_form_crash(capture_root)
+            if (
+                not crashed
+                or (after <= before and not in_flight)
+                or crash_retries >= CAPTURE_PROCESS_RESUME_LIMIT
+            ):
                 raise
             crash_retries += 1
-            saved = after - before
+            saved = max(after - before, 0)
             if saved < CAPTURE_LOW_YIELD_FORM_THRESHOLD:
                 low_yield_crashes += 1
             else:

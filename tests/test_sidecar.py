@@ -9,6 +9,7 @@ import scenelight.cli as cli_module
 from scenelight.cli import _capture_without_installed_runtime
 from scenelight.sidecar import (
     analysis_cache_root,
+    detect_project_renpy_version,
     managed_project_root,
     remove_analysis_cache,
     remove_managed_project,
@@ -329,3 +330,32 @@ def test_native_runtime_logs_survive_source_sync(tmp_path: Path, monkeypatch) ->
 
     assert runtime_log.read_text(encoding="utf-8") == "native log"
     assert runtime_traceback.read_text(encoding="utf-8") == "native traceback"
+
+
+def test_project_engine_version_comes_from_the_launcher_log(tmp_path: Path) -> None:
+    project = tmp_path / "Eidolon"
+    project.mkdir()
+    (project / "log.txt").write_text(
+        "Windows-10-10.0.26100\nRen'Py 8.3.7.25031702\n\nEarly init took 0.17s\n",
+        encoding="utf-8",
+    )
+
+    assert detect_project_renpy_version(project) == (8, 3, 7)
+
+
+def test_project_engine_version_prefers_the_compiled_script_version(tmp_path: Path) -> None:
+    project = tmp_path / "Eidolon"
+    (project / "game").mkdir(parents=True)
+    (project / "game/script_version.txt").write_text("7.4.11\n", encoding="utf-8")
+    # A stale launcher log must not outrank the version the scripts need.
+    (project / "log.txt").write_text("Ren'Py 8.3.7.25031702\n", encoding="utf-8")
+
+    assert detect_project_renpy_version(project) == (7, 4, 11)
+
+
+def test_project_engine_version_falls_back_to_a_bundled_runtime(tmp_path: Path) -> None:
+    project = tmp_path / "distributed-game"
+    (project / "renpy").mkdir(parents=True)
+    (project / "renpy/vc_version.py").write_text('version = "8.2.1"\n', encoding="utf-8")
+
+    assert detect_project_renpy_version(project) == (8, 2, 1)
