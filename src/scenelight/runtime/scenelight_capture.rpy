@@ -2230,6 +2230,23 @@ init -999 python:
                 candidates.append(saved)
             if deterministic not in candidates:
                 candidates.append(deterministic)
+            # The filename keeps a readable copy of the planned spelling, which
+            # can change between processes even when the form itself is the
+            # same. Match the stable digest suffix so earlier pixels are found.
+            digest = hashlib.sha256(
+                _scenelight_form_key(normalized).encode("utf-8")
+            ).hexdigest()[:12]
+            try:
+                directory = os.path.join(config.basedir, output_relative)
+                suffix = "_%s.png" % digest
+                for entry in os.listdir(directory):
+                    if not entry.startswith("sprite_") or not entry.endswith(suffix):
+                        continue
+                    candidate = os.path.join(output_relative, entry).replace(os.sep, "/")
+                    if candidate not in candidates:
+                        candidates.append(candidate)
+            except OSError:
+                pass
             for relative in candidates:
                 absolute = os.path.join(config.basedir, relative.replace("/", os.sep))
                 composite_job = _scenelight_composite_job_path(relative)

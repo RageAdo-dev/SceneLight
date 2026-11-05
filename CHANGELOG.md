@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8
+
+### Fixes
+
+- Find saved sprite pixels by the form's stable digest instead of its planned spelling, so a resumed process keeps every finished form instead of re-rendering the same ones and stopping again.
+
 ## 1.0.7
 
 ### Fixes
