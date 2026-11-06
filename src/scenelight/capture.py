@@ -304,7 +304,7 @@ def _project_signature(discovery: ProjectDiscovery, *, content_signature: str | 
     return digest.hexdigest()
 
 
-def _missing_capture_paths(project_root: Path, payload: dict[str, object]) -> list[str]:
+def _missing_capture_paths(project_root: Path, payload: dict[str, object]) -> list[tuple[str, str]]:
     """Name the captures a payload says it wrote but that are not on disk."""
 
     raw_composites = payload.get("composite_captures", {})
@@ -313,11 +313,11 @@ def _missing_capture_paths(project_root: Path, payload: dict[str, object]) -> li
         if isinstance(raw_composites, dict)
         else set()
     )
-    missing: list[str] = []
+    missing: list[tuple[str, str]] = []
     for group_name in ("scenes", "sprites", "character_candidates"):
         group = payload.get(group_name, {})
         if not isinstance(group, dict):
-            missing.append("<%s is not a mapping>" % (group_name,))
+            missing.append((group_name, "<not a mapping>"))
             continue
         for key, relative in group.items():
             if relative is None:
@@ -327,7 +327,7 @@ def _missing_capture_paths(project_root: Path, payload: dict[str, object]) -> li
                 not (project_root / normalized).is_file()
                 and normalized not in composite_destinations
             ):
-                missing.append("%s: %s" % (group_name, key))
+                missing.append((group_name, str(key)))
     raw_sequences = payload.get("scene_sequences", {})
     if isinstance(raw_sequences, dict):
         for key, raw_frames in raw_sequences.items():
@@ -338,7 +338,7 @@ def _missing_capture_paths(project_root: Path, payload: dict[str, object]) -> li
                     continue
                 normalized = str(raw_frame[1]).replace("\\", "/")
                 if not (project_root / normalized).is_file():
-                    missing.append("scene_sequence %s" % (key,))
+                    missing.append(("scene_sequence", str(key)))
     return missing
 
 
@@ -3269,10 +3269,36 @@ def capture_runtime_assets(
     _combine_matting_captures(discovery.project_root, result_payload)
     if not _paths_exist(discovery.project_root, result_payload):
         missing = _missing_capture_paths(discovery.project_root, result_payload)
-        raise FileNotFoundError(
-            "Ren'Py did not write every reported SceneLight capture (%d missing): %s"
-            % (len(missing), "; ".join(missing[:6]))
+        # One form the renderer could not write must not throw away a whole
+        # inventory. Drop the stragglers, report them as unsupported, and keep
+        # going; a pass that lost a large share of its captures is still fatal.
+        sprites = result_payload.get("sprites")
+        sprite_missing = [key for group, key in missing if group == "sprites"]
+        tolerable = (
+            isinstance(sprites, dict)
+            and sprite_missing
+            and len(sprite_missing) <= max(8, len(sprites) // 50)
+            and all(group == "sprites" for group, _key in missing)
         )
+        if tolerable:
+            errors = result_payload.setdefault("errors", [])
+            if isinstance(errors, list):
+                for key in sprite_missing:
+                    sprites.pop(key, None)
+                    errors.append("sprite %s: the capture file was not written" % (key,))
+            print(
+                "SceneLight skipped %d sprite form(s) whose capture was not written: %s"
+                % (len(sprite_missing), ", ".join(sprite_missing[:6])),
+                flush=True,
+            )
+        else:
+            raise FileNotFoundError(
+                "Ren'Py did not write every reported SceneLight capture (%d missing): %s"
+                % (
+                    len(missing),
+                    "; ".join("%s: %s" % (group, key) for group, key in missing[:6]),
+                )
+            )
     _deduplicate_normalized_captures(discovery.project_root, result_payload)
     _normalize_surface_captures(discovery.project_root, result_payload)
     skipped_forms = set(_asset_capture_errors(result_payload.get("errors"), "sprite"))

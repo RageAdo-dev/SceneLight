@@ -385,9 +385,7 @@ def test_parallel_merge_keeps_worker_scene_captures() -> None:
         "errors": [],
     }
 
-    merged = capture._merge_parallel_capture_payloads(
-        master, [worker], {"hero": ["hero idle"]}
-    )
+    merged = capture._merge_parallel_capture_payloads(master, [worker], {"hero": ["hero idle"]})
 
     assert merged["scenes"] == {
         "bedroom": "previews/scene_bedroom.png",
