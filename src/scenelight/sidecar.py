@@ -70,20 +70,36 @@ def managed_project_root(project_root: Path) -> Path:
     return storage_root() / f"{slug}-{digest}"
 
 
+def _analysis_cache_base(project_root: Path) -> Path:
+    """Choose a cache volume that keeps installing a runtime a rename.
+
+    Writing the prepared runtime into the game is a cross-volume copy when the
+    cache lives on another drive, and that copy is tens of thousands of map
+    files. Building the cache beside the project turns the same step into an
+    atomic rename.
+    """
+
+    source = project_root.expanduser().resolve()
+    default = storage_root().parent / "analysis-cache"
+    if source.drive and default.drive and source.drive.lower() != default.drive.lower():
+        return source / ".scenelight_cache" / "analysis-cache"
+    return default
+
+
 def analysis_cache_root(project_root: Path) -> Path:
     """Keep reusable analysis outside disposable managed/direct installations."""
 
     source = project_root.expanduser().resolve()
     digest = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:12]
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", source.name).strip("-.") or "renpy-project"
-    return storage_root().parent / "analysis-cache" / f"{slug}-{digest}"
+    return _analysis_cache_base(source) / f"{slug}-{digest}"
 
 
 def remove_analysis_cache(project_root: Path) -> bool:
     """Remove only the deterministic cache owned by one selected project."""
 
     cache = analysis_cache_root(project_root)
-    root = (storage_root().parent / "analysis-cache").resolve()
+    root = _analysis_cache_base(project_root).resolve()
     if cache.parent.resolve() != root or cache == root:
         raise ValueError(f"Refusing to remove an unexpected analysis cache path: {cache}")
     if not cache.exists():

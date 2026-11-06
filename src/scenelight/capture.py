@@ -2598,14 +2598,32 @@ def _merge_parallel_capture_payloads(
     normalized_captures: set[str] = set()
     matting_captures: list[object] = list(master.get("matting_captures") or [])
     errors = [str(value) for value in master.get("errors", [])]
+    scenes: dict[str, object] = dict(master.get("scenes") or {})
+    scene_sequences: dict[str, object] = dict(master.get("scene_sequences") or {})
+    scene_frame_sources: dict[str, object] = dict(master.get("scene_frame_sources") or {})
     for payload in workers:
         if payload.get("version") != CAPTURE_VERSION or payload.get("plan_only"):
             raise ValueError("Ren'Py wrote an incompatible SceneLight worker result")
         raw_sprites = payload.get("sprites", {})
+        raw_scenes = payload.get("scenes", {})
         raw_composites = payload.get("composite_captures", {})
-        if not isinstance(raw_sprites, dict) or not isinstance(raw_composites, dict):
+        if (
+            not isinstance(raw_sprites, dict)
+            or not isinstance(raw_scenes, dict)
+            or not isinstance(raw_composites, dict)
+        ):
             raise ValueError("Ren'Py wrote an invalid SceneLight worker result")
         sprites.update((str(name), str(path)) for name, path in raw_sprites.items())
+        # A worker captures whatever its chunk contains, including backgrounds.
+        # Dropping those leaves the merged result pointing at files that only
+        # exist inside a worker's capture directory.
+        scenes.update((str(name), path) for name, path in raw_scenes.items())
+        raw_sequences = payload.get("scene_sequences")
+        if isinstance(raw_sequences, dict):
+            scene_sequences.update((str(name), value) for name, value in raw_sequences.items())
+        raw_sources = payload.get("scene_frame_sources")
+        if isinstance(raw_sources, dict):
+            scene_frame_sources.update((str(name), value) for name, value in raw_sources.items())
         composites.update((str(path), value) for path, value in raw_composites.items())
         surface_captures.update(str(value) for value in payload.get("surface_captures", []))
         normalized_captures.update(str(value) for value in payload.get("normalized_captures", []))
@@ -2625,6 +2643,9 @@ def _merge_parallel_capture_payloads(
 
     used_paths = set(sprites.values())
     merged["sprites"] = sprites
+    merged["scenes"] = scenes
+    merged["scene_sequences"] = scene_sequences
+    merged["scene_frame_sources"] = scene_frame_sources
     merged["composite_captures"] = {
         path: manifest for path, manifest in composites.items() if path in used_paths
     }

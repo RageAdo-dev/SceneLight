@@ -363,6 +363,38 @@ def test_review_does_not_retry_sprites_with_the_software_renderer(tmp_path, monk
     assert result.sprites == {}
 
 
+def test_parallel_merge_keeps_worker_scene_captures() -> None:
+    """Backgrounds captured inside a worker must survive the merge."""
+
+    master = {
+        "version": capture.CAPTURE_VERSION,
+        "sprites": {},
+        "errors": [],
+        "scenes": {"bedroom": "previews/scene_bedroom.png"},
+        "character_tags": [],
+        "surface_captures": [],
+        "normalized_captures": [],
+    }
+    worker = {
+        "version": capture.CAPTURE_VERSION,
+        "sprites": {"hero idle": "previews/sprite_a.png"},
+        "scenes": {"corridor": "previews/scene_corridor.png"},
+        "composite_captures": {},
+        "surface_captures": [],
+        "normalized_captures": [],
+        "errors": [],
+    }
+
+    merged = capture._merge_parallel_capture_payloads(
+        master, [worker], {"hero": ["hero idle"]}
+    )
+
+    assert merged["scenes"] == {
+        "bedroom": "previews/scene_bedroom.png",
+        "corridor": "previews/scene_corridor.png",
+    }
+
+
 def test_parallel_merge_keeps_old_engine_capture_pairs() -> None:
     """A worker on an engine without offscreen readback reports pairs, not files."""
 
