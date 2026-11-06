@@ -386,8 +386,20 @@ def _runtime_capture_launchers(
             launchers.append((sdk_executable, False, "SceneLight's Ren'Py 7 compatibility runtime"))
         return launchers
 
+    prefer_verified = False
     if native is not None:
-        launchers.append((native, True, "the mod's native Ren'Py runtime"))
+        # Python 2 games often ship an older 7.x engine whose texture loader
+        # leaks. SceneLight stops live analysis on those, and the cached
+        # fallback leaves characters unlit, so the verified 7.x runtime is tried
+        # first when one is available.
+        prefer_verified = (
+            native_major == 7
+            and sdk_executable is not None
+            and sdk_major == 7
+            and _is_compatibility_runtime(sdk_executable)
+        )
+        if not prefer_verified:
+            launchers.append((native, True, "the mod's native Ren'Py runtime"))
     if (
         sdk_executable is not None
         and (native is None or sdk_executable.resolve() != native.resolve())
@@ -405,6 +417,10 @@ def _runtime_capture_launchers(
             else "the selected Ren'Py SDK"
         )
         launchers.append((sdk_executable, False, label))
+        if prefer_verified:
+            # Keep the game's own engine as a fallback when the verified runtime
+            # cannot start this project.
+            launchers.append((native, True, "the mod's native Ren'Py runtime"))
     return launchers
 
 
