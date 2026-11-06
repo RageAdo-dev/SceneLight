@@ -1669,10 +1669,23 @@ init -50 python:
         explicit_background = False
         try:
             entries = renpy.game.context().scene_lists.layers.get("master", ())
-            for entry in reversed(entries):
-                entry_tag = getattr(entry, "tag", None)
-                if entry_tag and str(entry_tag).startswith(("hide$", "replaced$")):
-                    continue
+
+            def entry_tag(entry):
+                value = getattr(entry, "tag", None)
+                return str(value).lower() if value else ""
+
+            ordered = [
+                entry
+                for entry in reversed(entries)
+                if not entry_tag(entry).startswith(("hide$", "replaced$"))
+            ]
+            # Games commonly layer a solid "black" or another overlay above the
+            # real background. Treating the topmost named entry as the scene lit
+            # characters against that overlay, which rendered them black.
+            # Prefer the conventional background tag, then fall back to the
+            # topmost entry for games that name scenes some other way.
+            ordered.sort(key=lambda entry: 0 if entry_tag(entry) == "bg" else 1)
+            for entry in ordered:
                 background = getattr(entry, "displayable", None)
                 renderer = renpy.display._scenelight_live_renderer
                 if isinstance(background, _SceneLightBackground) and renderer is not None:
