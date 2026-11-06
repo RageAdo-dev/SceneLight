@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -106,8 +107,32 @@ def remove_analysis_cache(project_root: Path) -> bool:
         return False
     if cache.is_symlink() or not cache.is_dir():
         raise ValueError(f"Analysis cache ownership could not be verified: {cache}")
-    shutil.rmtree(cache)
+    _remove_tree(cache)
     return True
+
+
+def _clear_readonly_and_retry(function: Callable[..., object], path: str, _error) -> None:
+    """Retry a failed delete after clearing Windows' read-only attribute.
+
+    A project copy can contain a Git repository, and Git writes its objects
+    read-only. ``shutil.rmtree`` then reports ``Access is denied`` for a file
+    nobody is using, which looks exactly like a lock.
+    """
+
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    try:
+        function(path)
+    except OSError:
+        pass
+
+
+def _remove_tree(path: Path) -> None:
+    """Delete a tree even when it holds read-only files."""
+
+    shutil.rmtree(path, onerror=_clear_readonly_and_retry)
 
 
 def _relative_key(path: Path, root: Path) -> str:
@@ -446,7 +471,7 @@ def remove_managed_project(project_root: Path) -> bool:
     delay = 0.05
     while True:
         try:
-            shutil.rmtree(managed)
+            _remove_tree(managed)
             break
         except FileNotFoundError:
             break

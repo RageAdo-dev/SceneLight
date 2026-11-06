@@ -359,3 +359,20 @@ def test_project_engine_version_falls_back_to_a_bundled_runtime(tmp_path: Path) 
     (project / "renpy/vc_version.py").write_text('version = "8.2.1"\n', encoding="utf-8")
 
     assert detect_project_renpy_version(project) == (8, 2, 1)
+
+def test_managed_copy_with_read_only_git_objects_is_removable(tmp_path: Path) -> None:
+    """Git writes its objects read-only; deleting the copy must still work."""
+
+    import stat
+
+    from scenelight.sidecar import _remove_tree
+
+    objects = tmp_path / ".git" / "objects" / "00"
+    objects.mkdir(parents=True)
+    packed = objects / "9a568ea495ccfcd727a5e67d0bc700c08a673a"
+    packed.write_bytes(b"packed object")
+    packed.chmod(stat.S_IREAD)
+
+    _remove_tree(tmp_path)
+
+    assert not tmp_path.exists()
