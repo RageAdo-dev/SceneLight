@@ -363,6 +363,37 @@ def test_review_does_not_retry_sprites_with_the_software_renderer(tmp_path, monk
     assert result.sprites == {}
 
 
+def test_parallel_merge_keeps_old_engine_capture_pairs() -> None:
+    """A worker on an engine without offscreen readback reports pairs, not files."""
+
+    master = {
+        "version": capture.CAPTURE_VERSION,
+        "sprites": {},
+        "errors": [],
+        "character_tags": ["hero"],
+        "surface_captures": [],
+        "normalized_captures": [],
+    }
+    worker = {
+        "version": capture.CAPTURE_VERSION,
+        "sprites": {"hero idle": "previews/sprite_a.png"},
+        "composite_captures": {},
+        "surface_captures": [],
+        "normalized_captures": [],
+        "errors": [],
+        "matting_captures": [
+            {"relative": "previews/sprite_a.png", "size": [4, 4], "crop": [4, 4]},
+            {"relative": "previews/sprite_gone.png", "size": [4, 4], "crop": [4, 4]},
+        ],
+    }
+
+    merged = capture._merge_parallel_capture_payloads(master, [worker], {"hero": ["hero idle"]})
+
+    assert merged["sprites"] == {"hero idle": "previews/sprite_a.png"}
+    # The unrelated pair belongs to a form this run did not keep.
+    assert [entry["relative"] for entry in merged["matting_captures"]] == ["previews/sprite_a.png"]
+
+
 def test_reset_request_skips_gives_the_next_backend_a_clean_slate(tmp_path):
     request = tmp_path / "request.json"
     request.write_text(

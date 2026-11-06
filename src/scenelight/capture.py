@@ -2596,6 +2596,7 @@ def _merge_parallel_capture_payloads(
     composites: dict[str, object] = {}
     surface_captures: set[str] = set()
     normalized_captures: set[str] = set()
+    matting_captures: list[object] = list(master.get("matting_captures") or [])
     errors = [str(value) for value in master.get("errors", [])]
     for payload in workers:
         if payload.get("version") != CAPTURE_VERSION or payload.get("plan_only"):
@@ -2608,6 +2609,7 @@ def _merge_parallel_capture_payloads(
         composites.update((str(path), value) for path, value in raw_composites.items())
         surface_captures.update(str(value) for value in payload.get("surface_captures", []))
         normalized_captures.update(str(value) for value in payload.get("normalized_captures", []))
+        matting_captures.extend(payload.get("matting_captures") or [])
         errors.extend(str(value) for value in payload.get("errors", []))
 
     expected_forms = {form for forms in request_forms.values() for form in forms}
@@ -2628,6 +2630,12 @@ def _merge_parallel_capture_payloads(
     }
     merged["surface_captures"] = sorted(surface_captures & used_paths)
     merged["normalized_captures"] = sorted(normalized_captures & used_paths)
+    merged["matting_captures"] = [
+        entry
+        for entry in matting_captures
+        if isinstance(entry, dict)
+        and str(entry.get("relative") or "").replace("\\", "/") in used_paths
+    ]
     merged["resolved_requests"] = sorted(
         requested
         for requested, forms in request_forms.items()
@@ -3197,6 +3205,9 @@ def capture_runtime_assets(
         capture_root / "composite_jobs",
         result_payload,
     )
+    # Engines without an offscreen screenshot report pairs instead of finished
+    # files; rebuild them before the path check judges the capture.
+    _combine_matting_captures(discovery.project_root, result_payload)
     if not _paths_exist(discovery.project_root, result_payload):
         raise FileNotFoundError("Ren'Py did not write every reported SceneLight capture")
     _deduplicate_normalized_captures(discovery.project_root, result_payload)
