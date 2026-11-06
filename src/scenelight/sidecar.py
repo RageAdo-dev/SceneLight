@@ -215,6 +215,14 @@ def _copy_atomic(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(destination.name + ".scenelight-copy")
     shutil.copy2(source, temporary)
+    # A game that ships read-only archives (or was unpacked from a read-only
+    # medium) makes both the copy and the existing destination read-only, and
+    # Windows then refuses the replace with "Access is denied".
+    for path in (temporary, destination):
+        try:
+            os.chmod(path, stat.S_IWRITE)
+        except OSError:
+            pass
     os.replace(temporary, destination)
 
 
@@ -303,8 +311,54 @@ def sync_project(
             "source_files": current,
         },
     )
+    _neutralize_instance_guards(managed)
     return SyncResult(source, managed, tuple(sorted(set(copied))), tuple(sorted(set(removed))))
 
+
+_INSTANCE_GUARD_STUB = """
+
+
+# SceneLight capture clone: the mod's single-instance guard would refuse to
+# start this capture beside the player's own window, and the engine reports that
+# refusal as a clean exit with no result. The clone is disposable and isolated,
+# so the guard has nothing to protect here.
+class SingleInstance(object):
+    def __init__(self, *args, **kwargs):
+        pass
+"""
+
+_INSTANCE_GUARD_MODULES = (
+    "game/python-packages/singleton.py",
+    "game/singleton.py",
+    "python-packages/singleton.py",
+)
+
+
+def _neutralize_instance_guards(project_root: Path) -> list[Path]:
+    """Disable a mod's single-instance guard inside a capture clone.
+
+    A mod that guards against a second copy refuses to start while the player
+    still has it open, and Ren'Py ends without writing a result, which looks
+    like a renderer failure.
+    """
+
+    patched: list[Path] = []
+    for relative in _INSTANCE_GUARD_MODULES:
+        path = project_root / relative
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "class SingleInstance" not in text or "SceneLight capture clone" in text:
+            continue
+        try:
+            path.write_text(text + _INSTANCE_GUARD_STUB, encoding="utf-8")
+            patched.append(path)
+        except OSError:
+            continue
+    return patched
 
 def find_native_executable(project_root: Path) -> Path | None:
     """Choose the distribution's own Windows launcher, never an external SDK."""

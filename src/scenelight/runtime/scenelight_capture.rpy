@@ -154,6 +154,17 @@ init -999 python:
             # Diagnostics must never decide whether a capture succeeds.
             pass
 
+    def _scenelight_texture_probe_supported():
+        """Whether to run the texture-leak probe before a capture.
+
+        The probe renders a throwaway texture to measure a leak in one bundled
+        runtime. On some drivers, and on a fullscreen 4K drawable, that render
+        stops the engine instead of measuring anything, so it stays off unless a
+        developer asks for it.
+        """
+
+        return bool(os.environ.get("SCENELIGHT_ENABLE_TEXTURE_PROBE"))
+
     def _scenelight_probe_texture_cleanup():
         # Exercise the compiled runtime, rather than trusting its version or
         # bundled source. Some Ren'Py 7 binaries omit Texture's finalizer.
@@ -3001,7 +3012,7 @@ init -999 python:
             _scenelight_deferred_form_stream[0] = None
         result = {
             "version": 42,
-            "texture_cleanup_ok": _scenelight_probe_texture_cleanup() if request.get("probe_texture_cleanup") else None,
+            "texture_cleanup_ok": _scenelight_probe_texture_cleanup() if (request.get("probe_texture_cleanup") and _scenelight_texture_probe_supported()) else None,
             "renpy_version": renpy.version_string,
             # Source-only inspection cannot see this value when options.rpyc
             # lives inside an RPA. Publishing the initialized runtime value

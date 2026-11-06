@@ -38,7 +38,12 @@ from .project import (
     _looks_like_foreground_sprite,
 )
 from .script_cache import source_candidates
-from .sidecar import STATE_NAME, managed_project_root, renpy_runtime_command
+from .sidecar import (
+    STATE_NAME,
+    _neutralize_instance_guards,
+    managed_project_root,
+    renpy_runtime_command,
+)
 from .source_types import VISUAL_SOURCE_SUFFIXES
 
 CAPTURE_VERSION = 42
@@ -2536,6 +2541,7 @@ def _clone_capture_runtime(source: Path, destination: Path) -> None:
         copy_function=copy_worker_file,
         ignore=ignore,
     )
+    _neutralize_instance_guards(destination)
 
 
 def _schedule_capture_worker_cleanup(worker_group: Path) -> threading.Thread:
