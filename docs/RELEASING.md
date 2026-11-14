@@ -51,7 +51,7 @@ Upload the verified packages and checksums to a draft GitHub release. Check its
 tag, download links and release notes before publishing.
 
 Keep published tags and download contents unchanged. A replacement build of the
-same app version needs a new tag, such as `v1.1.0-20261114`, pointing to its source
+same app version needs a new tag, such as `v1.1.0-20261114.1`, pointing to its source
 commit. Build its online installer against that exact tag. Retire superseded
 downloads only after the replacement has been verified and the old assets backed up.
 
@@ -63,7 +63,7 @@ creates the draft. The workflow leaves existing releases unchanged.
 Build the complete ZIP first, then run:
 
 ```text
-python tools/build_online_installer.py dist/SceneLight-v1.1.0-Windows.zip --release-tag v1.1.0-20261114
+python tools/build_online_installer.py dist/SceneLight-v1.1.0-Windows.zip --release-tag v1.1.0-20261114.1
 ```
 
 Publish both ZIPs under that tag. The online installer pins the complete package’s
