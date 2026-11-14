@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from .release import release_content_sha256
+from .runtime import log_privacy
 from .sidecar import storage_root
 
 SEGMENT_BYTES = 2 * 1024 * 1024
@@ -56,7 +58,14 @@ def _platform_description() -> str:
 def _atomic_json(path: Path, payload) -> None:
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
-        temporary.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(
+                log_privacy.mask_value(payload),
+                indent=2,
+                default=lambda v: log_privacy.mask_text(str(v)),
+            ),
+            encoding="utf-8",
+        )
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -80,6 +89,7 @@ class Session:
         self._started = time.monotonic()
         self._last_stage = ""
         self._sequence = 0
+        self._capture_state = {"workers": {}}
         self._summary = {
             "schema": 1,
             "id": self.path.name,
@@ -94,6 +104,7 @@ class Session:
         if existing is None:
             runtime = Path(__file__).with_name("runtime") / "scenelight_runtime.rpy"
             self._summary["runtime_sha256"] = hashlib.sha256(runtime.read_bytes()).hexdigest()
+            self._summary["build_sha256"] = release_content_sha256()
             self._summary["components"] = {}
             for name in (
                 "numpy",
@@ -136,7 +147,14 @@ class Session:
                         if old.exists():
                             os.replace(old, self.journal.with_suffix(f".jsonl.{index}"))
                 with self.journal.open("a", encoding="utf-8") as stream:
-                    stream.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
+                    stream.write(
+                        json.dumps(
+                            log_privacy.mask_value(record),
+                            default=lambda v: log_privacy.mask_text(str(v)),
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
                 if level == "error" and self._owns_summary:
                     self.update(
                         error_count=self._summary.get("error_count", 0) + 1,
@@ -146,7 +164,36 @@ class Session:
             # Logging must never turn an otherwise successful game operation into a failure.
             pass
 
+    def _write_capture_state(self) -> None:
+        try:
+            _atomic_json(self.path / f"capture-state-{os.getpid()}.json", self._capture_state)
+        except OSError:
+            pass
+
+    def capture_batch(self, sizes: list[int], restored: list[bool]) -> None:
+        with self._guard:
+            self._capture_state["workers"] = {
+                str(i): {"assigned": size, "status": "restored" if saved else "queued"}
+                for i, (size, saved) in enumerate(zip(sizes, restored), 1)
+            }
+            self._write_capture_state()
+
+    def capture_status(self, worker: int | None, *, new_attempt=False, **details) -> None:
+        # Keep the last observation even if thousands of skip messages rotate the journal.
+        with self._guard:
+            state = (
+                self._capture_state.setdefault("main", {})
+                if worker is None
+                else self._capture_state["workers"].setdefault(str(worker), {})
+            )
+            if new_attempt:
+                for key in set(state) - {"assigned"}:
+                    del state[key]
+            state.update(details, observed=_stamp())
+            self._write_capture_state()
+
     def output(self, line: str) -> None:
+        line = log_privacy.mask_text(line)
         try:
             with self._guard:
                 if self._console_bytes >= SEGMENT_BYTES:
@@ -182,7 +229,18 @@ class Session:
         stage_changed = stage is not None and stage[1] != self._last_stage
         self._last_stage = stage[1] if stage is not None else ""
         now = time.monotonic()
-        if level != "info" or line.startswith((">", "[")):
+        if line.startswith(
+            (
+                "SceneLight worker ",
+                "SceneLight sprite batches:",
+                "SceneLight capture outcome:",
+                "SceneLight background cache:",
+                "SceneLight applied ",
+                "SceneLight capture cache:",
+            )
+        ) and not line.startswith(("SceneLight worker copies ", "SceneLight worker cleanup ")):
+            self.event("progress", line.rstrip(), level)
+        elif level != "info" or line.startswith((">", "[")):
             self.event("output", line.rstrip(), level)
         elif progress and (
             stage_changed or progress[1] == progress[2] or now - self._last_progress >= 1.0
@@ -224,11 +282,11 @@ class Session:
 
     def attach_text(self, label: str, text: str) -> None:
         try:
-            safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", label)[:80]
+            safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", log_privacy.mask_text(label))[:80]
             folder = self.path / "evidence"
             folder.mkdir(exist_ok=True)
             # Keep the useful tail of a runaway engine log, with the truncation explicit.
-            raw = text.encode("utf-8", "replace")
+            raw = log_privacy.mask_text(text).encode("utf-8", "replace")
             if len(raw) > SEGMENT_BYTES:
                 raw = (
                     b"[Earlier content omitted: attachment exceeded 2 MiB]\n" + raw[-SEGMENT_BYTES:]
@@ -277,10 +335,23 @@ def sessions(root: Path | None = None) -> list[dict]:
                 key in item for key in ("started", "area", "status", "id")
             ):
                 continue
-            rows.append({**item, "path": path.parent})
+            rows.append({**log_privacy.mask_value(item), "path": path.parent})
         except (OSError, ValueError):
             continue
     return sorted(rows, key=lambda item: str(item.get("started", "")), reverse=True)
+
+
+def session_game_root(row: dict) -> Path | None:
+    path = row.get("managed_project") or row.get("project")
+    if not path:
+        return None
+    if path == "<USER>":
+        return Path.home()
+    if path.startswith(("<USER>/", "<USER>\\")):
+        tail = path[7:]
+        if "<USER>" not in tail and not Path(tail).anchor and ".." not in Path(tail).parts:
+            return Path.home() / tail
+    return None if "<USER>" in path else Path(path)
 
 
 def session_signature(path: Path) -> tuple:
@@ -321,7 +392,7 @@ def read_events(
                 heapq.heappush(rows, (key, item))
                 if len(rows) > limit:
                     heapq.heappop(rows)
-    return [item for _key, item in sorted(rows)]
+    return [log_privacy.mask_value(item) for _key, item in sorted(rows)]
 
 
 def event_text(row: dict) -> str:
@@ -348,7 +419,7 @@ def read_console(path: Path, *, query: str = "", limit: int = 1500) -> str:
                         lines.append(line)
         except OSError:
             continue
-    return "".join(lines)
+    return log_privacy.mask_text("".join(lines))
 
 
 _SECRET_KEYS = {
@@ -371,8 +442,10 @@ _SECRET_NAME = r"(?:authorization|proxy[_-]?authorization|(?:access[_-]?|refresh
 def _redact_value(value):
     if isinstance(value, dict):
         return {
-            key: "<REDACTED>"
+            log_privacy.mask_text(key): "<REDACTED>"
             if re.sub(r"[^a-z0-9]", "", key.casefold()) in _SECRET_KEYS
+            else "<USER>"
+            if log_privacy.is_account_key(key)
             else _redact_value(item)
             for key, item in value.items()
         }
@@ -398,13 +471,7 @@ def redact(text: str) -> str:
             redact(line.rstrip("\r\n")) + line[len(line.rstrip("\r\n")) :]
             for line in text.splitlines(keepends=True)
         )
-    home = str(Path.home())
-    for value in {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}:
-        text = re.sub(re.escape(value), "<USER>", text, flags=re.I)
-    text = re.sub(
-        r"(?i)([A-Z]:[\\/](?:Users|Documents and Settings)[\\/])[^\\/\s\"']+", r"\1<USER>", text
-    )
-    text = re.sub(r"(?i)(/(?:home|Users)/)[^/\s\"']+", r"\1<USER>", text)
+    text = log_privacy.mask_text(text)
     for quote in ('"', "'"):
         text = re.sub(
             rf"(?i)((?:[\"']?{_SECRET_NAME}[\"']?)\s*[:=]\s*){quote}(?:\\.|[^{quote}\\])*{quote}",
@@ -428,6 +495,55 @@ def redact(text: str) -> str:
     return text
 
 
+def _capture_state_report(session_path: Path, files: dict) -> str:
+    states = {}
+    lines = []
+    for path in sorted(session_path.glob("capture-state-*.json")):
+        try:
+            data = _redact_value(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get("workers"), dict):
+            continue
+        pid = path.stem.rsplit("-", 1)[-1]
+        states[pid] = data
+        lines.append(f"Capture supervisor {pid} · latest observations:")
+        workers = data["workers"]
+        entries = [("Main capture", data.get("main"))] + [
+            (f"Worker {number}", worker) for number, worker in workers.items()
+        ]
+        for label, state in entries:
+            if not isinstance(state, dict):
+                continue
+            status = state.get("status", "unknown")
+            if state.get("batch_error"):
+                status = f"batch failed (last status: {status})"
+            info = [status]
+            if state.get("purpose") and label == "Main capture":
+                info.append(str(state["purpose"]))
+            if "assigned" in state:
+                info.append(f"{state['assigned']} assigned")
+            if state.get("renderer"):
+                info.append(f"renderer: {state['renderer']}")
+            progress = state.get("progress")
+            if isinstance(progress, dict):
+                info.append(
+                    f"{progress.get('stage')} {progress.get('current')}/{progress.get('total')}"
+                    + (f" · {progress['item']}" if progress.get("item") else "")
+                )
+            if state.get("exit_code") is not None:
+                info.append(f"exit {state['exit_code']}")
+            if state.get("error") or state.get("batch_error"):
+                info.append((state.get("error") or state["batch_error"]).splitlines()[0][:512])
+            lines.append(f"  {label}: " + "; ".join(info))
+        if not workers:
+            lines.append("  No parallel sprite batch was recorded by this supervisor.")
+    if not states:
+        return ""
+    files["capture-state.json"] = json.dumps(states, indent=2, ensure_ascii=False)
+    return "\n".join(lines) + "\n"
+
+
 def export_report(
     session_path: Path, destination: Path, *, notes: str = "", game_root: Path | None = None
 ) -> None:
@@ -443,7 +559,7 @@ def export_report(
     ]:
         if path.is_file():
             try:
-                files[path.relative_to(session_path).as_posix()] = redact(
+                files[log_privacy.mask_text(path.relative_to(session_path).as_posix())] = redact(
                     path.read_text(encoding="utf-8", errors="replace")
                 )
             except OSError:
@@ -479,21 +595,58 @@ def export_report(
                     ("[Earlier content omitted]\n" if size > SEGMENT_BYTES else "") + raw
                 )
     summary = json.loads(files.get("session.json", "{}"))
-    errors = [
-        _redact_value(row)
-        for row in read_events(session_path, limit=5000)
-        if row.get("level") == "error"
+    rows = [_redact_value(row) for row in read_events(session_path, limit=20000)]
+    errors = [row for row in rows if row.get("level") == "error"]
+    structured_errors = [row for row in errors if row.get("stage") != "output"]
+    last_error = (
+        (structured_errors[-1].get("message") if structured_errors else None)
+        or summary.get("failure")
+        or summary.get("last_error")
+        or (errors[-1].get("message") if errors else None)
+    )
+    error_label = (
+        "Earlier error (operation succeeded)"
+        if last_error and summary.get("status") in {"complete", "succeeded"}
+        else "Last error"
+    )
+    capture = [
+        row
+        for row in rows
+        if row.get("stage")
+        in {"capture.process", "capture.result", "capture.summary", "capture.script-error"}
+        or (row.get("stage") == "capture" and row.get("level") == "error")
     ]
+    capture_note = _capture_state_report(session_path, files)
+    if capture:
+        stops = [row for row in capture if row.get("message") == "Capture did not complete"]
+        if stops:
+            capture_note += (
+                f"Recorded capture stops: {len(stops)} (including retries). See capture.json.\n"
+            )
+            details = stops[-1].get("details") or {}
+            progress = details.get("last_progress")
+            if isinstance(progress, list) and len(progress) == 4:
+                stage, current, total, item = progress
+                capture_note += (
+                    f"Last progress on that attempt: {stage} {current}/{total}, {item}\n"
+                )
+            if details.get("exit_code") in (3221225477, -1073741819):
+                capture_note += (
+                    "That process exited with a Windows access violation (0xC0000005).\n"
+                )
+        files["capture.json"] = json.dumps(capture, indent=2, ensure_ascii=False)
     files["SUMMARY.txt"] = redact(
         f"SceneLight support report · {session_path.name}\nStatus: {summary.get('status', 'unknown')}\n"
         f"Operation: {summary.get('operation', summary.get('area', 'unknown'))}\n"
-        f"Version: {summary.get('version', 'unknown')}\nLast error: {summary.get('last_error', summary.get('failure', 'none recorded'))}\n\nUser description:\n{notes or '(not supplied)'}\n\n"
+        f"Version: {summary.get('version', 'unknown')}\nBuild: {summary.get('build_sha256', 'not recorded')}\n"
+        f"{error_label}: {str(last_error).splitlines()[0][:512] if last_error else 'none recorded'}\n"
+        + capture_note
+        + f"\nUser description:\n{notes or '(not supplied)'}\n\n"
         + "Recent errors:\n"
         + "\n".join(event_text(row) for row in errors[-8:])
         + "\n\nLogs are bounded; rotated older events may be omitted. Running means no completion was recorded (still running or interrupted).\n"
         + "Personal home paths and common credentials are redacted. Review before sharing; project and image names remain. No assets or saves are included.\n"
     )
-    rows = [_redact_value(row) for row in read_events(session_path, limit=20000)]
     entries = "".join(
         "<details data-level='"
         + html.escape(str(row.get("level", "info")), quote=True)

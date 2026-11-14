@@ -20,6 +20,8 @@ from pathlib import Path
 
 from . import __version__
 from .calibration import profile_path
+from .capture_reuse import compiled_source_digest
+from .compiled_script import compiled_fingerprint
 from .file_verification import bounded_file_work, verified_digest
 from .launch_safety import (
     LAUNCHER_CONFIG,
@@ -35,7 +37,12 @@ from .release import (
     release_version_from_manifest,
 )
 from .script_cache import source_candidates
-from .sidecar import find_native_executable, remove_analysis_cache, renpy_sdk_prefix
+from .sidecar import (
+    analysis_cache_root,
+    find_native_executable,
+    remove_analysis_cache,
+    renpy_sdk_prefix,
+)
 from .source_types import VISUAL_SOURCE_SUFFIXES, is_effect_source
 
 MANIFEST_NAME = ".scenelight_developer_install.json"
@@ -70,7 +77,7 @@ def _sha256(path: Path) -> str:
 
 
 def _tracked_source_state(
-    project_root: Path, *, progress: ProgressStage | None = None
+    project_root: Path, *, progress: ProgressStage | None = None, include_generated: bool = True
 ) -> dict[str, list[int | str]]:
     """Track authored bytes, including timestamp-preserving asset replacements."""
 
@@ -108,9 +115,15 @@ def _tracked_source_state(
             relative = path.relative_to(project_root)
             if suffix not in VISUAL_SOURCE_SUFFIXES and not is_effect_source(relative):
                 continue
-            if any(source.is_file() for source in source_candidates(path)):
-                # A source-backed compiler cache is not a new authored input. Keep
-                # compiled-only games/mods trackable when no source twin exists.
+            twins = source_candidates(path)
+            if twins and any(source.is_file() for source in twins):
+                # Ren'Py uses paired RPC2 bytecode when its footer matches the source.
+                # Its size and mtime can both change on an equivalent recompile.
+                if relative.as_posix() not in (
+                    "game/scenelight_runtime.rpyc",
+                    "game/scenelight_save_compat.rpyc",
+                ) and compiled_source_digest(path, twins):
+                    state[relative.as_posix()] = [0, 0, compiled_fingerprint(path) or _sha256(path)]
                 continue
             stat = path.stat()
             if progress is not None:
@@ -118,12 +131,44 @@ def _tracked_source_state(
             state[relative.as_posix()] = [stat.st_size, stat.st_mtime_ns, _sha256(path)]
             if progress is not None:
                 progress.advance()
+    if include_generated:
+        _include_generated_scripts(project_root, state)
     return dict(sorted(state.items()))
 
 
-def _installation_source_state(project_root: Path) -> dict[str, list[int | str]]:
+def _include_generated_scripts(project_root: Path, state: dict[str, list[int | str]]) -> None:
+    # A playtest can create the source's first .rpyc. Compare it to the copy
+    # our renderer built from the same source, even before the player launches.
+    index = analysis_cache_root(project_root) / "capture_pixels.json"
+    if index.is_file():
+        try:
+            compiled = json.loads(index.read_bytes())["compiled"]
+            for name, entry in compiled.items():
+                if (
+                    not isinstance(entry, list)
+                    or len(entry) != 4
+                    or entry[3] is not True
+                    or not entry[2]
+                ):
+                    continue
+                relative = Path("game") / name
+                key = relative.as_posix()
+                if key not in state and any(
+                    state.get(twin.as_posix(), [None, None, None])[2] == entry[0]
+                    for twin in source_candidates(relative)
+                ):
+                    state[key] = [0, 0, entry[2]]
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
+            pass
+
+
+def _installation_source_state(
+    project_root: Path, *, include_generated: bool = True
+) -> dict[str, list[int | str]]:
     with ProgressStage("source-index", item="Reading source file fingerprints") as progress:
-        return _tracked_source_state(project_root, progress=progress)
+        return _tracked_source_state(
+            project_root, progress=progress, include_generated=include_generated
+        )
 
 
 def _runtime_file_hashes(
@@ -394,7 +439,9 @@ def _plain_project_path(
     return destination
 
 
-def _owned_paths(project_root: Path, manifest: dict[str, object]) -> dict[str, Path]:
+def _owned_paths(
+    project_root: Path, manifest: dict[str, object], *, inventory=None
+) -> dict[str, Path]:
     version = manifest.get("version")
     if version not in {1, 2, 3}:
         raise RuntimeError("Unsupported SceneLight developer ownership manifest version.")
@@ -409,6 +456,10 @@ def _owned_paths(project_root: Path, manifest: dict[str, object]) -> dict[str, P
     for key, expected_hash in files.items():
         if not isinstance(key, str) or not isinstance(expected_hash, str):
             raise RuntimeError("SceneLight developer ownership manifest contains invalid entries.")
+        if inventory is not None and key in inventory:
+            # This exact relative name was observed under the checked runtime root.
+            result[key] = inventory[key]
+            continue
         relative = Path(key)
         destination = _plain_project_path(project_root, relative, checked=checked)
         in_namespace = relative.parts[: len(EMBED_ROOT.parts)] == EMBED_ROOT.parts
@@ -430,14 +481,47 @@ def _recognized_compiler_output(relative: str, owned: set[str]) -> bool:
     return path.with_suffix(".rpy").as_posix() in owned
 
 
+def _runtime_inventory(project_root: Path) -> dict[str, Path]:
+    root = _plain_project_path(project_root, EMBED_ROOT)
+    files = {}
+    pending = [(root, EMBED_ROOT.as_posix())] if root.is_dir() else []
+    while pending:
+        folder, prefix = pending.pop()
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                relative = prefix + "/" + entry.name
+                info = entry.stat(follow_symlinks=False)
+                if (
+                    stat_mode.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & 0x400
+                ):
+                    raise RuntimeError(
+                        f"SceneLight refuses a symbolic link or Windows reparse point: {relative}"
+                    )
+                if stat_mode.S_ISDIR(info.st_mode):
+                    pending.append((entry.path, relative))
+                elif stat_mode.S_ISREG(info.st_mode):
+                    files[relative] = Path(entry.path)
+                else:
+                    raise RuntimeError(
+                        f"Unexpected file type in the SceneLight runtime: {relative}"
+                    )
+    return files
+
+
 def developer_status(
-    project: Path, *, check_sources: bool = True, verified_out=None
+    project: Path,
+    *,
+    check_sources: bool = True,
+    verified_out=None,
+    progress: ProgressStage | None = None,
 ) -> DeveloperStatus:
     project_root = project.expanduser().resolve()
     manifest = _manifest(project_root)
     if manifest is None:
         return DeveloperStatus(False, True, (), (), (), ())
-    owned_paths = _owned_paths(project_root, manifest)
+    inventory = _runtime_inventory(project_root)
+    owned_paths = _owned_paths(project_root, manifest, inventory=inventory)
     expected = manifest["files"]
     assert isinstance(expected, dict)
     missing: list[str] = []
@@ -448,11 +532,16 @@ def developer_status(
 
     def check(item):
         key, path = item
-        if not path.is_file():
+        if key not in inventory and not path.is_file():
             return key, None, None
-        digest, stamp, _ = verified_digest(path, expected[key], stamps.get(key))
+        try:
+            digest, stamp, _ = verified_digest(path, expected[key], stamps.get(key))
+        except FileNotFoundError:
+            return key, None, None
         return key, digest, stamp
 
+    if progress is not None:
+        progress.set_total(len(owned_paths))
     for key, digest, stamp in bounded_file_work(
         check, owned_paths.items(), workers=None if stamps else 1
     ):
@@ -462,20 +551,15 @@ def developer_status(
             modified.append(key)
         elif stamp and verified_out is not None:
             verified_out[key] = stamp
+        if progress is not None:
+            progress.advance()
 
     owned = set(owned_paths)
-    unowned: list[str] = []
+    unowned = [
+        key for key in inventory.keys() - owned if not _recognized_compiler_output(key, owned)
+    ]
     embed_root = project_root / EMBED_ROOT
-    if embed_root.is_dir():
-        checked: set[Path] = set()
-        for path in embed_root.rglob("*"):
-            _plain_project_path(project_root, path.relative_to(project_root), checked=checked)
-            if not path.is_file():
-                continue
-            relative = path.relative_to(project_root).as_posix()
-            if relative not in owned and not _recognized_compiler_output(relative, owned):
-                unowned.append(relative)
-    elif embed_root.exists():
+    if embed_root.exists() and not embed_root.is_dir():
         modified.append(EMBED_ROOT.as_posix())
 
     previous_source_state = manifest.get("source_state")
@@ -598,6 +682,7 @@ def _stage_runtime(
     *,
     native_launcher: bool,
     consume_managed: bool = False,
+    private_stage: bool = False,
 ) -> tuple[Path, Path, bool]:
     game_root = project_root / "game"
     if not game_root.is_dir():
@@ -605,7 +690,9 @@ def _stage_runtime(
     # Keep this transaction directory short. Generated sprite-map
     # filenames can be long enough that the previous 61-character staging name
     # crossed Win32's traditional MAX_PATH boundary in otherwise valid games.
-    stage = game_root / f".sl-{uuid.uuid4().hex[:8]}"
+    stage = (
+        source_data.parent.parent if private_stage else game_root
+    ) / f".sl-{uuid.uuid4().hex[:8]}"
     staged_data = stage / "runtime"
     consumed = False
     try:
@@ -695,7 +782,7 @@ def preflight_embed_destination(project: Path) -> None:
 
 
 def preflight_refresh_destination(
-    project: Path, *, item: str = "Checking ownership of the existing runtime"
+    project: Path, *, item: str = "Checking ownership of the existing runtime", verified_out=None
 ) -> None:
     """Require a current, fully owned direct install before expensive analysis."""
 
@@ -712,8 +799,10 @@ def preflight_refresh_destination(
             "This developer installation predates safe refresh support. Remove it through "
             "SceneLight, then install the current developer API once."
         )
-    with ProgressStage("install-verify", item=item):
-        status = developer_status(project_root, check_sources=False)
+    with ProgressStage("install-verify", item=item) as progress:
+        status = developer_status(
+            project_root, check_sources=False, verified_out=verified_out, progress=progress
+        )
     if not status.clean:
         details = [*(f"missing: {path}" for path in status.missing)]
         details.extend(f"modified: {path}" for path in status.modified)
@@ -862,6 +951,7 @@ def refresh_embedded_from_managed(
     *,
     consume_managed: bool = False,
     preflight_complete: bool = False,
+    installed_forms=None,
 ) -> dict[str, object]:
     """Transactionally replace a verified direct runtime with freshly analyzed data."""
 
@@ -871,6 +961,8 @@ def refresh_embedded_from_managed(
         preflight_refresh_destination(project_root)
     manifest_path = project_root / MANIFEST_NAME
     original_manifest_hash = _sha256(manifest_path)
+    if installed_forms is not None and original_manifest_hash != installed_forms.ownership_digest:
+        raise RuntimeError("Installation ownership changed during analysis.")
     original_manifest = _manifest(project_root)
     assert original_manifest is not None
     destination_root = project_root / EMBED_ROOT
@@ -883,6 +975,7 @@ def refresh_embedded_from_managed(
         source_data,
         native_launcher=launcher_owned,
         consume_managed=consume_managed,
+        private_stage=installed_forms is not None,
     )
     from .developer_transaction import JOURNAL, publish
 
@@ -905,10 +998,23 @@ def refresh_embedded_from_managed(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
 
+            playback_value = install.get("playback_executable")
+            if playback_value and not install.get("playback_native", True):
+                playback = Path(str(playback_value)).expanduser().resolve()
+                if not playback.is_file():
+                    raise FileNotFoundError("The selected playback runtime is no longer available.")
+                (staged_data / LAUNCHER_CONFIG.name).write_text(
+                    str(playback) + "\n", encoding="utf-8"
+                )
+                native_launcher = dict(native_launcher, runtime=str(playback))
+
         # Re-verify after potentially long analysis/staging so a concurrent
         # manual edit can never be overwritten by the refresh swap.
+        live_stamps = {} if installed_forms is not None else None
         preflight_refresh_destination(
-            project_root, item="Rechecking ownership before replacing the runtime"
+            project_root,
+            item="Rechecking ownership before replacing the runtime",
+            verified_out=live_stamps,
         )
         if _sha256(manifest_path) != original_manifest_hash:
             raise RuntimeError(
@@ -932,6 +1038,33 @@ def refresh_embedded_from_managed(
             if not executable_path.is_file():
                 raise RuntimeError("The existing SceneLight launcher disappeared during refresh.")
             files[executable_relative] = _sha256(executable_path)
+        if installed_forms is not None:
+            form_index = json.loads((staged_data / "sprite_form_manifest.json").read_bytes())
+            entries = [form_index["fallback"], *form_index["sprites"].values()]
+            needed = {
+                "game/" + entry[channel]
+                for entry in entries
+                for channel in ("normal_noise", "height_ao_edge", "response")
+            }
+            prefix = (EMBED_ROOT / "sprite_form").as_posix() + "/"
+            if any(not name.startswith(prefix) for name in needed):
+                raise RuntimeError("Invalid sprite map path in prepared form index.")
+            files = {
+                name: digest
+                for name, digest in files.items()
+                if not name.startswith(prefix) or name in needed
+            }
+            for relative in installed_forms.retained:
+                name = "game/" + relative
+                if name in needed:
+                    files[name] = original_manifest["files"][name]
+            if needed - files.keys():
+                raise RuntimeError("The prepared sprite-map index references missing textures.")
+            file_stamps = {
+                name: stamp
+                for name, stamp in live_stamps.items()
+                if files.get(name) == original_manifest["files"][name]
+            }
         refreshed_manifest = {
             "version": 3,
             "scenelight_version": __version__,
@@ -950,13 +1083,36 @@ def refresh_embedded_from_managed(
             "analysis_config_sha256": install.get("analysis_config_sha256"),
             "selection_settings": install.get("selection_settings"),
         }
-        cleanup_warning = publish(
-            project_root,
-            stage,
-            original_manifest,
-            refreshed_manifest,
-            on_rollback=lambda: _discard_staged_runtime(stage, staged_data, source_data, consumed),
-        )
+        if installed_forms is not None:
+            from .updates import publish_changed_assets
+
+            changed_count = publish_changed_assets(
+                project_root,
+                staged_data,
+                original_manifest,
+                refreshed_manifest,
+                original_manifest_hash,
+                verified_stamps=live_stamps,
+            )
+            print(
+                f"SceneLight applied {changed_count:,} changed files; {len(installed_forms.retained):,} existing sprite maps retained.",
+                flush=True,
+            )
+            cleanup_warning = None
+            try:
+                shutil.rmtree(stage)
+            except OSError as error:
+                cleanup_warning = f"Update complete. Temporary workspace cleanup remains: {error}"
+        else:
+            cleanup_warning = publish(
+                project_root,
+                stage,
+                original_manifest,
+                refreshed_manifest,
+                on_rollback=lambda: _discard_staged_runtime(
+                    stage, staged_data, source_data, consumed
+                ),
+            )
     except Exception:
         if not (project_root / JOURNAL).exists():
             _discard_staged_runtime(stage, staged_data, source_data, consumed)

@@ -1,4 +1,5 @@
 import ast
+import re
 import sys
 import textwrap
 from types import ModuleType, SimpleNamespace
@@ -12,6 +13,18 @@ from scenelight.preview.shader_source import (
     vertex_source,
 )
 from scenelight.runtime import shader_renpy, shader_stages
+from scenelight.runtime.shader_data import SHADERS
+
+
+def test_gles_fallback_does_not_share_uniforms_with_different_stage_precision():
+    # Ren'Py 7.5 emits highp vertex and mediump fragment defaults. ANGLE
+    # rejects a uniform used in both stages under those different defaults.
+    declarations = re.findall(r"uniform\s+\w+\s+(\w+)\s*;", SHADERS["variables"])
+    vertex = "\n".join(value for key, value in SHADERS.items() if key.startswith("vertex"))
+    fragment = "\n".join(value for key, value in SHADERS.items() if key.startswith("fragment"))
+    vertex_names = set(re.findall(r"\b\w+\b", vertex))
+    fragment_names = set(re.findall(r"\b\w+\b", fragment))
+    assert not (set(declarations) & vertex_names & fragment_names)
 
 
 def test_vertex_samples_use_original_helpers_and_leave_spatial_samples_in_fragment():

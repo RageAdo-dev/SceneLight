@@ -50,6 +50,11 @@ runtime executables, `lib/`, `module/`, `renpy/` and original `LICENSE.txt`.
 Upload the verified packages and checksums to a draft GitHub release. Check its
 tag, download links and release notes before publishing.
 
+Keep published tags and download contents unchanged. A replacement build of the
+same app version needs a new tag, such as `v1.1.0-20261114`, pointing to its source
+commit. Build its online installer against that exact tag. Retire superseded
+downloads only after the replacement has been verified and the old assets backed up.
+
 If GitHub Actions is enabled, pushing a `vX.Y.Z` tag builds the packages and
 creates the draft. The workflow leaves existing releases unchanged.
 
@@ -58,12 +63,12 @@ creates the draft. The workflow leaves existing releases unchanged.
 Build the complete ZIP first, then run:
 
 ```text
-python tools/build_online_installer.py dist/SceneLight-v1.1.0-Windows.zip --release-tag v1.1.0
+python tools/build_online_installer.py dist/SceneLight-v1.1.0-Windows.zip --release-tag v1.1.0-20261114
 ```
 
 Publish both ZIPs under that tag. The online installer pins the complete package’s
-hash, so rebuild it whenever the payload changes. It requires publicly accessible
-release assets. Use the complete Windows ZIP for private distribution.
+hash; a different payload needs a new installer and download URL. It requires
+publicly accessible release assets. Use the complete Windows ZIP for private distribution.
 
 ## Native launcher
 

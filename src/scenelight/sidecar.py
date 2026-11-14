@@ -35,8 +35,10 @@ _EXCLUDED_ROOT_FILES = {
 _EXCLUDED_GAME_NAMES = {
     "cache",
     "saves",
+    "scenelight_runtime",
     "scenelight_capture.rpy",
     "scenelight_capture.rpyc",
+    "scenelight_capture_privacy.txt",
     "scenelight_runtime.rpy",
     "scenelight_runtime.rpyc",
 }
@@ -71,44 +73,50 @@ def managed_project_root(project_root: Path) -> Path:
     return storage_root() / f"{slug}-{digest}"
 
 
-def _analysis_cache_base(project_root: Path) -> Path:
-    """Choose a cache volume that keeps installing a runtime a rename.
+def primary_analysis_cache_root(project_root: Path) -> Path:
+    """Keep the cache on the managed workspace's volume for directory transfers."""
+    return storage_root().parent / "analysis-cache" / managed_project_root(project_root).name
 
-    Writing the prepared runtime into the game is a cross-volume copy when the
-    cache lives on another drive, and that copy is tens of thousands of map
-    files. Building the cache beside the project turns the same step into an
-    atomic rename.
-    """
 
+def _legacy_analysis_cache(project_root: Path) -> Path | None:
     source = project_root.expanduser().resolve()
-    default = storage_root().parent / "analysis-cache"
-    if source.drive and default.drive and source.drive.lower() != default.drive.lower():
-        return source / ".scenelight_cache" / "analysis-cache"
-    return default
+    primary = primary_analysis_cache_root(source)
+    if source.drive and primary.drive and source.drive.lower() != primary.drive.lower():
+        return source / ".scenelight_cache" / "analysis-cache" / primary.name
+    return None
+
+
+def cache_checkout_marker(cache: Path) -> Path:
+    return cache.with_name(".slc-" + cache.name.rsplit("-", 1)[-1] + ".checked-out")
 
 
 def analysis_cache_root(project_root: Path) -> Path:
-    """Keep reusable analysis outside disposable managed/direct installations."""
-
-    source = project_root.expanduser().resolve()
-    digest = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:12]
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", source.name).strip("-.") or "renpy-project"
-    return _analysis_cache_base(source) / f"{slug}-{digest}"
+    primary = primary_analysis_cache_root(project_root)
+    if not primary.exists():
+        working = managed_project_root(project_root) / ".scenelight_cache"
+        if (
+            cache_checkout_marker(primary).exists()
+            and working.is_dir()
+            and working.resolve() == working
+        ):
+            return working
+        legacy = _legacy_analysis_cache(project_root)
+        if legacy is not None and legacy.is_dir():
+            return legacy
+    return primary
 
 
 def remove_analysis_cache(project_root: Path) -> bool:
-    """Remove only the deterministic cache owned by one selected project."""
-
-    cache = analysis_cache_root(project_root)
-    root = _analysis_cache_base(project_root).resolve()
-    if cache.parent.resolve() != root or cache == root:
-        raise ValueError(f"Refusing to remove an unexpected analysis cache path: {cache}")
-    if not cache.exists():
-        return False
-    if cache.is_symlink() or not cache.is_dir():
-        raise ValueError(f"Analysis cache ownership could not be verified: {cache}")
-    _remove_tree(cache)
-    return True
+    """Remove only this project's cache, including the old cross-volume location."""
+    removed = False
+    for cache in (primary_analysis_cache_root(project_root), _legacy_analysis_cache(project_root)):
+        if cache is None or not cache.exists():
+            continue
+        if cache.resolve() != cache or not cache.is_dir():
+            raise ValueError(f"Analysis cache ownership could not be verified: {cache}")
+        _remove_tree(cache)
+        removed = True
+    return removed
 
 
 def _clear_readonly_and_retry(function: Callable[..., object], path: str, _error) -> None:
@@ -152,8 +160,6 @@ def _is_source_file(relative: Path) -> bool:
     if parts[0] == "game" and len(parts) >= 2:
         if parts[1] in _EXCLUDED_GAME_NAMES:
             return False
-        if parts[1] == "scenelight_runtime":
-            return False
     return True
 
 
@@ -184,6 +190,7 @@ def _is_reserved_managed_file(relative: Path) -> bool:
             "scenelight_runtime.rpyc",
             "scenelight_capture.rpy",
             "scenelight_capture.rpyc",
+            "scenelight_capture_privacy.txt",
         }
     return False
 
@@ -226,6 +233,28 @@ def _copy_atomic(source: Path, destination: Path) -> None:
     os.replace(temporary, destination)
 
 
+def _project_files(root: Path, *, managed: bool):
+    # A direct installation can have three generated textures per form. Neither
+    # sync pass needs to visit those files or the capture/transport cache.
+    for directory, dirs, files in os.walk(root, onerror=_raise_walk_error):
+        current = Path(directory)
+        if current == root:
+            excluded = (
+                {".scenelight_cache"} if managed else {".scenelight_cache", ".scenelight_backups"}
+            )
+            dirs[:] = [name for name in dirs if name.lower() not in excluded]
+        elif current == root / "game":
+            dirs[:] = [name for name in dirs if name.lower() not in _EXCLUDED_GAME_NAMES]
+        for filename in files:
+            path = current / filename
+            if path.is_file():
+                yield path
+
+
+def _raise_walk_error(error):
+    raise error
+
+
 def sync_project(
     project_root: Path,
     *,
@@ -250,9 +279,7 @@ def sync_project(
         old_files = {}
 
     source_files = []
-    for file_path in source.rglob("*"):
-        if not file_path.is_file():
-            continue
+    for file_path in _project_files(source, managed=False):
         relative = file_path.relative_to(source)
         if _is_source_file(relative):
             source_files.append((file_path, relative))
@@ -290,9 +317,7 @@ def sync_project(
     # Native source-backed bytecode retains statement identities used by saves.
     # Analysis temporarily protects/restores it through script_cache; orphaned
     # outputs and files without a current authored source can still be removed.
-    for target in managed.rglob("*"):
-        if not target.is_file():
-            continue
+    for target in _project_files(managed, managed=True):
         relative = target.relative_to(managed)
         key = relative.as_posix()
         if (
@@ -360,6 +385,7 @@ def _neutralize_instance_guards(project_root: Path) -> list[Path]:
             continue
     return patched
 
+
 def find_native_executable(project_root: Path) -> Path | None:
     """Choose the distribution's own Windows launcher, never an external SDK."""
 
@@ -375,9 +401,19 @@ def find_native_executable(project_root: Path) -> Path | None:
         return None
     expected = re.sub(r"[^a-z0-9]", "", root.name.lower())
 
-    def rank(path: Path) -> tuple[int, int, str]:
+    def rank(path: Path) -> tuple[int, int, int, int, str]:
         stem = re.sub(r"[^a-z0-9]", "", path.stem.lower())
-        return (0 if stem == expected else 1, len(path.name), path.name.lower())
+        # DDLC mods often retain DDLC.exe beside their newer custom launcher.
+        # A managed folder has a different name, so exact-name matching alone
+        # selected the shortest executable and started the obsolete engine.
+        paired = path.with_suffix(".py").is_file()
+        return (
+            0 if stem == expected else 1,
+            0 if paired else 1,
+            1 if paired and stem == "ddlc" else 0,
+            len(path.name),
+            path.name.lower(),
+        )
 
     return min(candidates, key=rank)
 
@@ -471,7 +507,17 @@ def detect_project_renpy_version(project_root: Path) -> tuple[int, int, int] | N
     if match:
         return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
 
+    try:
+        init_text = (root / "renpy" / "__init__.py").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        init_text = ""
+    versions = re.findall(r"version_tuple\s*=\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", init_text)
     major = renpy_runtime_major(root)
+    for parts in versions:
+        version = tuple(int(part) for part in parts)
+        if version[0] == major:
+            return version
+
     if major is not None:
         return (major, 0, 0)
     return None

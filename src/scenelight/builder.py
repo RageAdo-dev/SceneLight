@@ -72,13 +72,11 @@ GIB = 1024**3
 
 
 def _atlas_layout(
-    scene_count: int, grid_size: tuple[int, int], limit: int = 4096
+    scene_count: int, tile_size: tuple[int, int], limit: int = 4096
 ) -> tuple[int, int]:
-    """Fit both atlases inside the supported Ren'Py texture limit before allocating."""
-    row_height = max(TILE_SIZE[1], grid_size[1])
-    block_width = max(TILE_SIZE[0], grid_size[0] * TRANSPORT_PLANES)
-    max_rows = limit // row_height
-    max_columns = limit // block_width
+    """Pack the scene tiles and the neutral tile within a Ren'Py texture."""
+    max_rows = limit // tile_size[1]
+    max_columns = limit // tile_size[0]
     if max_rows < 1 or max_columns < 1:
         raise ValueError("SceneLight analysis grid exceeds the supported texture size")
     columns = max(min(ATLAS_COLUMNS, max_columns), math.ceil((scene_count + 1) / max_rows))
@@ -1218,16 +1216,27 @@ def _sprite_spec_fingerprint(
     return digest.hexdigest()
 
 
+@dataclass
+class InstalledFormMaps:
+    ownership_digest: str
+    manifest: dict
+    owned: set[str]
+    retained: set[str]
+
+
 def _build_form_maps(
     discovery: ProjectDiscovery,
     output_root: Path,
     worker_count: int,
+    installed: InstalledFormMaps | None = None,
 ) -> dict[str, object]:
     form_root = output_root / "sprite_form"
     form_root.mkdir(parents=True, exist_ok=True)
     manifest_path = output_root / "sprite_form_manifest.json"
     previous: dict[str, object] = {}
-    if manifest_path.is_file():
+    if installed is not None:
+        previous = installed.manifest
+    elif manifest_path.is_file():
         try:
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -1268,7 +1277,11 @@ def _build_form_maps(
                 break
             exists = asset_exists.get(raw_asset)
             if exists is None:
-                exists = (discovery.game_root / raw_asset).is_file()
+                exists = (
+                    raw_asset in installed.owned
+                    if installed is not None
+                    else (discovery.game_root / raw_asset).is_file()
+                )
                 asset_exists[raw_asset] = exists
             if not exists:
                 prior_assets_valid = False
@@ -1344,6 +1357,18 @@ def _build_form_maps(
         # worker composes its image on demand, bounding memory to the active
         # worker count even for mods with thousands of expressions.
         pending.append((key, spec, paths, source_fingerprint))
+
+    # An edited form can share its old filenames with an unchanged expression.
+    # Keep those textures for the expression and give the edited form its own set.
+    retained = {entry[name] for entry in entries.values() for name in asset_names}
+    if installed is not None:
+        installed.retained.update(retained)
+    for _key, _spec, paths, fingerprint in pending:
+        if any(
+            path.relative_to(discovery.game_root).as_posix() in retained for path in paths.values()
+        ):
+            for channel in paths:
+                paths[channel] = form_root / f"form_{fingerprint}_{channel}.png"
 
     if sprite_total:
         print(
@@ -1485,6 +1510,7 @@ def build_project(
     grid_size: tuple[int, int] = TRANSPORT_GRID_SIZE,
     workers: int | None = None,
     analyzer_backend: str = "auto",
+    installed_forms: InstalledFormMaps | None = None,
 ) -> BuildResult:
     """Generate a complete runtime from locally discovered project art."""
 
@@ -1509,15 +1535,18 @@ def build_project(
     for warning in effect_build.warnings:
         print(f"effect pack warning: skipped {warning}", flush=True)
     scene_names = sorted(discovery.scenes)
-    atlas_columns, rows = _atlas_layout(len(scene_names), grid_size)
+    atlas_columns, rows = _atlas_layout(len(scene_names), TILE_SIZE)
+    transport_block_width = grid_size[0] * TRANSPORT_PLANES
+    transport_columns, transport_rows = _atlas_layout(
+        len(scene_names), (transport_block_width, grid_size[1])
+    )
     atlas_size = (TILE_SIZE[0] * atlas_columns, TILE_SIZE[1] * rows)
     irradiance_atlas = Image.new("RGBA", atlas_size, (106, 106, 106, 79))
     emitter_atlas = Image.new("RGBA", atlas_size, (106, 106, 106, 128))
     wrap_atlas = Image.new("RGB", atlas_size, (0, 0, 0))
-    transport_block_width = grid_size[0] * TRANSPORT_PLANES
     transport_atlas = Image.new(
         "RGBA",
-        (transport_block_width * atlas_columns, grid_size[1] * rows),
+        (transport_block_width * transport_columns, grid_size[1] * transport_rows),
         (0, 0, 0, 255),
     )
 
@@ -1525,19 +1554,19 @@ def build_project(
     transport_by_scene: dict[str, np.ndarray] = {}
     cache_root = discovery.project_root / ".scenelight_cache"
     cache_root.mkdir(parents=True, exist_ok=True)
-    cache_paths = {
-        name: _transport_cache_path(cache_root, name, discovery.scenes[name], grid_size)
-        for name in scene_names
-    }
-    for name, cache_path in cache_paths.items():
-        if not cache_path.is_file():
-            continue
-        with np.load(cache_path) as cached:
-            transport = cached["transport"]
-        expected = (TRANSPORT_PLANES, grid_size[1], grid_size[0], 4)
-        if transport.shape == expected and transport.dtype == np.uint8:
-            transport_by_scene[name] = transport
-            print(f"transport cached: {name}", flush=True)
+    cache_paths = {}
+    with ProgressStage("background-cache", total=len(scene_names)) as progress:
+        for name in scene_names:
+            path = _transport_cache_path(cache_root, name, discovery.scenes[name], grid_size)
+            cache_paths[name] = path
+            if path.is_file():
+                with np.load(path) as cached:
+                    transport = cached["transport"]
+                expected = (TRANSPORT_PLANES, grid_size[1], grid_size[0], 4)
+                if transport.shape == expected and transport.dtype == np.uint8:
+                    transport_by_scene[name] = transport
+                    print(f"transport cached: {name}", flush=True)
+            progress.advance()
 
     missing_transport = [name for name in scene_names if name not in transport_by_scene]
     if missing_transport:
@@ -1698,9 +1727,11 @@ def build_project(
         str,
         tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, object]],
     ] = {}
-    print(f"scene 0/{len(scene_names)}: preparing", flush=True)
     cached_scene_fields = 0
-    with ThreadPoolExecutor(max_workers=max(1, min(worker_count, len(scene_names)))) as executor:
+    with (
+        ProgressStage("background-fields", total=len(scene_names)) as background_progress,
+        ThreadPoolExecutor(max_workers=max(1, min(worker_count, len(scene_names)))) as executor,
+    ):
         futures = {
             executor.submit(render_scene_fields, scene_name): scene_name
             for scene_name in scene_names
@@ -1709,6 +1740,7 @@ def build_project(
             scene_name, irradiance, emitter, wrap, metadata, reused = future.result()
             cached_scene_fields += int(reused)
             scene_fields[scene_name] = (irradiance, emitter, wrap, metadata)
+            background_progress.advance()
     print(
         f"SceneLight background cache: {cached_scene_fields}/{len(scene_names)} reused; "
         f"{len(scene_names) - cached_scene_fields} analyzed",
@@ -1727,9 +1759,10 @@ def build_project(
             [transport_by_scene[scene_name][plane] for plane in range(TRANSPORT_PLANES)],
             axis=1,
         )
+        transport_row, transport_column = divmod(tile_index, transport_columns)
         transport_atlas.paste(
             Image.fromarray(transport_strip, "RGBA"),
-            (column * transport_block_width, row * grid_size[1]),
+            (transport_column * transport_block_width, transport_row * grid_size[1]),
         )
         metadata = dict(metadata)
         metadata["light_transport_layout"] = _transport_light_layout(transport_by_scene[scene_name])
@@ -1737,10 +1770,10 @@ def build_project(
             "tile": [column, row],
             "uv": [column / atlas_columns, row / rows, 1.0 / atlas_columns, 1.0 / rows],
             "transport_uv": [
-                column / atlas_columns,
-                row / rows,
-                1.0 / (atlas_columns * TRANSPORT_PLANES),
-                1.0 / rows,
+                transport_column / transport_columns,
+                transport_row / transport_rows,
+                1.0 / (transport_columns * TRANSPORT_PLANES),
+                1.0 / transport_rows,
             ],
             "calibration": discovery.scene_calibration.get(
                 scene_name.split("::", 1)[0], discovery.calibration
@@ -1794,8 +1827,8 @@ def build_project(
             "texture": "scenelight_runtime/transport_atlas.png",
             "grid_size": list(grid_size),
             "planes": TRANSPORT_PLANES,
-            "columns": atlas_columns,
-            "rows": rows,
+            "columns": transport_columns,
+            "rows": transport_rows,
             "subject_y_max": TRANSPORT_SUBJECT_Y_MAX,
             "character_height": TRANSPORT_CHARACTER_HEIGHT,
             "chroma_range": CHROMA_RANGE,
@@ -1815,7 +1848,7 @@ def build_project(
         1,
         min(16, workers or (os.cpu_count() or 1), len(discovery.sprites) or 1),
     )
-    forms = _build_form_maps(discovery, output_root, form_worker_count)
+    forms = _build_form_maps(discovery, output_root, form_worker_count, installed_forms)
     report = {
         "sdk": "SceneLight",
         "manifest_version": RUNTIME_MANIFEST_VERSION,

@@ -1,6 +1,7 @@
 """Interrupted captures retain usable batches without trusting damaged output."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,115 @@ from PIL import Image
 
 import scenelight.capture as capture
 from scenelight.project import ProjectDiscovery
+
+
+@pytest.mark.parametrize("stage", ["form", "form.start"])
+def test_supervisor_waits_for_a_completed_batch_not_a_progress_counter(
+    tmp_path, monkeypatch, stage
+):
+    """A busy worker must survive even when its progress passes the form limit."""
+    (tmp_path / "game").mkdir()
+    request = tmp_path / "request.json"
+    request.write_text("{}")
+    result = tmp_path / "result.json"
+    progress = tmp_path / "progress.json"
+    child = tmp_path / "worker.py"
+    child.write_text(
+        "import json, os, pathlib, time\n"
+        f"root = pathlib.Path({str(tmp_path)!r})\n"
+        "assert os.environ['SCENELIGHT_CAPTURE_BATCH_LIMIT'] == '2'\n"
+        f"(root/'progress.json').write_text(json.dumps({{'stage': {stage!r}, "
+        "'current': 3, 'total': 4}))\n"
+        "time.sleep(0.4)\n"
+        "(root/'finished-form').write_text('saved')\n"
+        "(root/'result.tmp').write_text(json.dumps({'capture_complete': False}))\n"
+        "os.replace(str(root/'result.tmp'), str(root/'result.json'))\n"
+    )
+    monkeypatch.setattr(
+        capture, "renpy_runtime_command", lambda *_a, **_k: [sys.executable, str(child)]
+    )
+    monkeypatch.setattr(capture, "_managed_runtime_pids", lambda *_a: set())
+    monkeypatch.setattr(capture, "_descendant_pids", lambda *_a: set())
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    assert (
+        capture._run_capture_request(
+            discovery,
+            Path(sys.executable),
+            request_path=request,
+            result_path=result,
+            native_runtime=False,
+            timeout_seconds=5,
+            purpose="test cooperative batches",
+            progress_path=progress,
+            checkpoint_root=tmp_path,
+            checkpoint_limit=2,
+            show_progress=False,
+        )
+        is False
+    )
+    assert (tmp_path / "finished-form").read_text() == "saved"
+
+
+def test_partial_renderer_failure_does_not_blacklist_sprites_for_next_backend(tmp_path):
+    request, result = tmp_path / "request.json", tmp_path / "result.json"
+    request.write_text("{}")
+    result.write_text(
+        json.dumps(
+            {
+                "capture_complete": False,
+                "sprite_failures": {
+                    "hero idle": "Exception: SceneLight character capture requires a GPU renderer",
+                    "hero missing": "Missing image",
+                },
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="capture backend"):
+        capture._retain_batch_failures(request, result)
+    assert json.loads(request.read_text()) == {}
+
+
+def test_clean_batch_of_failed_forms_keeps_errors_and_makes_progress(tmp_path, monkeypatch):
+    (tmp_path / "game").mkdir()
+    request = tmp_path / "request.json"
+    request.write_text("{}")
+    result = tmp_path / "result.json"
+    calls = []
+
+    def batch(*_args, **_kwargs):
+        calls.append(json.loads(request.read_text()))
+        if len(calls) == 1:
+            result.write_text(
+                json.dumps(
+                    {
+                        "capture_complete": False,
+                        "sprite_failures": {"hero wings": "Missing image: wings.png"},
+                    }
+                )
+            )
+            return False
+        assert calls[-1]["completed_form_failures"] == {
+            "hero wings": "Missing image: wings.png",
+        }
+        assert "skip_forms" not in calls[-1]
+        return True
+
+    monkeypatch.setattr(capture, "_run_capture_request", batch)
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+    capture._run_capture_request_resumable(
+        discovery,
+        Path(sys.executable),
+        request_path=request,
+        result_path=result,
+        native_runtime=False,
+        timeout_seconds=5,
+        purpose="capture",
+        progress_path=tmp_path / "progress.json",
+        composite_job_root=tmp_path / "composites",
+        renderer=None,
+        capture_root=tmp_path,
+    )
+    assert len(calls) == 2
 
 
 def test_parallel_restart_keeps_completed_shards_when_worker_count_changes(
@@ -303,7 +413,7 @@ def test_a_crash_without_progress_still_stops_instead_of_spinning(tmp_path, monk
     assert "skip_forms" not in json.loads(request.read_text(encoding="utf-8"))
 
 
-def test_review_keeps_recorded_skips_for_the_next_renderer(tmp_path, monkeypatch):
+def test_review_retries_crashed_forms_with_the_next_renderer(tmp_path, monkeypatch):
     project = tmp_path / "proj"
     (project / "game").mkdir(parents=True)
     discovery = ProjectDiscovery(project, project / "game", {}, {}, [])
@@ -326,7 +436,55 @@ def test_review_keeps_recorded_skips_for_the_next_renderer(tmp_path, monkeypatch
     with pytest.raises(RuntimeError):
         capture.capture_runtime_review(discovery, tmp_path / "renpy-gl2.exe", renderer="gl2")
 
-    assert requests[-1]["skip_forms"] == ["andres"]
+    assert "skip_forms" not in requests[-1]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the renderer stopped while capturing this form",
+        "TypeError: load() got an unexpected keyword argument 'directory'",
+        "the capture file was not written",
+    ],
+)
+def test_backend_failures_are_retried_without_discarding_completed_forms(
+    tmp_path, monkeypatch, reason
+):
+    (tmp_path / "game").mkdir()
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {"skip_forms": ["hero wings"], "completed_form_failures": {"hero wings": reason}}
+        )
+    )
+    result = tmp_path / "result.json"
+    checkpoint = tmp_path / "sprite_healthy.png.surface-checkpoint"
+    checkpoint.write_text("raw")
+
+    def run(*_args, **_kwargs):
+        payload = json.loads(request.read_text())
+        assert "skip_forms" not in payload
+        assert "completed_form_failures" not in payload
+        result.write_text(json.dumps({"sprites": {}, "errors": ["sprite hero wings: " + reason]}))
+        return True
+
+    monkeypatch.setattr(capture, "_run_capture_request", run)
+    with pytest.raises(RuntimeError, match="Another compatible renderer"):
+        _resume(tmp_path, ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, []))
+    assert checkpoint.read_text() == "raw"
+
+
+def test_missing_game_file_can_be_reported_without_rejecting_the_backend():
+    capture._require_healthy_capture_backend(
+        {"errors": ["sprite hero wings: Couldn't find file 'wings.png'."]}
+    )
+
+
+@pytest.mark.parametrize(
+    "reason", ["TypeError: invalid outfit value", "AttributeError: missing pose"]
+)
+def test_an_error_in_one_authored_asset_does_not_reject_the_backend(reason):
+    capture._require_healthy_capture_backend({"errors": ["sprite hero wings: " + reason]})
 
 
 def test_review_does_not_retry_sprites_with_the_software_renderer(tmp_path, monkeypatch):
@@ -357,10 +515,10 @@ def test_review_does_not_retry_sprites_with_the_software_renderer(tmp_path, monk
     monkeypatch.setattr(capture, "_paths_exist", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(capture, "_write_capture_result", lambda *_a, **_k: None)
 
-    result = capture.capture_runtime_review(discovery, tmp_path / "renpy.exe", renderer=None)
+    with pytest.raises(RuntimeError, match="capture backend failed"):
+        capture.capture_runtime_review(discovery, tmp_path / "renpy.exe", renderer=None)
 
     assert calls == [None]
-    assert result.sprites == {}
 
 
 def test_parallel_merge_keeps_worker_scene_captures() -> None:
@@ -471,6 +629,17 @@ def test_capture_trace_tail_keeps_the_last_steps_and_their_paths(tmp_path):
     assert "images/a.png" in lines[0]
     assert lines[1] == "{not json"
     assert capture._capture_trace_tail(None) == ""
+
+
+def test_capture_trace_cannot_blame_a_form_from_a_previous_process(tmp_path):
+    path = tmp_path / "capture_attempts.jsonl"
+    older = {"attempt_id": "first", "stage": "attempt", "form": "earlier form"}
+    current = {"attempt_id": "second", "stage": "matting_pass", "form": "current form"}
+    path.write_text(json.dumps(older) + "\n")
+    assert capture._capture_trace_tail(tmp_path, attempt="second") == ""
+    with path.open("a") as stream:
+        stream.write(json.dumps(current) + "\n{partial")
+    assert json.loads(capture._capture_trace_tail(tmp_path, attempt="second")) == current
 
 
 def test_progress_names_the_form_that_is_still_rendering():

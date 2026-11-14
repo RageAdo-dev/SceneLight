@@ -742,7 +742,7 @@ def test_dependency_state_reports_every_exact_missing_version_for_new_environmen
     assert statuses[0] == ("NumPy 2.2.6", False)
     assert len(statuses) == len(set(PREVIEW_DEPENDENCIES.values()))
     assert state.verified_count == 0
-    assert state.verification_summary == "0 of 8 components checked"
+    assert state.verification_summary == "0 of 9 components checked"
 
 
 def test_verification_summary_matches_rows_including_runtime_and_optional_cuda(
@@ -753,7 +753,7 @@ def test_verification_summary_matches_rows_including_runtime_and_optional_cuda(
     python = tmp_path / "python.exe"
     python.touch()
     monkeypatch.setattr(setup_gui, "_missing_modules", lambda *args: [])
-    for cuda, expected in ((False, 7), (True, 8)):
+    for cuda, expected in ((False, 8), (True, 9)):
         state = dependency_state(include_preview=False, include_cuda=cuda, python_executable=python)
         assert len(state.component_statuses) == expected
         assert all(ready for _, ready in state.component_statuses)
@@ -771,8 +771,8 @@ def test_missing_preview_binding_marks_shared_package_once(tmp_path, monkeypatch
     state = dependency_state(include_preview=True, python_executable=python)
     assert state.required.count(qt) == 1
     assert state.missing == (qt,)
-    assert state.verified_count == 7
-    assert state.verification_summary == "7 of 8 components checked"
+    assert state.verified_count == 8
+    assert state.verification_summary == "8 of 9 components checked"
     assert dict(state.component_statuses)["PySide6-Essentials 6.11.2"] is False
 
 
@@ -817,6 +817,16 @@ def test_native_access_violation_is_not_mislabeled_as_a_progress_line() -> None:
     assert title == "The game renderer stopped unexpectedly"
     assert "preparing character forms" in message
     assert "form 1/10731" not in message
+
+
+def test_review_crash_after_a_form_started_is_reported_as_capture_failure():
+    title, message = describe_operation_failure(
+        "SceneLight tried every compatible graphics backend bundled with the game and any "
+        "selected SDK, but the character capture stopped partway through on each one.\n"
+        "Ren'Py could not inventory character families (exit 3221225477 while capturing 'hero')."
+    )
+    assert title == "Character preview capture stopped"
+    assert "export" in message
 
 
 def test_component_build_failure_names_the_package_and_the_packaged_app() -> None:
@@ -1379,6 +1389,7 @@ def test_cancel_during_process_creation_is_not_lost(monkeypatch, tmp_path, close
         _running=False,
         _process=None,
         _cancel_requested=event,
+        _reset_progress_panel=noop,
         _refresh_project_state=noop,
         operation_var=widget,
         progress_frame=widget,

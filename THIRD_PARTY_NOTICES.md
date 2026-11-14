@@ -62,3 +62,8 @@ Original DDLC assets, game files and reusable character maps are not bundled.
 SceneLight reads the user's project and generates its runtime data locally.
 Users and authors are responsible for the rights to their project content.
 DDLC projects must follow [Team Salvato's IP Guidelines](https://teamsalvato.com/ip-guidelines).
+
+## Watchdog
+
+Setup uses Watchdog to detect artwork saves. Its Apache 2.0 license and notices
+ship in the bundled Python runtime under `watchdog-7.1.0.dist-info/licenses/`.

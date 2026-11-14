@@ -168,6 +168,7 @@ SHADERS = {
             uniform float u_sc_sharpness;
             uniform float u_sc_has_form;
             uniform vec2 u_sc_form_center;
+            uniform vec2 u_sc_vertex_form_center;
             uniform vec3 u_sc_group_anchor;
             uniform vec4 u_sc_snapshot_rect;
             uniform float u_sc_use_snapshot_rect;
@@ -243,7 +244,7 @@ SHADERS = {
                 -gl_Position.y * 0.5 + 0.5
             );
             vec4 sc_center_position = u_transform * vec4(
-                u_model_size * u_sc_form_center,
+                u_model_size * u_sc_vertex_form_center,
                 0.0,
                 1.0
             );
@@ -254,7 +255,7 @@ SHADERS = {
             vec2 sc_snapshot_screen = u_sc_snapshot_rect.xy
                 + a_tex_coord * u_sc_snapshot_rect.zw;
             vec2 sc_snapshot_center = u_sc_snapshot_rect.xy
-                + u_sc_form_center * u_sc_snapshot_rect.zw;
+                + u_sc_vertex_form_center * u_sc_snapshot_rect.zw;
             v_sc_screen = mix(
                 sc_live_screen,
                 sc_snapshot_screen,

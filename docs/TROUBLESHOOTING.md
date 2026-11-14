@@ -57,7 +57,9 @@ Preview defaults or permanent project rules.
 
 ## Installation or update is taking a long time
 
-The progress percentage belongs to the named stage. Reaching 100% for sprite maps
+The row below the stage headings shows the steps in the active stage. Select any
+heading to see which steps ran, which were skipped, and what Setup is doing now.
+The percentage shows progress on the current task. Reaching 100% for sprite maps
 can be followed by cache saving, runtime transfer, verification and cleanup.
 Wait for the final completion message. The Cancel button stops the operation;
 it does not finish the update.
@@ -77,6 +79,28 @@ continue. Activity and the report retain the asset names and reasons. Repair the
 source artwork and run Scan/Update to reconsider it. A write failure or a renderer
 that cannot initialize needs attention; it is not treated as missing artwork.
 
+## An update was interrupted
+
+Reopen SceneLight and select the same game. Setup checks the interrupted update
+and restores the previous installation where needed. Recovery can take time on
+large projects. Wait for it to finish before choosing **Update SceneLight** again.
+
+If Setup reports changed or missing installation files, open **Review existing
+SceneLight files**. Do not delete the runtime folder or recovery files by hand.
+If recovery fails or stops making progress, export the Activity report before
+trying again.
+
+## Windows blocks the download
+
+The current Windows release is unsigned. A Microsoft Defender detection has been
+reported for the 1.1.0 ZIP; it has not been confirmed as a false positive.
+An unknown-publisher warning and an antivirus detection are different issues.
+
+If your antivirus detects a threat, leave it quarantined. Include the detection
+name, affected filename and SceneLight version in a bug report. Microsoft accepts
+[software submissions for review](https://www.microsoft.com/en-us/wdsi/filesubmission).
+Do not disable protection or add an exclusion to run SceneLight.
+
 ## Bug reports
 
 Include the SceneLight package/build, Ren’Py version, GPU/driver, steps to reproduce,
@@ -87,3 +111,5 @@ log ending may omit the expensive earlier phases.
 
 [Open a bug report](https://github.com/RageAdo-dev/SceneLight/issues/new?template=bug_report.yml).
 Reports are saved locally; nothing is uploaded automatically.
+SceneLight redacts user-directory names and credentials from its diagnostic
+exports. Review screenshots and attachments before sharing them.

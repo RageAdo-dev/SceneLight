@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import scenelight.capture as capture
+from scenelight import diagnostics
 from scenelight.project import ProjectDiscovery
 
 
@@ -156,6 +157,8 @@ def test_parallel_lock_fallback_keeps_successes_and_resumes_failed_shard(
 
 
 def test_non_lock_worker_error_is_not_hidden_by_fallback(tmp_path, monkeypatch, capsys):
+    session = diagnostics.Session("setup", root=tmp_path / "logs")
+    monkeypatch.setattr(diagnostics, "_session", session)
     discovery = discovery_at(tmp_path / "project")
     cache = discovery.project_root / ".scenelight_cache"
     cache.mkdir()
@@ -187,6 +190,10 @@ def test_non_lock_worker_error_is_not_hidden_by_fallback(tmp_path, monkeypatch, 
             renderer=None,
         )
     assert sorted(calls) == ["w1", "w1", "w2"]
+    state = json.loads(next(session.path.glob("capture-state-*.json")).read_text())["workers"]
+    assert state["1"]["status"] == "finished" and "batch_error" not in state["1"]
+    assert state["2"]["batch_error"] == "invalid sprite data"
+    assert [state[i]["assigned"] for i in ("1", "2")] == [1, 1]
     assert (cache / "captured/parallel/worker-1-complete.json").is_file()
     output = capsys.readouterr().out
     assert "one at a time" in output

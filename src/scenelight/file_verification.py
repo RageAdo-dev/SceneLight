@@ -68,7 +68,7 @@ if os.name == "nt":
     _cacheable_volumes: dict[int, bool] = {}
 
 
-def _open(path: Path, *, exclusive: bool = False):
+def _open(path: Path, *, exclusive: bool = False, share_writes: bool = False):
     if os.name != "nt":
         return path.open("rb", buffering=0)
     # Deny concurrent writers while observing the identity or reading bytes.
@@ -80,7 +80,7 @@ def _open(path: Path, *, exclusive: bool = False):
     handle = _kernel.CreateFileW(
         name,
         0x80000000,
-        0 if exclusive else 0x1 | 0x4,
+        0 if exclusive else (0x1 | 0x4 | (0x2 if share_writes else 0)),
         None,
         3,
         0x80,
@@ -96,6 +96,11 @@ def _open(path: Path, *, exclusive: bool = False):
         _kernel.CloseHandle(handle)
         raise
     return os.fdopen(descriptor, "rb", buffering=0)
+
+
+def open_for_preview(path: Path):
+    """Let editors save or atomically replace the artwork while preview reads it."""
+    return _open(path, share_writes=True)
 
 
 def _usn_from_record(data: bytes) -> int | None:
@@ -198,8 +203,11 @@ def verified_digest(path: Path, expected: str | None = None, stamp: str | None =
 
 
 def bounded_file_work(function, items, *, workers: int | None = None):
-    """Keep at most eight file jobs queued, including on very large mods."""
+    """Limit pending work to two jobs per worker, including on very large mods."""
     count = min(4, max(1, os.cpu_count() or 1)) if workers is None else max(1, workers)
+    if count == 1:
+        yield from map(function, items)
+        return
     iterator = iter(items)
     with ThreadPoolExecutor(max_workers=count, thread_name_prefix="SceneLight-files") as pool:
         pending = deque()

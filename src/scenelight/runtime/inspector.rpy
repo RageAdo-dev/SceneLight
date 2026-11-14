@@ -92,6 +92,13 @@ init 1001 python:
                     report["note"] = ("Transition snapshot: last drawn values can differ from current rules."
                         if report["frozen_transition"] else "External color grading detected on this sprite."
                         if report["authored_color_grade"] else "Exact form map" if report["mapped_form"] else "Generic form map (update this sprite's analysis)")
+                    edit_forms = getattr(renpy.display, "_scenelight_edit_forms", None)
+                    if edit_forms and not report["frozen_transition"]:
+                        edit_state = edit_forms.form_status(sprite.form_key)
+                        if edit_state:
+                            report["live_lighting"] = edit_state
+                            report["mapped_form"] = edit_state == "Lighting ready"
+                            report["note"] = edit_state
                     if not scene or not _SCENELIGHT_SHADER_AVAILABLE:
                         report["effective_enabled"] = False
                         report["note"] = "Lighting unavailable: no recognized background or supported shader."

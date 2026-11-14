@@ -23,11 +23,19 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, diagnostics
+from .artwork_preview import ArtworkPreview
 from .branding import ICON_PATH, ICON_PNG, set_process_identity
 from .compatibility import RENPY_VERSION, cached_renpy_executable, compatibility_root
 from .cuda_detection import CudaSupport, detect_cuda_support
 from .developer import DeveloperStatus, developer_status
-from .project_watch import ProjectWatch, source_metadata
+from .project_watch import (
+    LiveSources,
+    ProjectWatch,
+    live_updates_enabled,
+    notify_playtest,
+    save_live_updates_enabled,
+    source_metadata,
+)
 from .release import (
     ReleaseRelation,
     classify_release,
@@ -46,6 +54,7 @@ from .setup_dependencies import _missing_modules as _missing_modules
 from .setup_progress import _PROGRESS_PATTERNS as _PROGRESS_PATTERNS
 from .setup_progress import COMPONENT_OUTPUT_LABELS as COMPONENT_OUTPUT_LABELS
 from .setup_progress import ComponentProgress as ComponentProgress
+from .setup_progress import OperationProgress
 from .setup_progress import ProgressUpdate as ProgressUpdate
 from .setup_progress import _component_output_name as _component_output_name
 from .setup_progress import component_command_status as component_command_status
@@ -55,12 +64,14 @@ from .setup_progress import parse_component_progress as parse_component_progress
 from .setup_progress import parse_progress as parse_progress
 from .setup_progress import parse_runtime_progress as parse_runtime_progress
 from .setup_progress import progress_moves_forward as progress_moves_forward
+from .setup_progress_view import CaptureWorkers, StageRibbon
 from .setup_selection import character_review_candidates as character_review_candidates
 from .setup_selection import character_review_mode as character_review_mode
 from .setup_selection import character_review_required as character_review_required
 from .setup_selection import character_review_selected_tags as character_review_selected_tags
 from .setup_selection import save_character_selection as save_character_selection
 from .setup_theme import soft_controls
+from .setup_timing import previous_runs
 from .sidecar import (
     find_native_executable,
     managed_project_root,
@@ -174,6 +185,15 @@ class ProjectInspection:
     def release_replacement_available(self) -> bool:
         relation = self.preferred_release_relation
         return bool(relation and relation.replacement_available)
+
+    @property
+    def live_update_ready(self) -> bool:
+        return (
+            self.direct_install_ready
+            and self.error is None
+            and not self.managed_install_needs_attention
+            and not self.release_replacement_available
+        )
 
     @property
     def release_update_operation(self) -> str | None:
@@ -455,11 +475,18 @@ def describe_operation_failure(output: str) -> tuple[str, str]:
             "The selected game or mod was not changed.",
         )
     if "tried every compatible graphics backend" in lowered:
+        if "character capture stopped partway" in lowered and (
+            "while capturing " in lowered or '"stage": "attempt"' in lowered
+        ):
+            return (
+                "Character preview capture stopped",
+                "Ren'Py reached character capture. Open Activity and export this scan's report "
+                "to see the last form and capture step recorded for each attempt.",
+            )
         return (
             "No compatible renderer worked",
             "SceneLight automatically tried every graphics backend bundled with this game and "
-            "any selected SDK, but character capture stopped partway through on each one. The "
-            "activity log lists each attempted backend. The selected game or mod was not changed.",
+            "any selected SDK. Open Activity and export this session's report for the results.",
         )
     if "number of texture units: 0" in lowered or "can't find a workable environment" in lowered:
         return (
@@ -802,7 +829,7 @@ def installed_managed_version(project_root: Path) -> str | None:
 
 
 def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspection:
-    """Inspect a project and any prior SceneLight install without changing it."""
+    """Recover an interrupted update before comparing installed files to their manifest."""
 
     try:
         selection = inspect_project_path(value)
@@ -816,12 +843,15 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
 
     project_root = selection.root
     try:
-        from .developer_transaction import JOURNAL, recover
+        from .developer_transaction import JOURNAL as developer_journal
+        from .developer_transaction import recover
+        from .updates import JOURNAL as update_journal
+        from .updates import operation_lock, recover_update
 
-        if (project_root / JOURNAL).exists():
-            from .updates import operation_lock
-
+        if (project_root / update_journal).exists() or (project_root / developer_journal).exists():
             with operation_lock(project_root):
+                diagnostics.event("setup.recovery", "Checking an interrupted SceneLight update")
+                recover_update(project_root)
                 recover(project_root)
         reserved_namespace = (project_root / "game" / "scenelight_runtime").exists()
         managed_root = managed_project_root(project_root)
@@ -832,6 +862,7 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
             installed_managed_release(project_root) if managed_install_present else (None, None)
         )
     except (OSError, RuntimeError, ValueError) as caught:
+        diagnostics.event("setup.inspection", str(caught), level="error")
         return ProjectInspection(selection, error=str(caught))
     try:
         snapshot = source_metadata(project_root)
@@ -851,6 +882,18 @@ def inspect_project_installation(value: str | os.PathLike[str]) -> ProjectInspec
     error: str | None = None
     try:
         status = developer_status(project_root)
+        if status.installed and not status.clean:
+            diagnostics.event(
+                "setup.inspection",
+                "Installed SceneLight files need review",
+                level="warning",
+                missing=len(status.missing),
+                modified=len(status.modified),
+                unowned=len(status.unowned),
+                missing_examples=status.missing[:5],
+                modified_examples=status.modified[:5],
+                unowned_examples=status.unowned[:5],
+            )
     except (OSError, RuntimeError, ValueError) as caught:
         error = str(caught)
     return ProjectInspection(
@@ -975,14 +1018,15 @@ class SceneLightSetup(tk.Tk):
         self._project_generation = 0
         self._source_watch = ProjectWatch()
         self._watch_busy = False
-        self._progress_phase: str | None = None
-        self._progress_started_at = 0.0
-        self._progress_origin = 0
-        self._progress_current = 0
-        self._progress_total = 0
-        self._latest_progress = None
-        self._progress_indeterminate = False
-        self._last_elapsed_refresh = 0.0
+        self.live_edit_var = tk.BooleanVar(value=False)
+        self._live_sources = None
+        self._artwork_preview: ArtworkPreview | None = None
+        self._live_project: Path | None = None
+        self._live_reload_pending = None
+        self.live_edit_check = None
+        self._live_progress: OperationProgress | None = None
+        self._last_run_text = ""
+        self._last_progress_view = None
         self._dependency_state: DependencyState | None = None
         self._dependency_key: tuple[object, ...] | None = None
         self._options_window: tk.Toplevel | None = None
@@ -1254,11 +1298,12 @@ class SceneLightSetup(tk.Tk):
         shell.grid_columnconfigure(0, weight=1)
         shell.grid_rowconfigure(0, weight=1)
 
-        flow = tk.Frame(shell, background="#0d1014", padx=48, pady=20)
+        flow = self.setup_flow = tk.Frame(shell, background="#0d1014", padx=48, pady=20)
         flow.grid(row=0, column=0, sticky="nsew")
         flow.grid_columnconfigure(0, weight=1)
 
         top_row = tk.Frame(flow, background="#0d1014")
+        self.setup_toolbar = top_row
         top_row.grid(row=0, column=0, sticky="ew")
         top_row.grid_columnconfigure(0, weight=1)
         tk.Label(
@@ -1309,6 +1354,7 @@ class SceneLightSetup(tk.Tk):
             pady=6,
         )
         steps.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        self.workflow_steps = steps
         for column, text in enumerate(("1  Choose", "2  Scan", "3  Review", "4  Install")):
             steps.grid_columnconfigure(column, weight=1, uniform="steps")
             label = tk.Label(
@@ -1329,6 +1375,7 @@ class SceneLightSetup(tk.Tk):
             padx=16,
             pady=10,
         )
+        self.selection_card = selection
         selection.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         selection.grid_columnconfigure(0, weight=1)
         tk.Label(
@@ -1445,28 +1492,112 @@ class SceneLightSetup(tk.Tk):
         self.manage_button.grid(row=9, column=0, sticky="w", pady=(7, 0))
         self.manage_button.grid_remove()
 
-        self.progress_frame = tk.Frame(flow, background="#0d1014")
-        self.progress_frame.grid(row=10, column=0, sticky="ew", pady=(9, 0))
+        self.progress_frame = tk.Frame(
+            flow,
+            background="#141a20",
+            padx=14,
+            pady=5,
+            highlightbackground="#283641",
+            highlightthickness=1,
+        )
+        self.progress_frame.grid(row=10, column=0, sticky="ew", pady=(4, 0))
         self.progress_frame.columnconfigure(0, weight=1)
+        self.stage_ribbon = StageRibbon(self.progress_frame)
+        self.stage_ribbon.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 3))
+        self.stage_ribbon.grid_remove()
+        self.progress_heading = tk.Label(
+            self.progress_frame,
+            textvariable=self.operation_var,
+            anchor="w",
+            justify="left",
+            width=1,
+            background="#141a20",
+            foreground="#f1f6f8",
+            font=("Segoe UI Semibold", 16),
+        )
+        self.progress_heading.grid(row=1, column=0, sticky="ew")
+        self.progress_percent = tk.Label(
+            self.progress_frame,
+            background="#141a20",
+            foreground="#91e4fc",
+            font=("Segoe UI Semibold", 23),
+            anchor="e",
+        )
+        self.progress_percent.grid(row=1, column=1, rowspan=2, sticky="e", padx=(8, 0))
+        self.progress_count = tk.Label(
+            self.progress_frame,
+            background="#141a20",
+            foreground="#b5c7d5",
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        self.progress_count.grid(row=2, column=0, sticky="w")
         self.progress = ttk.Progressbar(
             self.progress_frame, mode="indeterminate", style="Scene.Horizontal.TProgressbar"
         )
-        self.progress.grid(row=0, column=0, sticky="ew")
-        self.cancel_operation_button = ttk.Button(
+        self.progress.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 4))
+        self.progress_detail = tk.Label(
             self.progress_frame,
+            background="#141a20",
+            foreground="#d6e1eb",
+            font=("Segoe UI", 9),
+            anchor="w",
+            justify="left",
+            width=1,
+        )
+        self.progress_detail.grid(row=4, column=0, columnspan=2, sticky="ew")
+        self.worker_strip = CaptureWorkers(self.progress_frame)
+        self.worker_strip.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(3, 4))
+        self.worker_strip.grid_remove()
+        self.progress_receipt = tk.Label(
+            self.progress_frame,
+            background="#141a20",
+            foreground="#91cfb0",
+            font=("Segoe UI", 9),
+            anchor="w",
+            justify="left",
+            width=1,
+        )
+        self.progress_receipt.grid(row=6, column=0, columnspan=2, sticky="ew")
+        self.progress_receipt.grid_remove()
+        self.progress_clock = tk.Label(
+            self.progress_frame,
+            background="#141a20",
+            foreground="#adc0d0",
+            font=("Segoe UI", 9),
+            anchor="w",
+            width=1,
+        )
+        self.progress_clock.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(2, 5))
+        actions = tk.Frame(self.progress_frame, background="#141a20")
+        actions.grid(row=8, column=0, columnspan=2, sticky="ew")
+        actions.columnconfigure(1, weight=1)
+        self.progress_eta = tk.Label(
+            actions,
+            background="#141a20",
+            foreground="#d0e5ef",
+            font=("Segoe UI Semibold", 10),
+            width=1,
+        )
+        self.progress_eta.grid(row=0, column=1, sticky="ew", padx=4)
+        self.progress_eta.grid_remove()
+        ttk.Button(
+            actions, text="View activity", command=self._toggle_log, style="Secondary.TButton"
+        ).grid(row=0, column=0, sticky="w")
+        self.cancel_operation_button = ttk.Button(
+            actions,
             text="Cancel",
             command=self._cancel_operation,
             style="Cancel.TButton",
         )
-        self.cancel_operation_button.grid(row=0, column=1, sticky="e", padx=(12, 0))
-        ttk.Label(
-            self.progress_frame,
-            textvariable=self.operation_var,
-            style="FlowBody.TLabel",
-            wraplength=440,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7, 0))
+        self.cancel_operation_button.grid(row=0, column=2, sticky="e", padx=(5, 0))
+        self.cancel_operation_button.grid_remove()
         self.progress_frame.grid_remove()
+        self.progress_heading.bind(
+            "<Configure>", lambda e: self.progress_heading.configure(wraplength=max(1, e.width - 4))
+        )
+        for label in (self.progress_detail, self.progress_clock, self.progress_receipt):
+            label.bind("<Configure>", lambda e: e.widget.configure(wraplength=max(1, e.width - 4)))
         flow.bind(
             "<Configure>",
             lambda event: self.project_path_label.configure(wraplength=max(220, event.width - 190)),
@@ -1627,6 +1758,14 @@ class SceneLightSetup(tk.Tk):
                 variable=self.inspector_var,
                 style="Dark.TCheckbutton",
             )
+            self.live_edit_check = ttk.Checkbutton(
+                inspector_card,
+                text="Live updates while editing",
+                variable=self.live_edit_var,
+                command=self._toggle_live_edit,
+                style="Dark.TCheckbutton",
+            )
+            self.live_edit_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
             self.inspector_check.grid(row=0, column=0, sticky="w")
             self.inspector_apply = ttk.Button(
                 inspector_card,
@@ -1718,6 +1857,7 @@ class SceneLightSetup(tk.Tk):
                 self.sdk_entry = None
                 self.sdk_browse = None
                 self.cuda_check = None
+                self.live_edit_check = None
                 self.inspector_check = None
                 self.inspector_apply = None
                 self._inspector_selection_key = None
@@ -1842,6 +1982,8 @@ class SceneLightSetup(tk.Tk):
             self.sdk_var.set(selected)
 
     def _project_changed(self, *_: object) -> None:
+        self._sync_live_project(None)
+        self._last_run_text = ""
         self._close_character_review_window()
         self._scan_ok = False
         self._review_completed_for = None
@@ -1919,10 +2061,12 @@ class SceneLightSetup(tk.Tk):
             return
 
         self._project_checking = True
-        self.operation_var.set("Checking the selected game…")
-        self.progress.configure(mode="indeterminate", maximum=100, value=0)
-        self.progress.start(12)
-        self.progress_frame.grid()
+        if not self._running and not self._last_run_text:
+            self._reset_progress_panel()
+            self.operation_var.set("Checking the selected game…")
+            self.progress.configure(mode="indeterminate", maximum=100, value=0)
+            self.progress.start(12)
+            self.progress_frame.grid()
         self._refresh_project_state()
 
         def worker() -> None:
@@ -1954,11 +2098,71 @@ class SceneLightSetup(tk.Tk):
         self._source_watch = ProjectWatch(inspection.source_metadata)
         self._project_inspection = inspection
         self._project_inspection_value = value
-        self.progress.stop()
+        self._sync_live_project(
+            inspection.selection.root
+            if self.developer_mode and inspection.live_update_ready
+            else None
+        )
         if not self._running:
+            self.progress.stop()
             self.progress_frame.grid_remove()
             self.operation_var.set("Ready")
         self._refresh_project_state()
+        if (
+            self._live_sources is None
+            or self._running
+            or self._closing
+            or not self._dependency_state
+            or not self._dependency_state.ready
+        ):
+            return
+        if inspection.direct_refresh_required:
+            self._start_operation("refresh", self._command("refresh"))
+        elif self._live_reload_pending is self._live_sources:
+            self._live_reload_pending = None
+            try:
+                notify_playtest(inspection.selection.root)
+                if self._artwork_preview is not None:
+                    self._artwork_preview.project_updated()
+            except OSError as error:
+                self._append_log(f"[Lighting updated. Reload the playtest manually: {error}]\n")
+
+    def _sync_live_project(self, project: Path | None) -> None:
+        if project == self._live_project:
+            return
+        self._live_project = project
+        self._live_reload_pending = None
+        enabled = project is not None and live_updates_enabled(project)
+        self._watch_live_edits(enabled)
+
+    def _watch_live_edits(self, enabled: bool) -> None:
+        if self._artwork_preview is not None:
+            self._artwork_preview.stop()
+            self._artwork_preview = None
+        self.live_edit_var.set(enabled)
+        self._live_sources = LiveSources() if enabled else None
+        if enabled:
+            events = self._events
+            self._artwork_preview = ArtworkPreview(
+                self._live_project, lambda msg: events.put(("log", msg + "\n"))
+            )
+            self._artwork_preview.start()
+
+    def _set_live_edit(self, enabled: bool) -> None:
+        self._live_reload_pending = None
+        self._watch_live_edits(enabled)
+        if self._live_project is not None:
+            try:
+                save_live_updates_enabled(self._live_project, enabled)
+            except OSError as error:
+                self._append_log(
+                    f"[Could not save this project's live update preference: {error}]\n"
+                )
+
+    def _toggle_live_edit(self):
+        self._set_live_edit(self.live_edit_var.get())
+        if self._live_sources is not None:
+            self._begin_project_inspection()
 
     def _poll_project_sources(self) -> None:
         if self._destroying:
@@ -1974,18 +2178,19 @@ class SceneLightSetup(tk.Tk):
             root = inspection.selection.root
             generation = self._project_generation
             self._watch_busy = True
+            live = self._live_sources
 
             def worker():
                 try:
-                    snapshot = source_metadata(root)
-                except OSError:
+                    snapshot = live.snapshot(root) if live else source_metadata(root)
+                except (RuntimeError, OSError):
                     snapshot = None  # An editor may be replacing a file; retry next poll.
-                self._events.put(("project-sources", generation, snapshot))
+                self._events.put(("project-sources", generation, snapshot, live))
 
             threading.Thread(target=worker, name="scenelight-project-watch", daemon=True).start()
         self.after(5_000, self._poll_project_sources)
 
-    def _finish_project_sources(self, generation, snapshot) -> None:
+    def _finish_project_sources(self, generation, snapshot, live=None) -> None:
         self._watch_busy = False
         if (
             generation != self._project_generation
@@ -1994,14 +2199,16 @@ class SceneLightSetup(tk.Tk):
             or snapshot is None
         ):
             return
-        if not self._source_watch.observe(snapshot):
+        if live is not getattr(self, "_live_sources", None):
+            return
+        if not (live.watch if live else self._source_watch).observe(snapshot):
             return
         self._scan_ok = False
         self._review_completed_for = None
         self._character_review_pending_for = None
         self._last_scan_payload = {}
         self._close_character_review_window()
-        self.preview_var.set("Project files changed. Update SceneLight, then restart the game.")
+        self.preview_var.set("Project files changed. Checking installed lighting…")
         self._append_log("[Project files changed; checking the installed lighting data.]\n")
         self._begin_project_inspection()
 
@@ -2142,6 +2349,7 @@ class SceneLightSetup(tk.Tk):
         if self._running:
             return
         self._close_character_review_window()
+        self._sync_live_project(None)
         self.developer_mode = not self.developer_mode
         self._scan_ok = False
         self._review_completed_for = None
@@ -2151,7 +2359,7 @@ class SceneLightSetup(tk.Tk):
         self._attached = False
         self._last_launcher = None
         self.preview_var.set("Nothing has been scanned or changed.")
-        self._refresh_project_state()
+        self._begin_project_inspection()
 
     def _refresh_project_state(self) -> None:
         if self.mode_button is not None:
@@ -2185,6 +2393,17 @@ class SceneLightSetup(tk.Tk):
                 or inspection.unmanaged_namespace_present
             )
         )
+        if self.live_edit_check is not None:
+            self.live_edit_check.configure(
+                state="normal"
+                if (
+                    self.developer_mode
+                    and inspection is not None
+                    and inspection.live_update_ready
+                    and not self._running
+                )
+                else "disabled"
+            )
         if self.inspector_check is not None:
             self._refresh_inspector_option(selection, inspection, existing_issue)
         state = self._dependency_state
@@ -2261,7 +2480,7 @@ class SceneLightSetup(tk.Tk):
                 self.installation_status.configure(foreground="#f0b66d")
             elif inspection is not None and inspection.refresh_required:
                 self.installation_var.set(
-                    "Project files changed. Update SceneLight, then restart the game."
+                    "Project files changed. Update SceneLight to apply the new lighting."
                 )
                 self.installation_status.configure(foreground="#f0b66d")
             elif inspection is not None and inspection.direct_install_ready:
@@ -2311,6 +2530,30 @@ class SceneLightSetup(tk.Tk):
             self.installation_var.set("No existing SceneLight installation selected.")
             self.installation_status.configure(foreground="#7f8a96")
 
+        if (
+            self._last_run_text
+            and existing_install
+            and not existing_issue
+            and inspection
+            and not inspection.refresh_required
+            and not release_replacement_available
+        ):
+            self.installation_var.set(self._last_run_text)
+        if self._running:
+            self.setup_flow.configure(padx=20, pady=6)
+            self.setup_toolbar.grid_remove()
+            self.selection_card.grid_remove()
+            self.workflow_steps.grid_remove()
+            self.installation_status.grid_remove()
+            self.project_status.grid_remove()
+        else:
+            self.setup_flow.configure(padx=48, pady=20)
+            self.setup_toolbar.grid()
+            self.selection_card.grid()
+            self.workflow_steps.grid()
+            self.installation_status.grid()
+            self.project_status.grid()
+
         player_ready = self._attached or bool(
             inspection and inspection.managed_install_ready and not self._project_checking
         )
@@ -2343,7 +2586,10 @@ class SceneLightSetup(tk.Tk):
         self.project_browse.configure(state=editing_state)
         if selection.valid or self._project_checking:
             self.project_browse.configure(text="Change…")
-            self.state_row.grid()
+            if self._running:
+                self.state_row.grid_remove()
+            else:
+                self.state_row.grid()
             self.primary_button.grid()
         else:
             self.project_browse.configure(text="Choose…")
@@ -2417,7 +2663,7 @@ class SceneLightSetup(tk.Tk):
             if selection.valid or self._project_checking:
                 self.primary_button.grid()
         if self.manage_button is not None:
-            if existing_install or existing_issue:
+            if (existing_install or existing_issue) and not self._running:
                 self.manage_button.grid()
                 self.manage_button.configure(
                     state="disabled" if self._running or self._project_checking else "normal"
@@ -2429,7 +2675,11 @@ class SceneLightSetup(tk.Tk):
             primary_state = "disabled"
             title, subtitle, _status = operation_copy(self._active_operation or "")
             self.workflow_title_var.set(title)
-            self.workflow_subtitle_var.set(getattr(self, "_update_reason", "") or subtitle)
+            project = selection.root.name if selection.root else ""
+            reason = getattr(self, "_update_reason", "")
+            self.workflow_subtitle_var.set(
+                "  ·  ".join(filter(None, (project, reason))) or subtitle
+            )
         elif self._project_checking:
             label = "Inspecting selected game…"
             primary_state = "disabled"
@@ -3032,6 +3282,7 @@ class SceneLightSetup(tk.Tk):
         super().report_callback_exception(kind, error, trace)
 
     def _append_log(self, text: str, *, record: bool = True) -> None:
+        text = diagnostics.log_privacy.mask_text(text)
         self._log_lines.append(text)
         session = diagnostics.current_session()
         if session is not None and record:
@@ -3395,6 +3646,7 @@ class SceneLightSetup(tk.Tk):
         commands = normalize_command_batch(command)
         self._cancel_requested.clear()
         self._running = True
+        self._last_run_text = ""
         self._active_operation = operation
         self._update_reason = ""
         previous_session = diagnostics.current_session()
@@ -3409,14 +3661,12 @@ class SceneLightSetup(tk.Tk):
         if self.cancel_operation_button is not None:
             self.cancel_operation_button.configure(state="normal", text="Cancel")
             self.cancel_operation_button.grid()
-        self._progress_phase = None
-        self._progress_started_at = 0.0
-        self._progress_origin = 0
-        self._progress_current = 0
-        self._progress_total = 0
-        self._latest_progress = None
-        self._progress_indeterminate = False
-        self._last_elapsed_refresh = 0.0
+        self._live_progress = (
+            None
+            if operation in {"components", "preview-components"}
+            else OperationProgress(initial_status, time.monotonic(), operation=operation)
+        )
+        self._reset_progress_panel()
         if operation in {"components", "preview-components"}:
             self.progress.stop()
             self.progress.configure(mode="determinate", maximum=len(commands), value=0)
@@ -3425,6 +3675,8 @@ class SceneLightSetup(tk.Tk):
             self.progress.start(12)
         for item in commands:
             self._append_log("\n> " + subprocess.list2cmdline(item) + "\n")
+
+        project = self.project_var.get()
 
         def worker() -> None:
             output: list[str] = []
@@ -3438,6 +3690,13 @@ class SceneLightSetup(tk.Tk):
                 else 0
             )
             try:
+                if operation in {"scan", "install", "embed", "attach", "refresh"}:
+                    self._events.put(
+                        (
+                            "timing-history",
+                            previous_runs(diagnostics.logs_root(), project, operation),
+                        )
+                    )
                 return_code = 0
                 for command_index, item in enumerate(commands, start=1):
                     if self._cancel_requested.is_set():
@@ -3572,8 +3831,14 @@ class SceneLightSetup(tk.Tk):
                         "install",
                         "refresh",
                     }:
-                        self._update_reason = line.removeprefix("SceneLight update: ").strip()
-                        self.workflow_subtitle_var.set(self._update_reason)
+                        self._update_reason = diagnostics.log_privacy.mask_text(
+                            line.removeprefix("SceneLight update: ").strip()
+                        )
+                        self.workflow_subtitle_var.set(
+                            "  ·  ".join(
+                                filter(None, (self.project_name_var.get(), self._update_reason))
+                            )
+                        )
                     if self._active_operation in {"components", "preview-components"}:
                         component_update = parse_component_progress(
                             line,
@@ -3581,47 +3846,8 @@ class SceneLightSetup(tk.Tk):
                         )
                         if component_update is not None:
                             self._apply_component_progress(component_update)
-                    progress = parse_progress(line)
-                    if progress is not None and progress_moves_forward(
-                        progress,
-                        previous_phase=self._progress_phase,
-                        previous_current=self._progress_current,
-                        previous_total=self._progress_total,
-                    ):
-                        now = time.monotonic()
-                        if progress.phase != self._progress_phase or (
-                            progress.total != self._progress_total
-                            and not progress.phase.startswith("stage-")
-                        ):
-                            self._progress_phase = progress.phase
-                            self._progress_started_at = now
-                            self._progress_origin = progress.current
-                        self._progress_current = progress.current
-                        self._progress_total = progress.total
-                        self._latest_progress = progress
-                        elapsed = now - self._progress_started_at
-                        completed = max(0, progress.current - self._progress_origin)
-                        if progress.total == 0 and progress.item != "Complete":
-                            if not getattr(self, "_progress_indeterminate", False):
-                                self.progress.stop()
-                                self.progress.configure(mode="indeterminate", maximum=100, value=0)
-                                self.progress.start(20)
-                                self._progress_indeterminate = True
-                        else:
-                            self.progress.stop()
-                            self.progress.configure(
-                                mode="determinate",
-                                maximum=max(1, progress.total),
-                                value=progress.current if progress.total else 1,
-                            )
-                            self._progress_indeterminate = False
-                        self.operation_var.set(
-                            format_progress_status(
-                                progress,
-                                elapsed_seconds=elapsed,
-                                completed_since_start=completed,
-                            )
-                        )
+                    if self._live_progress is not None and not self._cancel_requested.is_set():
+                        self._live_progress.observe(line, time.monotonic())
                 elif event[0] == "done":
                     self._operation_done(
                         str(event[1]),
@@ -3647,10 +3873,13 @@ class SceneLightSetup(tk.Tk):
                         maximum=int(event[3]),
                         value=int(event[2]),
                     )
+                elif event[0] == "timing-history":
+                    if self._live_progress is not None:
+                        self._live_progress.run.history = event[1]
                 elif event[0] == "dependency-check":
                     self._refresh_dependency_display()
                 elif event[0] == "project-sources":
-                    self._finish_project_sources(event[1], event[2])
+                    self._finish_project_sources(*event[1:])
                 elif event[0] == "project-inspection" and isinstance(event[3], ProjectInspection):
                     self._finish_project_inspection(int(event[1]), str(event[2]), event[3])
                 elif event[0] == "cuda-detection" and isinstance(event[2], CudaSupport):
@@ -3660,26 +3889,80 @@ class SceneLightSetup(tk.Tk):
         self._refresh_elapsed_progress()
         self.after(10 if not self._events.empty() else 100, self._drain_events)
 
+    def _reset_progress_panel(self) -> None:
+        self._last_progress_view = None
+        self.worker_strip.grid_remove()
+        self.stage_ribbon.reset()
+        self.progress_count.grid_remove()
+        self.progress_percent.grid_remove()
+        self.progress_eta.grid_remove()
+        self.progress_detail.configure(foreground="#d6e1eb")
+        for label in (self.progress_clock, self.progress_detail, self.progress_receipt):
+            label.grid_remove()
+
     def _refresh_elapsed_progress(self) -> None:
-        progress = getattr(self, "_latest_progress", None)
-        if (
-            self._active_operation is None
-            or progress is None
-            or not progress.phase.startswith("stage-")
-            or progress.item == "Complete"
-        ):
+        live = self._live_progress
+        if live is None:
+            return
+        if self._cancel_requested.is_set():
+            self.progress_eta.grid_remove()
             return
         now = time.monotonic()
-        if now - getattr(self, "_last_elapsed_refresh", 0.0) < 0.5:
+        step = live.step
+        timing = live.timing(now)
+        detail = live.detail()
+        receipt = live.summary()
+        workers = live.worker_states()
+        stages = live.stages.snapshot()
+        counts = live.batch_counts
+        eta = live.run.label(now, live.step_seconds_left(now)) if stages else ""
+        view = (step, timing, detail, receipt, workers, counts, stages, eta)
+        if view == self._last_progress_view:
             return
-        self._last_elapsed_refresh = now
-        self.operation_var.set(
-            format_progress_status(
-                progress,
-                elapsed_seconds=now - self._progress_started_at,
-                completed_since_start=max(0, progress.current - self._progress_origin),
+        previous = self._last_progress_view
+        self._last_progress_view = view
+        if previous is None or previous[0] != step:
+            self.operation_var.set(step.label)
+            if step.total:
+                self.progress.stop()
+                self.progress.configure(mode="determinate", maximum=step.total, value=step.current)
+                self.progress_count.configure(
+                    text=f"{step.current:,} of {step.total:,} {step.unit}".rstrip()
+                )
+                self.progress_percent.configure(text=f"{100 * step.current // step.total}%")
+                self.progress_count.grid()
+                self.progress_percent.grid()
+            else:
+                if previous is not None and previous[0].total:
+                    self.progress.stop()
+                    self.progress.configure(mode="indeterminate", maximum=100, value=0)
+                    self.progress.start(20)
+                self.progress_percent.grid_remove()
+                if step.current:
+                    self.progress_count.configure(text=f"{step.current:,} processed")
+                    self.progress_count.grid()
+                else:
+                    self.progress_count.grid_remove()
+        self.progress_clock.configure(text=timing)
+        self.progress_clock.grid()
+        if eta:
+            self.progress_eta.configure(text=eta)
+            self.progress_eta.grid()
+        if previous is None or previous[4:6] != (workers, counts):
+            self.worker_strip.show(workers, counts)
+            self.progress_detail.configure(
+                foreground="#ffda92"
+                if any(s in {"waiting", "retrying"} for s in workers)
+                else "#d6e1eb"
             )
-        )
+        if previous is None or previous[6] != stages:
+            self.stage_ribbon.show(stages)
+        for label, value in ((self.progress_detail, detail), (self.progress_receipt, receipt)):
+            if value:
+                label.configure(text=value)
+                label.grid()
+            else:
+                label.grid_remove()
 
     def _operation_done(
         self,
@@ -3694,6 +3977,11 @@ class SceneLightSetup(tk.Tk):
         if session is not None:
             session.update(
                 status="cancelled" if cancelled else "failed" if return_code else "succeeded",
+                setup_timing=(
+                    self._live_progress.run.snapshot(time.monotonic())
+                    if self._live_progress and not cancelled and return_code == 0
+                    else None
+                ),
                 exit_code=return_code,
                 managed_project=payload.get("managed_project")
                 if isinstance(payload, dict)
@@ -3705,18 +3993,27 @@ class SceneLightSetup(tk.Tk):
         continue_setup = operation == "components" and self._continue_after_components
         if operation == "components":
             self._continue_after_components = False
+        live = self._live_progress
+        self._live_progress = None
         self._running = False
         self._active_operation = None
         self._component_download = ""
+        self._reset_progress_panel()
         if self.cancel_operation_button is not None:
             self.cancel_operation_button.grid_remove()
             self.cancel_operation_button.configure(state="normal", text="Cancel")
         self.progress.stop()
-        if return_code == 0 and operation in {"components", "preview-components"}:
+        if return_code == 0 and not cancelled:
             self.progress.configure(mode="determinate", maximum=100, value=100)
         else:
             self.progress.configure(mode="indeterminate", maximum=100, value=0)
         result = payload if isinstance(payload, dict) else {}
+        if operation == "refresh" and self._live_sources is not None:
+            if return_code or cancelled:
+                self._set_live_edit(False)
+                self._append_log("[Live updates paused. Enable them again when ready.]\n")
+            elif result.get("update_mode") != "unchanged":
+                self._live_reload_pending = self._live_sources
         if cancelled:
             continue_setup = False
             self.operation_var.set("Operation cancelled.")
@@ -3888,6 +4185,11 @@ class SceneLightSetup(tk.Tk):
             elif operation == "preview-components":
                 importlib.invalidate_caches()
                 self.operation_var.set("Preview components installed. Click Open Preview again.")
+            if live is not None and operation in {"install", "embed", "attach", "refresh"}:
+                duration = format_duration(time.monotonic() - live.started)
+                self._last_run_text = f"{self.operation_var.get()}  ({duration})"
+                if live.summary():
+                    self._last_run_text += "\n" + live.summary()
             self._append_log(f"[{operation} finished successfully]\n")
         else:
             continue_setup = False
@@ -3964,6 +4266,8 @@ class SceneLightSetup(tk.Tk):
         if self._destroying:
             return
         self._destroying = True
+        if self._artwork_preview is not None:
+            self._artwork_preview.stop()
         super().destroy()
 
 

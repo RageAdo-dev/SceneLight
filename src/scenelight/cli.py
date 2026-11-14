@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -16,10 +17,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from . import __version__
-from .builder import RUNTIME_MANIFEST_VERSION, TRANSPORT_GRID_SIZE, build_project
+from .builder import RUNTIME_MANIFEST_VERSION, TRANSPORT_GRID_SIZE, InstalledFormMaps, build_project
 from .calibration import profile_path
 from .capture import (
     CaptureInstanceConflict,
+    CaptureRuntimeError,
     CaptureScriptError,
     capture_runtime_assets,
     capture_runtime_review,
@@ -30,6 +32,11 @@ from .capture import (
 )
 from .compatibility import cached_renpy_executable
 from .developer import (
+    EMBED_ROOT,
+    MANIFEST_NAME,
+    _include_generated_scripts,
+    _installation_source_state,
+    _plain_runtime_tree,
     developer_status,
     embed_from_managed,
     preflight_embed_destination,
@@ -38,16 +45,18 @@ from .developer import (
     remove_embedded,
 )
 from .form_maps import FORM_MAP_VERSION
-from .launch_safety import install_native_launcher, snapshot_saves
-from .progress import ProgressStage, copytree_with_progress
+from .launch_safety import LAUNCHER_CONFIG, install_native_launcher, launcher_asset, snapshot_saves
+from .progress import ProgressStage, copy_cache_tree, copytree_with_progress
 from .project import discover_project
 from .release import release_record
-from .script_cache import preserve_playback_bytecode
+from .script_cache import preserve_playback_bytecode, restore_playback_bytecode
 from .sidecar import (
     analysis_cache_root,
+    cache_checkout_marker,
     detect_project_renpy_version,
     find_native_executable,
     managed_project_root,
+    primary_analysis_cache_root,
     remove_analysis_cache,
     remove_managed_project,
     renpy_runtime_command,
@@ -217,6 +226,9 @@ def _renpy_sdk_launchers(project_root: Path) -> list[Path]:
         for folder in folders:
             launcher = folder / "renpy.exe"
             if not launcher.is_file():
+                # Unzipping to a folder named after the SDK nests it twice.
+                launcher = folder / folder.name / "renpy.exe"
+            if not launcher.is_file():
                 continue
             try:
                 resolved = launcher.resolve()
@@ -291,6 +303,17 @@ def _resolve_renpy_executable(project_root: Path, explicit: Path | None) -> Path
         found = first_existing([launcher_for(Path(value).expanduser().resolve())])
         if found is not None:
             return found
+
+    # The ordinary EXE of an installed legacy game may be our routing shim.
+    # Use its recorded engine directly while the runtime files are suspended.
+    try:
+        recorded = Path((project_root / LAUNCHER_CONFIG).read_text(encoding="utf-8").strip())
+        if recorded.is_file() and renpy_runtime_major(recorded) in (7, 8):
+            native = find_native_executable(project_root)
+            if native is None or recorded.resolve() != native.resolve():
+                return recorded.resolve()
+    except (OSError, ValueError):
+        pass
 
     # Prefer the engine the project was built with, wherever its SDK landed.
     # Without this the scanned game silently runs on Ren'Py 7.7.1 while the
@@ -370,6 +393,7 @@ def _is_compatibility_runtime(executable: Path) -> bool:
 def _runtime_capture_launchers(
     managed_root: Path,
     sdk_executable: Path | None,
+    fallback_executables: tuple[Path, ...] = (),
 ) -> list[tuple[Path, bool, str]]:
     """Return compatible capture runtimes in safest-first order."""
 
@@ -378,50 +402,44 @@ def _runtime_capture_launchers(
     native_major = renpy_runtime_major(native)
     sdk_major = renpy_runtime_major(sdk_executable)
 
-    # Ren'Py 6 can resolve its own archives, but it cannot register the GPU
-    # shaders SceneLight needs for playback. A Ren'Py 7 compatibility runtime
-    # preserves Python 2 game compatibility while providing the shader API.
-    if native_major is not None and native_major < 7:
-        if sdk_executable is not None and sdk_major == 7:
-            launchers.append((sdk_executable, False, "SceneLight's Ren'Py 7 compatibility runtime"))
-        return launchers
-
-    prefer_verified = False
+    # Keep the game's own engine when the preflight proves it can light the
+    # game. Ren'Py 6 needs a Python 2 runtime with model-based rendering.
+    legacy = native_major is not None and native_major < 7
+    shim = False
     if native is not None:
-        # Python 2 games often ship an older 7.x engine whose texture loader
-        # leaks. SceneLight stops live analysis on those, and the cached
-        # fallback leaves characters unlit, so the verified 7.x runtime is tried
-        # first when one is available.
-        prefer_verified = (
-            native_major == 7
-            and sdk_executable is not None
-            and sdk_major == 7
-            and _is_compatibility_runtime(sdk_executable)
-        )
-        if not prefer_verified:
-            launchers.append((native, True, "the mod's native Ren'Py runtime"))
-    if (
-        sdk_executable is not None
-        and (native is None or sdk_executable.resolve() != native.resolve())
-        and (
-            native is None
-            or (native_major is not None and sdk_major is not None and native_major == sdk_major)
-        )
-    ):
-        # The fallback search also finds the bundled runtime when no SDK was
-        # chosen. Naming it "the selected SDK" hides the engine mismatch that
-        # matters most when a newer game is inventoried with an older runtime.
+        asset = launcher_asset()
+        if asset.is_file() and native.stat().st_size == asset.stat().st_size:
+            shim = native.read_bytes() == asset.read_bytes()
+    if native is not None and not legacy and not shim:
+        launchers.append((native, True, "the mod's native Ren'Py runtime"))
+    seen = {native.resolve()} if native is not None else set()
+    for executable in (sdk_executable,) + fallback_executables:
+        if executable is None or executable.resolve() in seen:
+            continue
+        major = renpy_runtime_major(executable)
+        if native is not None and major != (7 if legacy else native_major):
+            continue
+        if native is None and sdk_major is not None and major != sdk_major:
+            continue
+        seen.add(executable.resolve())
         label = (
             "SceneLight's Ren'Py 7 compatibility runtime"
-            if _is_compatibility_runtime(sdk_executable)
+            if legacy or _is_compatibility_runtime(executable)
             else "the selected Ren'Py SDK"
         )
-        launchers.append((sdk_executable, False, label))
-        if prefer_verified:
-            # Keep the game's own engine as a fallback when the verified runtime
-            # cannot start this project.
-            launchers.append((native, True, "the mod's native Ren'Py runtime"))
+        launchers.append((executable, False, label))
     return launchers
+
+
+def _runtime_fallback_sdks(project_root: Path, selected: Path | None) -> tuple[Path, ...]:
+    """Offer installed alternatives when the first SDK cannot run a mod."""
+    if selected is None:
+        return ()
+    candidates = _renpy_sdk_launchers(project_root)
+    cached = cached_renpy_executable()
+    if cached is not None:
+        candidates.insert(0, cached)
+    return tuple(candidates)
 
 
 def _renderer_attempts(
@@ -441,13 +459,6 @@ def _renderer_attempts(
         for renderer in renderers:
             name = "automatic renderer" if renderer is None else f"{renderer} renderer"
             attempts.append((executable, native_runtime, f"{label} ({name})", renderer))
-    if launchers:
-        # Character capture composites every form in Ren'Py's software
-        # renderer. Starting the whole process in software keeps GL textures
-        # out of that cache, which is what stops the renderer on some layered
-        # forms. This costs one extra attempt only when the others failed.
-        executable, native_runtime, label = launchers[0]
-        attempts.append((executable, native_runtime, f"{label} (software renderer)", "sw"))
     return attempts
 
 
@@ -502,10 +513,12 @@ def _write_launcher(
     return launcher
 
 
-def _verify(project_root: Path) -> dict[str, object]:
+def _verify(project_root: Path, *, prepared: bool = False) -> dict[str, object]:
     managed_root = managed_project_root(project_root)
     developer_manifest = project_root / ".scenelight_developer_install.json"
-    verification_root = project_root if developer_manifest.is_file() else managed_root
+    verification_root = (
+        project_root if not prepared and developer_manifest.is_file() else managed_root
+    )
     install_location = "in-place" if verification_root == project_root else "separate-copy"
     game_root = verification_root / "game"
     runtime_script = (
@@ -569,8 +582,18 @@ def _mapped_config(project_root: Path, managed_root: Path, config: Path | None) 
         return resolved
 
 
+def _install_capture_bootstrap(game_root: Path) -> None:
+    source = capture_source()
+    shutil.copy2(source.with_name("log_privacy.py"), game_root / "scenelight_capture_privacy.txt")
+    shutil.copy2(source, game_root / "scenelight_capture.rpy")
+
+
 def _remove_capture_bootstrap(game_root: Path) -> None:
-    for name in ("scenelight_capture.rpy", "scenelight_capture.rpyc"):
+    for name in (
+        "scenelight_capture.rpy",
+        "scenelight_capture.rpyc",
+        "scenelight_capture_privacy.txt",
+    ):
         path = game_root / name
         if path.is_file():
             path.unlink()
@@ -687,15 +710,20 @@ def _scan_runtime_review(
             managed_root,
             _mapped_config(project_root, managed_root, config),
         )
-        shutil.copy2(capture_source(), discovery.game_root / "scenelight_capture.rpy")
-        attempts = _renderer_attempts(_runtime_capture_launchers(managed_root, sdk_executable))
+        _install_capture_bootstrap(discovery.game_root)
+        attempts = _renderer_attempts(
+            _runtime_capture_launchers(
+                managed_root, sdk_executable, _runtime_fallback_sdks(project_root, sdk_executable)
+            )
+        )
         selected_attempt: tuple[Path, bool, str, str | None] | None = None
         review = None
         failures: list[str] = []
         script_failed_runtimes: set[Path] = set()
+        unsupported_runtimes: set[Path] = set()
         for index, attempt in enumerate(attempts, start=1):
             executable, native_runtime, label, renderer = attempt
-            if executable.resolve() in script_failed_runtimes:
+            if executable.resolve() in script_failed_runtimes | unsupported_runtimes:
                 continue
             print(f"SceneLight renderer {index}/{len(attempts)}: trying {label}", flush=True)
             try:
@@ -716,6 +744,10 @@ def _scan_runtime_review(
                 )
             except CaptureInstanceConflict:
                 raise
+            except CaptureRuntimeError as error:
+                unsupported_runtimes.add(executable.resolve())
+                failures.append(f"{label}: {error}")
+                continue
             except CaptureScriptError as error:
                 script_failed_runtimes.add(executable.resolve())
                 failures.append(f"{label}: {error}")
@@ -770,11 +802,25 @@ def _scan_runtime_review(
     return payload
 
 
+def _install_inputs(project_root: Path, config: Path | None) -> dict:
+    from .project import _load_config
+    from .update_settings import analysis_config_sha256, selection_settings
+
+    settings = _load_config(project_root, config)
+    return {
+        "config": str(config) if config else None,
+        "config_sha256": _config_sha256(config),
+        "analysis_config_sha256": analysis_config_sha256(settings),
+        "selection_settings": selection_settings(settings),
+        "source_state": _installation_source_state(project_root, include_generated=False),
+    }
+
+
 def _write_install_config(
     managed_root: Path,
     *,
     project_root: Path,
-    config: Path | None,
+    inputs: dict,
     grid: tuple[int, int],
     workers: int | None,
     analyzer: str,
@@ -783,22 +829,21 @@ def _write_install_config(
     playback_native: bool,
     native_launcher: dict[str, object] | None,
     save_backup: dict[str, object],
+    verified_forms=None,
 ) -> None:
-    from .developer import _installation_source_state
-    from .project import _load_config
-    from .update_settings import analysis_config_sha256, selection_settings
     from .updates import runtime_hashes
 
     runtime_stamps = {}
+    expected, stamps = {}, {}
+    for relative, (digest, stamp) in (verified_forms or {}).items():
+        key = (Path("game/scenelight_runtime/sprite_form") / relative).as_posix()
+        expected[key], stamps[key] = digest, stamp
     payload = {
         "version": 1,
         "scenelight_version": __version__,
         "release": release_record(),
         "source": str(project_root),
-        "config": str(config) if config else None,
-        "config_sha256": _config_sha256(config),
-        "analysis_config_sha256": analysis_config_sha256(_load_config(project_root, config)),
-        "selection_settings": selection_settings(_load_config(project_root, config)),
+        **inputs,
         "grid": list(grid),
         "workers": workers,
         "analyzer": analyzer,
@@ -808,8 +853,9 @@ def _write_install_config(
         "playback_runtime_major": renpy_runtime_major(playback_executable),
         "native_launcher": native_launcher,
         "save_backup": save_backup,
-        "source_state": _installation_source_state(project_root),
-        "runtime_files": runtime_hashes(managed_root, verified_out=runtime_stamps),
+        "runtime_files": runtime_hashes(
+            managed_root, expected=expected, stamps=stamps, verified_out=runtime_stamps
+        ),
         "runtime_file_stamps": runtime_stamps,
         "inspector_enabled": (managed_root / "game/scenelight_runtime/inspector.rpy").is_file(),
     }
@@ -819,15 +865,56 @@ def _write_install_config(
     os.replace(temporary, path)
 
 
-def _restore_analysis_cache(project_root: Path, managed_root: Path) -> bool:
-    """Seed a disposable managed build with the last verified analysis cache."""
+def _return_checked_out_cache(project_root: Path, *, ignore=None) -> None:
+    cache = primary_analysis_cache_root(project_root)
+    marker = cache_checkout_marker(cache)
+    if not marker.exists():
+        return
+    working = managed_project_root(project_root) / ".scenelight_cache"
+    if not cache.exists():
+        if working.resolve() != working or not working.is_dir() or not _plain_runtime_tree(working):
+            raise RuntimeError("Cannot return the checked-out analysis cache safely.")
+        # A stopped Ren'Py process may have left playback files in the cache.
+        game = working.parent / "game"
+        if (working / "suspended-runtime").is_dir():
+            _restore_suspended_runtime(game)
+        if (working / "playback-bytecode" / "index.json").is_file():
+            restore_playback_bytecode(game)
+        if ignore is not None:
+            _prune_cache_checkpoints(working, ignore)
+        os.replace(working, cache)
+    elif working.exists():
+        raise RuntimeError("Two copies of the checked-out analysis cache exist.")
+    marker.unlink()
 
+
+def _restore_analysis_cache(project_root: Path, managed_root: Path, *, transfer=False) -> bool:
     source = analysis_cache_root(project_root)
     destination = managed_root / ".scenelight_cache"
     if destination.exists() or not source.is_dir():
         return False
+    if (
+        transfer
+        and source == primary_analysis_cache_root(project_root)
+        and managed_root == managed_project_root(project_root)
+        and managed_root.resolve() == managed_root
+        and source.resolve() == source
+        and _plain_runtime_tree(source)
+    ):
+        with ProgressStage("cache-restore", item="Opening the existing analysis cache"):
+            marker = cache_checkout_marker(source)
+            marker.touch(exist_ok=False)
+            try:
+                os.replace(source, destination)
+            except OSError as error:
+                marker.unlink()
+                if error.errno not in (errno.EXDEV, errno.EACCES, errno.EBUSY, errno.EPERM):
+                    raise
+            else:
+                print("Reusing the existing analysis cache in place.", flush=True)
+                return True
     try:
-        shutil.copytree(source, destination)
+        copy_cache_tree(source, destination, "cache-restore")
     except Exception:
         shutil.rmtree(destination, ignore_errors=True)
         raise
@@ -835,13 +922,26 @@ def _restore_analysis_cache(project_root: Path, managed_root: Path) -> bool:
     return True
 
 
-def _preserve_analysis_cache(project_root: Path, managed_root: Path) -> Path | None:
+def _prune_cache_checkpoints(root, ignore):
+    for directory, dirs, files in os.walk(root, topdown=True):
+        for name in ignore(directory, dirs + files):
+            path = Path(directory) / name
+            if name in dirs:
+                dirs.remove(name)
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+
+def _preserve_analysis_cache(
+    project_root: Path, managed_root: Path, *, consume: bool = False
+) -> Path | None:
     """Atomically retain capture/transport caches after a managed build is discarded."""
 
     source = managed_root / ".scenelight_cache"
     if not source.is_dir():
         return None
-    destination = analysis_cache_root(project_root)
+    destination = primary_analysis_cache_root(project_root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Do not repeat the user-controlled project name in transactional paths.
     # Sprite capture filenames can already be close to legacy Windows MAX_PATH;
@@ -858,6 +958,7 @@ def _preserve_analysis_cache(project_root: Path, managed_root: Path) -> Path | N
         completed_capture = (
             isinstance(capture_state, dict)
             and isinstance(capture_result, dict)
+            and capture_state.get("version") is not None
             and capture_state.get("version") == capture_result.get("version")
         )
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -873,8 +974,34 @@ def _preserve_analysis_cache(project_root: Path, managed_root: Path) -> Path | N
         if completed_capture
         else None
     )
+    if consume and cache_checkout_marker(destination).exists():
+        with ProgressStage("cache-save", item="Keeping the updated analysis cache"):
+            _return_checked_out_cache(project_root, ignore=ignore)
+        return destination
+    transferred = False
     try:
-        copytree_with_progress(source, stage, "cache-save", ignore=ignore)
+        if (
+            consume
+            and completed_capture
+            and source.resolve() == source
+            and _plain_runtime_tree(source)
+        ):
+            with ProgressStage("cache-save", item="Transferring the completed analysis cache"):
+                try:
+                    os.replace(source, stage)
+                    transferred = True
+                except OSError as error:
+                    if error.errno not in (
+                        errno.EXDEV,
+                        errno.EACCES,
+                        errno.EBUSY,
+                        errno.EPERM,
+                    ) and getattr(error, "winerror", None) not in (17, 32):
+                        raise
+                if transferred:
+                    _prune_cache_checkpoints(stage, ignore)
+        if not transferred:
+            copytree_with_progress(source, stage, "cache-save", ignore=ignore)
         with ProgressStage("cache-commit", item="Publishing the reusable cache"):
             if destination.exists():
                 os.replace(destination, backup)
@@ -884,16 +1011,39 @@ def _preserve_analysis_cache(project_root: Path, managed_root: Path) -> Path | N
             with ProgressStage("cache-cleanup", item="Removing the previous cache"):
                 shutil.rmtree(backup)
     except Exception:
-        if stage.is_dir():
-            shutil.rmtree(stage, ignore_errors=True)
-        if moved_existing and backup.is_dir() and not destination.exists():
-            os.replace(backup, destination)
+        try:
+            if stage.is_dir():
+                if transferred:
+                    os.replace(stage, source)
+                else:
+                    shutil.rmtree(stage, ignore_errors=True)
+        finally:
+            if moved_existing and backup.is_dir() and not destination.exists():
+                os.replace(backup, destination)
         raise
     print(f"Reusable analysis cache preserved: {destination}", flush=True)
     return destination
 
 
-def _seed_embedded_form_cache(project_root: Path, managed_root: Path) -> int:
+def _installed_forms(project: Path) -> InstalledFormMaps:
+    record = (project / MANIFEST_NAME).read_bytes()
+    files = json.loads(record)["files"]
+    index = (EMBED_ROOT / "sprite_form_manifest.json").as_posix()
+    manifest = {}
+    if index in files:
+        raw = (project / index).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != files[index]:
+            raise RuntimeError("The installed sprite-map index changed during refresh.")
+        manifest = json.loads(raw)
+    owned = {
+        name.removeprefix("game/")
+        for name in files
+        if name.startswith("game/scenelight_runtime/sprite_form/") and name.endswith(".png")
+    }
+    return InstalledFormMaps(hashlib.sha256(record).hexdigest(), manifest, owned, set())
+
+
+def _seed_embedded_form_cache(project_root: Path, managed_root: Path, *, verified=None) -> int:
     """Reuse exact compatible form maps from a verified direct installation."""
 
     source_data = project_root / "game" / "scenelight_runtime"
@@ -913,7 +1063,7 @@ def _seed_embedded_form_cache(project_root: Path, managed_root: Path) -> int:
         return 0
     destination_data.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copytree(source_forms, destination_forms)
+        copy_cache_tree(source_forms, destination_forms, "form-cache", verified=verified)
         shutil.copy2(source_manifest, destination_manifest)
     except Exception:
         destination_manifest.unlink(missing_ok=True)
@@ -933,6 +1083,7 @@ def _install_managed(
     renpy_sdk: Path | None,
     reuse_embedded_cache: bool = False,
     include_inspector: bool | None = None,
+    installed_forms: InstalledFormMaps | None = None,
 ) -> dict[str, object]:
     if include_inspector is None:
         from .inspector_install import inspector_enabled
@@ -963,13 +1114,13 @@ def _install_managed(
         existing_save_backup if isinstance(existing_save_backup, dict) else None
     )
 
+    # An author may keep editing during capture. Record the inputs before the
+    # copy so the next refresh can still see edits made after it.
+    inputs = _install_inputs(project_root, config)
     synced = sync_project(project_root)
     managed_root = synced.managed
-    analysis_cache_reused = _restore_analysis_cache(project_root, managed_root)
+    analysis_cache_reused = _restore_analysis_cache(project_root, managed_root, transfer=True)
     _restore_suspended_runtime(managed_root / "game")
-    embedded_form_cache_count = (
-        _seed_embedded_form_cache(project_root, managed_root) if reuse_embedded_cache else 0
-    )
     with _capture_without_installed_runtime(managed_root / "game"):
         discovery = discover_project(
             managed_root,
@@ -977,18 +1128,21 @@ def _install_managed(
         )
         native_executable = find_native_executable(managed_root)
         native_major = renpy_runtime_major(native_executable)
-        shutil.copy2(capture_source(), discovery.game_root / "scenelight_capture.rpy")
-        launchers = _runtime_capture_launchers(managed_root, sdk_executable)
+        _install_capture_bootstrap(discovery.game_root)
+        launchers = _runtime_capture_launchers(
+            managed_root, sdk_executable, _runtime_fallback_sdks(project_root, sdk_executable)
+        )
         attempts = _renderer_attempts(launchers)
         preflight_completed = False
         runtime_save_directory: str | None = None
         selected_attempt: tuple[Path, bool, str, str | None] | None = None
         preflight_failures: list[str] = []
         script_failed_runtimes: set[Path] = set()
+        unsupported_runtimes: set[Path] = set()
         if attempts:
             for index, attempt in enumerate(attempts, start=1):
                 executable, native_runtime, label, renderer = attempt
-                if executable.resolve() in script_failed_runtimes:
+                if executable.resolve() in script_failed_runtimes | unsupported_runtimes:
                     continue
                 print(f"SceneLight renderer {index}/{len(attempts)}: trying {label}", flush=True)
                 try:
@@ -1000,6 +1154,10 @@ def _install_managed(
                     )
                 except CaptureInstanceConflict:
                     raise
+                except CaptureRuntimeError as error:
+                    unsupported_runtimes.add(executable.resolve())
+                    preflight_failures.append(f"{label}: {error}")
+                    continue
                 except CaptureScriptError as error:
                     script_failed_runtimes.add(executable.resolve())
                     preflight_failures.append(f"{label}: {error}")
@@ -1029,15 +1187,6 @@ def _install_managed(
                 flush=True,
             )
 
-        # Compatibility is now known. Preserve both project-local and Ren'Py
-        # roaming saves before any install/build output is committed.
-        if save_backup is None:
-            save_backup = snapshot_saves(
-                project_root,
-                save_directory=runtime_save_directory,
-            )
-            if save_backup["created"]:
-                print(f"Save safety snapshot: {save_backup['path']}", flush=True)
         if selected_attempt is not None:
             playback_executable = selected_attempt[0]
             playback_native = selected_attempt[1]
@@ -1064,22 +1213,32 @@ def _install_managed(
             for capture_index, (executable, native_runtime, label, renderer) in enumerate(
                 ordered_attempts, start=1
             ):
-                if executable.resolve() in script_failed_runtimes:
+                if executable.resolve() in script_failed_runtimes | unsupported_runtimes:
                     continue
                 print(
                     f"SceneLight capture {capture_index}/{total_capture_attempts}: trying {label}",
                     flush=True,
                 )
                 try:
+                    if (executable, native_runtime, label, renderer) != selected_attempt:
+                        runtime_save_directory = preflight_runtime(
+                            discovery, executable, native_runtime=native_runtime, renderer=renderer
+                        )
                     capture = capture_runtime_assets(
                         discovery,
                         executable,
                         native_runtime=native_runtime,
                         renderer=renderer,
                     )
+                    selected_attempt = (executable, native_runtime, label, renderer)
+                    playback_executable, playback_native = executable, native_runtime
                     break
                 except CaptureInstanceConflict:
                     raise
+                except CaptureRuntimeError as error:
+                    unsupported_runtimes.add(executable.resolve())
+                    failures.append(f"{label}: {error}")
+                    continue
                 except CaptureScriptError as error:
                     script_failed_runtimes.add(executable.resolve())
                     failures.append(f"{label}: {error}")
@@ -1104,20 +1263,35 @@ def _install_managed(
                 )
             merge_capture(discovery, capture)
 
+    # Capture can select a different engine than the first successful preflight.
+    # Snapshot its save directory before committing install/build output.
+    if save_backup is None:
+        save_backup = snapshot_saves(project_root, save_directory=runtime_save_directory)
+        if save_backup["created"]:
+            print(f"Save safety snapshot: {save_backup['path']}", flush=True)
+
     # The analyzer may compile the copied project with a newer Ren'Py. Restore
     # every project-owned file from the source copy before native playback.
     sync_project(project_root)
+    verified_forms = {}
+    embedded_form_cache_count = (
+        _seed_embedded_form_cache(project_root, managed_root, verified=verified_forms)
+        if reuse_embedded_cache and installed_forms is None
+        else 0
+    )
     result = build_project(
         discovery,
         grid_size=grid,
         workers=workers,
         analyzer_backend=analyzer,
+        installed_forms=installed_forms,
     )
     if discovery.scene_media and discovery.scene_analysis == "live":
         from .prepared import prepare_project_movies
 
         prepare_project_movies(discovery)
-    preserved_cache = _preserve_analysis_cache(project_root, managed_root)
+    preserved_cache = _preserve_analysis_cache(project_root, managed_root, consume=True)
+    _include_generated_scripts(project_root, inputs["source_state"])
     with ProgressStage("runtime-setup", item="Installing runtime support and launcher files"):
         _install_runtime_files(discovery.game_root, inspector=include_inspector)
         _remove_capture_bootstrap(discovery.game_root)
@@ -1134,7 +1308,7 @@ def _install_managed(
         _write_install_config(
             managed_root,
             project_root=project_root,
-            config=config,
+            inputs=inputs,
             grid=grid,
             workers=workers,
             analyzer=analyzer,
@@ -1143,11 +1317,20 @@ def _install_managed(
             playback_native=playback_native,
             native_launcher=native_launcher,
             save_backup=save_backup,
+            verified_forms=verified_forms,
         )
         _write_launcher(project_root, managed_root, playback_executable)
         launcher = find_native_executable(managed_root)
     with ProgressStage("install-verify", item="Checking runtime files and generated manifests"):
-        verification = _verify(project_root)
+        verification = _verify(project_root, prepared=True)
+        if not verification["ok"]:
+            raise RuntimeError(
+                "Prepared runtime verification failed: "
+                + ", ".join(verification["missing_or_invalid"])
+            )
+    report_payload = json.loads(result.report_path.read_text(encoding="utf-8"))
+    if installed_forms is not None:
+        embedded_form_cache_count = report_payload["sprite_cache"]["reused"]
     attach_report = {
         "mode": "hybrid-gpu",
         "runtime_capture": bool(capture),
@@ -1169,7 +1352,6 @@ def _install_managed(
         "embedded_form_cache_count": embedded_form_cache_count,
         "analysis_cache": str(preserved_cache) if preserved_cache is not None else None,
     }
-    report_payload = json.loads(result.report_path.read_text(encoding="utf-8"))
     report_payload.update(attach_report)
     result.report_path.write_text(json.dumps(report_payload, indent=2) + "\n", encoding="utf-8")
     from .developer import _atomic_json
@@ -1292,12 +1474,29 @@ def _main(argv: list[str] | None = None) -> int:
     from .updates import operation_lock
 
     args = _parser().parse_args(argv)
-    if args.command in {"install", "attach", "embed", "refresh", "remove", "unembed", "inspector"}:
+    uses_workspace = args.command in {
+        "install",
+        "attach",
+        "embed",
+        "refresh",
+        "remove",
+        "unembed",
+        "inspector",
+        "launch",
+    } or (args.command == "scan" and args.runtime_review)
+    if uses_workspace:
         with operation_lock(args.project):
             from .developer_transaction import recover
+            from .updates import recover_update
 
-            recover(args.project.expanduser().resolve())
-            return _dispatch(argv)
+            project = args.project.expanduser().resolve()
+            _return_checked_out_cache(project)
+            recover_update(project)
+            recover(project)
+            try:
+                return _dispatch(argv)
+            finally:
+                _return_checked_out_cache(project)
     return _dispatch(argv)
 
 
@@ -1383,10 +1582,12 @@ def _dispatch(argv: list[str] | None = None) -> int:
         if quick is not None:
             print(json.dumps(quick, indent=2))
             return 0
+    installed_forms = None
     if args.command in {"attach", "embed"}:
         preflight_embed_destination(project_root)
     elif args.command == "refresh":
         preflight_refresh_destination(project_root)
+        installed_forms = _installed_forms(project_root)
     if args.command == "scan":
         if args.runtime_review:
             payload = _scan_runtime_review(
@@ -1410,6 +1611,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
         analyzer=args.analyzer,
         renpy_sdk=args.renpy_sdk,
         reuse_embedded_cache=args.command == "refresh",
+        installed_forms=installed_forms,
         include_inspector=inspector_enabled(project_root, embedded=args.command != "install"),
     )
     if args.command in {"attach", "embed"}:
@@ -1434,6 +1636,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             Path(str(result["managed_project"])),
             consume_managed=True,
             preflight_complete=True,
+            installed_forms=installed_forms,
         )
         result = {
             **result,

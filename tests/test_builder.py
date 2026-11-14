@@ -29,6 +29,37 @@ def test_stable_color_table_invalidates_the_previous_form_cache_key(tmp_path):
     assert builder_module._sprite_spec_fingerprint(spec) == current
 
 
+def test_edited_owner_leaves_shared_expression_maps_in_place(tmp_path):
+    project = make_project(tmp_path / "project")
+    game = project / "game"
+    discovery = discover_project(project)
+    source = game / "images/nova.png"
+    same = SpriteSpec("a", (source,))
+    original = replace(discovery, sprites={"a": same, "b": same})
+    manifest = builder_module._build_form_maps(original, game / "scenelight_runtime", 1)
+    channels = ("normal_noise", "height_ao_edge", "response")
+    owned = {manifest["sprites"]["a"][name] for name in channels}
+    assert manifest["sprites"]["a"] == manifest["sprites"]["b"]
+    before = {name: (game / name).read_bytes() for name in owned}
+    modified = game / "changed.png"
+    Image.new("RGBA", (72, 92), (192, 81, 36, 255)).save(modified)
+    isolated = tmp_path / "working/game"
+    cache = builder_module.InstalledFormMaps("snapshot", manifest, owned, set())
+    edited = replace(
+        original, game_root=isolated, sprites={"a": SpriteSpec("a", (modified,)), "b": same}
+    )
+    new = builder_module._build_form_maps(edited, isolated / "scenelight_runtime", 1, cache)
+    assert new["cache"]["unique_analyzed"] == 1
+    assert new["sprites"]["b"] == manifest["sprites"]["b"]
+    assert cache.retained == owned
+    for name in channels:
+        reused = new["sprites"]["b"][name]
+        rendered = new["sprites"]["a"][name]
+        assert reused != rendered and (isolated / rendered).is_file()
+        assert not (isolated / reused).exists()
+        assert (game / reused).read_bytes() == before[reused]
+
+
 def test_neutral_key_plus_strong_colored_source_uses_spatial_family_slots() -> None:
     physical = DetectedLight(
         0.132926,
@@ -620,9 +651,11 @@ def test_one_broken_surface_map_is_reported_without_aborting_other_forms(
 
 
 def test_temporal_atlases_grow_horizontally_and_reject_unsafe_allocations():
-    from scenelight.builder import _atlas_layout
+    from scenelight.builder import TILE_SIZE, TRANSPORT_PLANES, _atlas_layout
 
-    assert _atlas_layout(140, (16, 9)) == (4, 36)
-    assert _atlas_layout(300, (16, 9)) == (7, 43)
+    assert _atlas_layout(140, TILE_SIZE) == (4, 36)
+    assert _atlas_layout(300, TILE_SIZE) == (7, 43)
+    assert _atlas_layout(1000, TILE_SIZE) == (23, 44)
+    assert _atlas_layout(1000, (16 * TRANSPORT_PLANES, 9)) == (4, 251)
     with pytest.raises(ValueError, match="No installed runtime was replaced"):
-        _atlas_layout(405, (16, 9))
+        _atlas_layout(1125, TILE_SIZE)

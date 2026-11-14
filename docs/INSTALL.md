@@ -2,8 +2,8 @@
 
 | Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.0/SceneLight-v1.1.0-Windows-online.zip) | Downloads the app on first launch (230 MB). |
-| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.0/SceneLight-v1.1.0-Windows.zip) | 230 MB. App and required components included. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/latest/download/SceneLight-v1.1.0-Windows-online.zip) | Small download; installs the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/latest/download/SceneLight-v1.1.0-Windows.zip) | 230 MB. Includes the app and required components. |
 
 Extract the ZIP and open **SceneLight.exe**. No administrator access or separate
 Python installation is needed.
@@ -25,9 +25,11 @@ projects and Ren’Py 8 for Python 3.
 For your own mod, choose **For mod developers** and follow the
 [author quickstart](AUTHOR_QUICKSTART.md).
 
-Preparing a large game can take time. The percentage applies to the current stage;
-100% does not mean the whole installation has finished. **Cancel** stops the
-operation. **Settings → Activity** shows progress and any errors.
+During preparation, the stage headings show completed and remaining steps. Select
+a heading to see its details. The percentage applies to the current task; wait for
+the completion message before launching. Setup also shows elapsed time, asset
+counts and an estimate of the time remaining when enough information is available.
+**Cancel** stops the operation. **Settings → Activity** contains the full log.
 
 CUDA acceleration is optional and may need a separate download. Declining it
 keeps CPU preparation available; the game still needs working graphics acceleration.
@@ -56,12 +58,19 @@ in-game inspector → Apply to project**, then restart the game.
 Open the newer SceneLight, select the installed game and choose **Update SceneLight**.
 Downloading a package alone does not update an installed game.
 
-When Setup detects project edits, choose **Check changed assets → Update SceneLight**.
-Restart the game after the update completes. Compatible prepared data is reused;
-new or changed artwork may need preparation.
+For a manual project update, choose **Check changed assets → Update SceneLight**
+and restart the game after it completes. Unchanged artwork and compatible prepared
+data are reused. New or replaced artwork is checked again.
+
+Mod developers can leave Setup open and use [live updates](AUTHOR_QUICKSTART.md#live-updates-while-editing)
+while editing and playtesting. Live updates are enabled by default for developer installations.
 
 Use the same steps after saving Preview settings to the project. If they still
 do not appear, [check which rules the game is applying](TROUBLESHOOTING.md#preview-changes-do-not-appear-in-the-game).
+
+If an update was interrupted, reopen SceneLight and select the same game. Let it
+finish checking and recovering the installation before starting another update.
+[Recovery help](TROUBLESHOOTING.md#an-update-was-interrupted).
 
 ## Remove
 

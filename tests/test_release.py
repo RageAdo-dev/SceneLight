@@ -70,7 +70,7 @@ def test_release_record_names_every_cache_contract() -> None:
         "transport_algorithm": "14-spatial-radiance-basis",
         "sprite_form_version": 9,
         "capture_version": 42,
-        "capture_plan_version": 5,
+        "capture_plan_version": 6,
         "capture_pixel_version": 2,
         "content_sha256": fingerprint,
     }
@@ -107,10 +107,18 @@ def test_managed_install_manifest_records_release_identity(tmp_path: Path) -> No
     project.mkdir()
     managed.mkdir()
 
+    sprite = project / "game" / "sprite.png"
+    sprite.parent.mkdir()
+    sprite.write_bytes(b"sprite at capture")
+    config = project / "scenelight.json"
+    config.write_text("{}")
+    inputs = cli_module._install_inputs(project, config)
+    sprite.write_bytes(b"sprite edited while capturing")
+    config.write_text('{"lighting_strength": 0.5}')
     _write_install_config(
         managed,
         project_root=project,
-        config=None,
+        inputs=inputs,
         grid=(16, 9),
         workers=None,
         analyzer="cpu",
@@ -124,6 +132,9 @@ def test_managed_install_manifest_records_release_identity(tmp_path: Path) -> No
     payload = json.loads((managed / ".scenelight_install.json").read_text(encoding="utf-8"))
     assert payload["scenelight_version"] == __version__
     assert payload["release"] == release_record()
+    current = cli_module._install_inputs(project, config)
+    assert payload["source_state"]["game/sprite.png"] != current["source_state"]["game/sprite.png"]
+    assert payload["config_sha256"] != current["config_sha256"]
 
 
 def test_transport_algorithm_version_is_part_of_the_cache_key(

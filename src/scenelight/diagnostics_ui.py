@@ -109,10 +109,8 @@ def mount_activity(parent):
         if not output:
             return
         try:
-            project = state["game"] or row.get("managed_project") or row.get("project")
-            diagnostics.export_report(
-                row["path"], Path(output), game_root=Path(project) if project else None
-            )
+            project = Path(state["game"]) if state["game"] else diagnostics.session_game_root(row)
+            diagnostics.export_report(row["path"], Path(output), game_root=project)
         except (OSError, ValueError) as error:
             messagebox.showerror("Report export failed", str(error), parent=frame)
         else:

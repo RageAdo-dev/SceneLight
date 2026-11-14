@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,144 @@ from scenelight import builder, cli, updates
 from scenelight.developer import EMBED_ROOT, MANIFEST_NAME, _tracked_source_state
 from scenelight.release import release_record
 from scenelight.sidecar import managed_project_root
+
+
+@pytest.mark.parametrize("stop", ["before-record", "after-record", None])
+def test_asset_delta_recovery_preserves_unchanged_files(tmp_path, monkeypatch, stop):
+    root, _, record = installation(tmp_path, monkeypatch, count=3)
+    previous = json.loads(record.read_bytes())
+    original = record.read_bytes()
+    new = dict(previous, files=dict(previous["files"]))
+    prefix = EMBED_ROOT.as_posix() + "/"
+    keep = root / EMBED_ROOT / "map_0.png"
+    original_identity = keep.stat()
+    retired = root / EMBED_ROOT / "map_2.png"
+    retired_identity = retired.stat().st_ino
+    del new["files"][prefix + "map_2.png"]
+    del new["files"][prefix + "inspector.rpy"]
+    compiled = root / EMBED_ROOT / "inspector.rpyc"
+    compiled.write_bytes(b"compiler output")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    for name in ("map_1.png", "map_3.png"):
+        (staged / name).write_bytes(name.encode())
+        new["files"][prefix + name] = hashlib.sha256(name.encode()).hexdigest()
+    replace_file = os.replace
+    recover = updates.recover_update
+
+    def commit(src, dst):
+        if Path(dst) == record and stop == "before-record":
+            raise OSError("interrupted")
+        replace_file(src, dst)
+        if Path(dst) == record and stop == "after-record":
+            raise OSError("interrupted")
+
+    with monkeypatch.context() as m:
+        m.setattr(os, "replace", commit)
+        if stop:
+            m.setattr(updates, "recover_update", lambda root: None)
+            with pytest.raises(OSError, match="interrupted"):
+                updates.publish_changed_assets(
+                    root, staged, previous, new, hashlib.sha256(original).hexdigest()
+                )
+        else:
+            updates.publish_changed_assets(
+                root, staged, previous, new, hashlib.sha256(original).hexdigest()
+            )
+    recover(root)
+    recover(root)
+    rolled_back = stop == "before-record"
+    assert json.loads(record.read_bytes()) == (previous if rolled_back else new)
+    assert (keep.stat().st_ino, keep.stat().st_mtime_ns) == (
+        original_identity.st_ino,
+        original_identity.st_mtime_ns,
+    )
+    assert (root / EMBED_ROOT / "map_1.png").read_bytes() == (
+        b"exact existing map" if rolled_back else b"map_1.png"
+    )
+    assert (root / EMBED_ROOT / "map_2.png").exists() == rolled_back
+    if rolled_back:
+        assert retired.stat().st_ino == retired_identity
+    assert (root / EMBED_ROOT / "map_3.png").exists() != rolled_back
+    assert compiled.exists() == rolled_back
+    assert not (root / updates.JOURNAL).exists()
+
+
+def test_retired_files_use_counted_staging_and_recover_after_partial_removal(
+    tmp_path, monkeypatch, capsys
+):
+    root, _, manifest = installation(tmp_path, monkeypatch, count=3)
+    old = json.loads(manifest.read_bytes())
+    updated = dict(old, files=dict(old["files"]))
+    retired = [root / EMBED_ROOT / f"map_{i}.png" for i in range(3)]
+    for path in retired:
+        del updated["files"][path.relative_to(root).as_posix()]
+    copy, move = updates.shutil.copy2, os.replace
+
+    def copy_other_files(src, dst):
+        assert Path(src) not in retired
+        return copy(src, dst)
+
+    def stop_after_first(src, dst):
+        if Path(src) == retired[1]:
+            raise OSError("interrupted during removal")
+        return move(src, dst)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(updates.shutil, "copy2", copy_other_files)
+        patch.setattr(os, "replace", stop_after_first)
+        with pytest.raises(OSError, match="interrupted during removal"):
+            updates.publish_changed_assets(
+                root,
+                tmp_path / "unused",
+                old,
+                updated,
+                hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            )
+    assert all(path.read_bytes() == b"exact existing map" for path in retired)
+    assert json.loads(manifest.read_bytes()) == old
+    assert not (root / updates.JOURNAL).exists()
+    output = capsys.readouterr().out
+    assert "runtime-copy 3/3: Complete" in output
+    assert "runtime-apply 1/3: Stopped" in output
+
+
+def test_setup_recovers_a_cancelled_refresh_before_checking_files(tmp_path, monkeypatch):
+    from scenelight.setup_gui import inspect_project_installation
+
+    project, root, manifest = installation(tmp_path, monkeypatch)
+    previous = json.loads(manifest.read_bytes())
+    first, second = (root / EMBED_ROOT / f"map_{i}.png" for i in range(2))
+    new = dict(previous, files=dict(previous["files"]))
+    for path in (first, second):
+        del new["files"][path.relative_to(root).as_posix()]
+    move = os.replace
+
+    def stop_during_apply(src, dst):
+        if Path(src) == second:
+            raise OSError("cancelled")
+        return move(src, dst)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", stop_during_apply)
+        patch.setattr(updates, "recover_update", lambda root: None)
+        with pytest.raises(OSError, match="cancelled"):
+            updates.publish_changed_assets(
+                root, tmp_path, previous, new, hashlib.sha256(manifest.read_bytes()).hexdigest()
+            )
+    assert not first.exists()
+    with updates.operation_lock(project):
+        busy = inspect_project_installation(project)
+        assert "already using" in busy.error
+        assert not first.exists()
+    inspection = inspect_project_installation(project)
+    assert inspection.direct_install_ready
+    assert first.read_bytes() == b"exact existing map"
+    assert not (root / updates.JOURNAL).exists()
+
+    second.write_bytes(b"manually edited")
+    assert inspect_project_installation(project).direct_install_needs_attention
+    assert second.read_bytes() == b"manually edited"
 
 
 def installation(tmp_path, monkeypatch, embedded=True, count=2):

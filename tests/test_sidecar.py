@@ -8,6 +8,7 @@ from test_project import make_project
 import scenelight.cli as cli_module
 from scenelight.cli import _capture_without_installed_runtime
 from scenelight.sidecar import (
+    _project_files,
     analysis_cache_root,
     detect_project_renpy_version,
     managed_project_root,
@@ -17,6 +18,34 @@ from scenelight.sidecar import (
     sync_project,
     visual_sources_changed,
 )
+
+
+@pytest.mark.parametrize("managed", [True, False])
+def test_sync_walk_prunes_generated_trees_and_keeps_nested_authored_art(
+    tmp_path, managed, monkeypatch
+):
+    import os
+
+    ignored = {
+        tmp_path / name
+        for name in (".scenelight_cache", "game/cache", "game/saves", "game/scenelight_runtime")
+    }
+    if not managed:
+        ignored.add(tmp_path / ".scenelight_backups")
+    for directory in ignored:
+        directory.mkdir(parents=True)
+        (directory / "generated").touch()
+    authored = tmp_path / "game/locations/cache/scene.png"
+    authored.parent.mkdir(parents=True)
+    authored.touch()
+    scandir = os.scandir
+
+    def check_directory(directory):
+        assert Path(directory) not in ignored
+        return scandir(directory)
+
+    monkeypatch.setattr(os, "scandir", check_directory)
+    assert list(_project_files(tmp_path, managed=managed)) == [authored]
 
 
 def test_generated_support_reports_are_not_synced_or_deleted(tmp_path, monkeypatch):
@@ -359,6 +388,25 @@ def test_project_engine_version_falls_back_to_a_bundled_runtime(tmp_path: Path) 
     (project / "renpy/vc_version.py").write_text('version = "8.2.1"\n', encoding="utf-8")
 
     assert detect_project_renpy_version(project) == (8, 2, 1)
+
+
+def test_python2_engine_keeps_its_minor_version_without_a_log(tmp_path):
+    (tmp_path / "renpy").mkdir()
+    (tmp_path / "renpy/__init__.py").write_text("version_tuple = (7, 3, 5, vc_version)\n")
+    assert detect_project_renpy_version(tmp_path) == (7, 3, 5)
+
+
+def test_custom_mod_launcher_is_preferred_over_leftover_ddlc_launcher(tmp_path):
+    from scenelight.sidecar import find_native_executable
+
+    root = tmp_path / "managed-project-hash"
+    root.mkdir()
+    for name in ("DDLC", "WoDActTwo"):
+        (root / (name + ".exe")).touch()
+        (root / (name + ".py")).touch()
+    (root / "uninstall.exe").touch()
+    assert find_native_executable(root) == root / "WoDActTwo.exe"
+
 
 def test_managed_copy_with_read_only_git_objects_is_removable(tmp_path: Path) -> None:
     """Git writes its objects read-only; deleting the copy must still work."""

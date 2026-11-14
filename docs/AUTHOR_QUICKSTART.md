@@ -70,10 +70,26 @@ or exact edits. These changes are temporary; put permanent choices in your confi
 or script. The inspector can be removed through **Settings → Advanced** before
 distributing the mod.
 
-Setup detects project edits while it is open. Choose **Check changed assets →
-Update SceneLight**, then restart the game. Detection alone does not prepare new
-assets or reload the game. Before distributing, check movement, expressions,
-transitions, custom shaders, and save/load with your own assets.
+## Live updates while editing
+
+Leave Setup open with your project selected while you edit and playtest.
+**Settings → Advanced → Live updates while editing** is enabled by default for
+developer installations. SceneLight watches for added and changed artwork and
+scripts, prepares the changes, and refreshes the running game when needed.
+
+The game can show a lighting preview while the full project update continues.
+Its status changes from **Lighting preview (project update pending)** to
+**Lighting ready** when processing finishes. Further edits are picked up as well;
+you do not need to wait for one update to finish before saving another edit.
+
+Live previews cover image files and supported layered-image definitions. Custom
+Python displayables or changes that affect the whole project may need a full
+update. If live updates pause after an error, check **Settings → Activity**, fix
+the reported problem, and enable them again.
+
+With live updates off, use **Check changed assets → Update SceneLight**, then
+restart the game. Before distributing, check movement, expressions, transitions,
+custom shaders, and save/load with your own assets.
 
 The full [API reference](MOD_AUTHOR_API.md) covers configuration, selection rules,
 groups, colors and shaders. A searchable copy is in **Settings → Advanced → Developer guide**.

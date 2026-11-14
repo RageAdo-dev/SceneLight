@@ -119,6 +119,65 @@ def authored_hashes(project: Path) -> dict[str, str]:
     }
 
 
+def test_capture_fallback_is_used_for_playback_and_save_backup(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "isolated/projects"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    project = make_update_project(tmp_path / "game-project")
+    first, second = (tmp_path / name for name in ("first.exe", "second.exe"))
+    for path in (first, second):
+        path.touch()
+    monkeypatch.setattr(cli, "_resolve_renpy_executable", lambda *_: first)
+    monkeypatch.setattr(cli, "_runtime_fallback_sdks", lambda *_: ())
+    monkeypatch.setattr(cli, "_runtime_capture_launchers", lambda *_: [(first, False, "first")])
+    monkeypatch.setattr(
+        cli,
+        "_renderer_attempts",
+        lambda *_: [(first, False, "first", "gl2"), (second, False, "second", "angle2")],
+    )
+    preflights = []
+
+    def preflight(_discovery, engine, **_kwargs):
+        preflights.append(engine)
+        return engine.stem + "-saves"
+
+    def capture(discovery, engine, **_kwargs):
+        if engine == first:
+            raise RuntimeError("Renderer failed during readback")
+        return CaptureResult(
+            scenes=dict(discovery.scenes),
+            sprites={"hero idle": discovery.game_root / "images/hero.png"},
+            character_tags=["hero"],
+            errors=[],
+            cached=False,
+            background_inventory_requested=True,
+            scene_requests=len(discovery.scenes),
+            resolved_requests=[],
+        )
+
+    backups = []
+    original_backup = cli.snapshot_saves
+
+    def backup(project, **kwargs):
+        backups.append(kwargs["save_directory"])
+        return original_backup(project, **kwargs)
+
+    monkeypatch.setattr(cli, "preflight_runtime", preflight)
+    monkeypatch.setattr(cli, "capture_runtime_assets", capture)
+    monkeypatch.setattr(cli, "snapshot_saves", backup)
+    assert (
+        cli._main(["install", "--project", str(project), "--workers", "1", "--analyzer", "cpu"])
+        == 0
+    )
+    installed = managed_project_root(project)
+    record = json.loads((installed / ".scenelight_install.json").read_text())
+    report = json.loads((installed / "game/scenelight_runtime/install_report.json").read_text())
+    assert preflights == [first, second]
+    assert backups == ["second-saves"]
+    assert Path(record["playback_executable"]) == second
+    assert report["runtime_renderer"] == "angle2"
+
+
 @pytest.mark.parametrize("embedded", [False, True], ids=["player", "developer"])
 @pytest.mark.parametrize("automatic", [True, False], ids=["auto-on", "auto-off"])
 def test_update_rebuilds_changed_assets_and_preserves_author_choices(

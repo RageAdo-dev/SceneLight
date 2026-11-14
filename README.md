@@ -2,7 +2,7 @@
 
 ![SceneLight — character lighting for Ren’Py](docs/media/scenelight-banner.svg)
 
-**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/tag/v1.1.0)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
+**[Download for Windows](https://github.com/RageAdo-dev/SceneLight/releases/latest)** · **[Install](docs/INSTALL.md)** · **[Mod developer guide](docs/AUTHOR_QUICKSTART.md)**
 
 [Ren’Py 7 & 8](docs/COMPATIBILITY.md) · [Version 1.1.0](CHANGELOG.md) · [MIT license](LICENSE)
 
@@ -19,8 +19,8 @@ SceneLight is completely free. A credit or link back in your game or mod is alwa
 
 | Download | Details |
 | --- | --- |
-| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.0/SceneLight-v1.1.0-Windows-online.zip) | Downloads the app on first launch (230 MB). |
-| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/download/v1.1.0/SceneLight-v1.1.0-Windows.zip) | 230 MB. App and required components included. |
+| [Online setup](https://github.com/RageAdo-dev/SceneLight/releases/latest/download/SceneLight-v1.1.0-Windows-online.zip) | Small download; installs the app on first launch (230 MB). |
+| [Offline package](https://github.com/RageAdo-dev/SceneLight/releases/latest/download/SceneLight-v1.1.0-Windows.zip) | 230 MB. Includes the app and required components. |
 
 1. Download either ZIP, extract it, and open **SceneLight.exe**.
 2. Select your game folder, scan it, and choose the characters to light.
@@ -29,6 +29,9 @@ SceneLight is completely free. A credit or link back in your game or mod is alwa
 Players can add SceneLight to a game or create a separate copy. Mod developers can
 install the API in their project and control lighting from their scripts.
 Optional CUDA acceleration may need an additional download.
+
+The current Windows build is unsigned, and a Defender detection has been reported.
+It has not been confirmed as a false positive. [Details and reporting](docs/TROUBLESHOOTING.md#windows-blocks-the-download).
 
 ## Preview and controls
 
@@ -40,8 +43,9 @@ Optional CUDA acceleration may need an additional download.
 | [In-game inspector](docs/TROUBLESHOOTING.md) | Press **Shift+F9** to see the applied settings, try temporary changes, and export a bug report. |
 | [Mod API](docs/AUTHOR_QUICKSTART.md) | Set rules for backgrounds, characters and expressions. Group separate sprite pieces so they share lighting. |
 
-Setup detects project edits while it stays open. Choose **Check changed assets →
-Update SceneLight**, then restart the game. Updates reuse compatible prepared data.
+For mod developers, [live updates](docs/AUTHOR_QUICKSTART.md#live-updates-while-editing)
+prepare changed artwork while Setup and the game stay open. An in-game status shows
+when a lighting preview is still being processed and when it is ready.
 
 ## Example
 

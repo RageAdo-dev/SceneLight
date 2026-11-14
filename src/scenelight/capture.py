@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 import zlib
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -31,7 +32,10 @@ import psutil
 from PIL import Image
 
 from . import diagnostics
+from .capture_reuse import compiled_source_digest, record_pixels, rendering_script, verified_pixels
+from .compiled_script import compiled_fingerprint
 from .hashing import sha256_file
+from .progress import ProgressStage
 from .project import (
     ProjectDiscovery,
     SpriteSpec,
@@ -44,22 +48,18 @@ from .sidecar import (
     managed_project_root,
     renpy_runtime_command,
 )
-from .source_types import VISUAL_SOURCE_SUFFIXES
+from .source_types import IMAGE_SOURCE_SUFFIXES, VISUAL_SOURCE_SUFFIXES
 
 CAPTURE_VERSION = 42
-CAPTURE_PLAN_VERSION = 5
+CAPTURE_PLAN_VERSION = 6
 CAPTURE_PIXEL_VERSION = 2
 CAPTURE_PROCESS_RESUME_LIMIT = 32
 CAPTURE_PROCESS_BATCH_SIZE = 512
-# Character review renders every form in software. Restarting the engine
-# keeps its render and image caches bounded, which is where a native stop
-# on layered forms comes from.
-REVIEW_PROCESS_BATCH_SIZE = 16
-# Parallel workers checkpoint every form and normally stay alive until their
-# chunk finishes. If a renderer crashes, the worker resumes from those durable
-# checkpoints. A fixed form limit made healthy workers restart in lockstep,
-# which caused expensive GPU-initialization stalls on large projects.
-CAPTURE_PARALLEL_PROCESS_BATCH_SIZE: int | None = None
+# The helper yields between forms after this many attempts or this much memory
+# growth above the loaded game's baseline, with a lower ceiling on 32-bit engines.
+REVIEW_PROCESS_BATCH_SIZE = CAPTURE_PROCESS_BATCH_SIZE
+CAPTURE_PARALLEL_PROCESS_BATCH_SIZE = CAPTURE_PROCESS_BATCH_SIZE
+CAPTURE_PROCESS_MEMORY_LIMIT = 1024 * 1024 * 1024
 CAPTURE_LOW_YIELD_CRASH_LIMIT = 2
 CAPTURE_LOW_YIELD_FORM_THRESHOLD = 16
 MIB = 1024**2
@@ -78,6 +78,7 @@ CAPTURE_IGNORED_NAMES = {
     "scenelight-runtime.jsonl.1",
     "scenelight_capture.rpy",
     "scenelight_capture.rpyc",
+    "scenelight_capture_privacy.txt",
     "scenelight_runtime.rpy",
     "scenelight_runtime.rpyc",
 }
@@ -93,6 +94,10 @@ class CaptureInstanceConflict(RuntimeError):
 
 class CaptureScriptError(RuntimeError):
     """This runtime cannot parse the scripts; another graphics backend cannot help."""
+
+
+class CaptureRuntimeError(ValueError):
+    """The compiled engine lacks a capability that changing renderers cannot add."""
 
 
 def _is_instance_conflict(diagnostic: str) -> bool:
@@ -144,7 +149,7 @@ def needs_runtime_capture(discovery: ProjectDiscovery) -> bool:
     )
 
 
-def _managed_authored_paths(project_root: Path) -> set[str] | None:
+def _managed_authored_files(project_root: Path) -> dict | None:
     """Read provenance only for a managed copy owned by the current storage root."""
     try:
         state = json.loads((project_root / STATE_NAME).read_text(encoding="utf-8"))
@@ -155,12 +160,14 @@ def _managed_authored_paths(project_root: Path) -> set[str] | None:
             return None
         if managed_project_root(Path(source)) != project_root.resolve():
             return None
-        return set(files) if all(isinstance(key, str) for key in files) else None
+        return files if all(isinstance(key, str) for key in files) else None
     except (OSError, ValueError):
         return None
 
 
-def _capture_content_signature(discovery: ProjectDiscovery) -> str:
+def _capture_content_signature(
+    discovery: ProjectDiscovery, *, reuse_scope=None, compiled=None
+) -> str:
     """Identify pixel-producing logic and visual inputs, not UI/helper wording.
 
     ``CAPTURE_PIXEL_VERSION`` is bumped only when the bytes SceneLight derives
@@ -170,7 +177,7 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
 
     digest = hashlib.sha256()
     digest.update(f"scenelight-capture-pixels-{CAPTURE_PIXEL_VERSION}\0".encode("ascii"))
-    authored = _managed_authored_paths(discovery.project_root)
+    authored = _managed_authored_files(discovery.project_root)
     for path in sorted(discovery.game_root.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in VISUAL_SOURCE_SUFFIXES:
             continue
@@ -193,12 +200,50 @@ def _capture_content_signature(discovery: ProjectDiscovery) -> str:
                 # Preflight can regenerate nondeterministic bytecode. It is not
                 # an authored input and sync_project removes it before playback.
                 # Keep hashing bytecode shipped by the author, even beside source.
+                if compiled is not None:
+                    source_hash = compiled_source_digest(path, source_candidates(path))
+                    if source_hash:
+                        compiled[relative.as_posix()] = [
+                            source_hash,
+                            sha256_file(path).hex(),
+                            compiled_fingerprint(path),
+                            True,
+                        ]
                 continue
         digest.update(str(relative).replace("\\", "/").encode("utf-8"))
         digest.update(b"\0")
+        scope_file = hashlib.sha256()
+        track = reuse_scope is not None and path.suffix.lower() not in IMAGE_SOURCE_SUFFIXES
         with path.open("rb") as stream:
+            if track and path.suffix.lower() in (".rpy", ".rpym"):
+                raw = stream.read()
+                digest.update(raw)
+                guarded = rendering_script(raw)
+                if guarded:
+                    reuse_scope.update(
+                        relative.as_posix().encode() + b"\0" + hashlib.sha256(guarded).digest()
+                    )
+                track = False
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
+                if track:
+                    scope_file.update(chunk)
+        if track and compiled is not None and path.suffix.lower() in (".rpyc", ".rpymc"):
+            source_hash = compiled_source_digest(path, source_candidates(path))
+            if source_hash is not None:
+                # Preflight can recompile the managed copy with fresh statement IDs.
+                # Compare the author's original bytecode when checking for code-only edits.
+                metadata = (authored or {}).get(path.relative_to(discovery.project_root).as_posix())
+                original = metadata.get("sha256") if isinstance(metadata, dict) else None
+                compiled[relative.as_posix()] = [
+                    source_hash,
+                    original or scope_file.hexdigest(),
+                    compiled_fingerprint(path),
+                    bool(original and original != scope_file.hexdigest()),
+                ]
+                track = False
+        if track:
+            reuse_scope.update(relative.as_posix().encode() + b"\0" + scope_file.digest())
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -262,7 +307,9 @@ def _reset_request_skips(request_path: Path) -> None:
         payload = json.loads(request_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    if isinstance(payload, dict) and payload.pop("skip_forms", None) is not None:
+    if isinstance(payload, dict):
+        payload.pop("skip_forms", None)
+        payload.pop("completed_form_failures", None)
         try:
             request_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         except OSError:
@@ -1090,7 +1137,10 @@ def _record_capture_stall(
     records.append(record)
     try:
         temporary = path.with_name(path.name + ".tmp")
-        temporary.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(diagnostics.log_privacy.mask_value(records), indent=2) + "\n",
+            encoding="utf-8",
+        )
         os.replace(temporary, path)
     except OSError:
         return
@@ -1222,7 +1272,8 @@ def _capture_report(
         "forms": {
             "captured": len({str(r.get("form")) for r in stored if r.get("form")} | saved_forms),
             "matted": len(matted),
-            "requested": len(payload.get("sprites") or {}),
+            "requested": payload.get("planned_form_count"),
+            "returned": len(payload.get("sprites") or {}),
             "failed": len(errors),
         },
         "per_form_seconds": {
@@ -1244,7 +1295,10 @@ def _capture_report(
     path = capture_root / "capture-report.json"
     try:
         temporary = path.with_name(path.name + ".tmp")
-        temporary.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(diagnostics.log_privacy.mask_value(report), indent=2) + "\n",
+            encoding="utf-8",
+        )
         os.replace(temporary, path)
     except OSError:
         return report
@@ -1265,6 +1319,11 @@ def _capture_report(
         ),
         flush=True,
     )
+    session = diagnostics.current_session()
+    if session is not None:
+        session.attach_text(
+            "review-capture-report", json.dumps(report, ensure_ascii=False, indent=2)
+        )
     return report
 
 
@@ -1485,6 +1544,48 @@ def _asset_capture_errors(errors: object, kind: str) -> dict[str, str]:
     return failures
 
 
+def _renderer_capture_failures(payload: dict) -> dict[str, str]:
+    """Separate broken capture backends from absent game assets."""
+    failures = {}
+    for kind, group in (("sprite", "sprites"), ("scene", "scenes")):
+        reasons = _asset_capture_errors(payload.get("errors"), kind)
+        if kind == "sprite" and isinstance(payload.get("sprite_failures"), dict):
+            reasons.update(
+                {
+                    name: reason
+                    for name, reason in payload["sprite_failures"].items()
+                    if isinstance(name, str) and isinstance(reason, str)
+                }
+            )
+        for name, reason in reasons.items():
+            if name in payload.get(group, {}):
+                continue
+            if any(
+                marker in reason
+                for marker in (
+                    "the renderer stopped while capturing",
+                    "the capture file was not written",
+                    "TypeError: load() got an unexpected keyword argument 'directory'",
+                    "TypeError: screenshot()",
+                    "MemoryError:",
+                    "SceneLight capture needs offscreen readback",
+                    "SceneLight character capture requires a GPU renderer",
+                )
+            ):
+                failures[kind + " " + name] = reason
+    return failures
+
+
+def _require_healthy_capture_backend(payload: dict) -> None:
+    failures = _renderer_capture_failures(payload)
+    if failures:
+        examples = "; ".join(name + ": " + reason for name, reason in list(failures.items())[:4])
+        raise RuntimeError(
+            "The capture backend failed for %d asset(s); completed captures were retained. "
+            "Another compatible renderer or runtime is required. %s" % (len(failures), examples)
+        )
+
+
 def _record_capture_outcome(payload: dict, project_root: Path, label: str) -> None:
     """Keep skips searchable in Activity and downloadable without collecting artwork."""
     session = diagnostics.current_session()
@@ -1504,9 +1605,12 @@ def _record_capture_outcome(payload: dict, project_root: Path, label: str) -> No
         "captured_sprites": len(payload.get("sprites", {})),
         "skipped_assets": len(skipped),
     }
+    reused = payload.get("reused_pixels", {})
+    summary["reused_sprites"] = reused.get("sprites", 0)
+    summary["reused_backgrounds"] = reused.get("scenes", 0)
     session.event(
         "capture.summary",
-        f"{label}: {summary['captured_sprites']} sprite forms captured; "
+        f"{label}: {summary['captured_sprites']} sprite forms ready ({summary['reused_sprites']} reused); "
         f"{len(skipped)} assets skipped",
         "warning" if skipped else "info",
         **summary,
@@ -1623,7 +1727,7 @@ def _runtime_diagnostic(
     return diagnosis + "".join(sections)
 
 
-def _capture_trace_tail(capture_root: Path | None, limit: int = 8) -> str:
+def _capture_trace_tail(capture_root: Path | None, limit: int = 8, *, attempt: str = "") -> str:
     """Return the last in-engine capture steps, one JSON record per line."""
 
     if capture_root is None:
@@ -1632,7 +1736,9 @@ def _capture_trace_tail(capture_root: Path | None, limit: int = 8) -> str:
     if not path.is_file():
         return ""
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with path.open("rb") as stream:
+            stream.seek(max(0, path.stat().st_size - 65536))
+            lines = stream.read(65536).decode("utf-8", errors="replace").splitlines()
     except OSError:
         return ""
     records: list[str] = []
@@ -1643,9 +1749,10 @@ def _capture_trace_tail(capture_root: Path | None, limit: int = 8) -> str:
         try:
             value = json.loads(line)
         except ValueError:
-            records.append(line[:400])
+            if not attempt:
+                records.append(line[:400])
             continue
-        if isinstance(value, dict):
+        if isinstance(value, dict) and (not attempt or value.get("attempt_id") == attempt):
             records.append(json.dumps(value, sort_keys=True))
     return "\n".join(records)
 
@@ -1816,10 +1923,18 @@ def _run_capture_request(
     result_path.unlink(missing_ok=True)
     environment = os.environ.copy()
     environment["SCENELIGHT_CAPTURE_REQUEST"] = str(request_path)
+    environment["SCENELIGHT_CAPTURE_BATCH_LIMIT"] = str(
+        checkpoint_limit if checkpoint_root is not None and checkpoint_limit else 0
+    )
+    environment["SCENELIGHT_CAPTURE_MEMORY_LIMIT"] = str(
+        CAPTURE_PROCESS_MEMORY_LIMIT if checkpoint_root is not None else 0
+    )
     # Ren'Py's image-state resolver contains set/dict traversals. A stable hash
     # seed keeps the canonical form plan identical when a memory-safe batch
     # starts a new interpreter.
     environment["PYTHONHASHSEED"] = "0"
+    attempt_id = uuid.uuid4().hex
+    environment["SCENELIGHT_CAPTURE_ATTEMPT_ID"] = attempt_id
     environment.setdefault("SDL_AUDIODRIVER", "dummy")
     if renderer is None:
         environment.pop("RENPY_RENDERER", None)
@@ -1846,6 +1961,20 @@ def _run_capture_request(
     working_directory = (
         discovery.project_root if native_runtime else renpy_executable.resolve().parent
     )
+    session = diagnostics.current_session()
+    worker_match = re.fullmatch(r"capture_worker_(\d+)_request\.json", request_path.name)
+    worker = int(worker_match[1]) if worker_match else None
+    if session is not None:
+        session.capture_status(
+            worker,
+            new_attempt=True,
+            status="launch requested",
+            purpose=purpose,
+            attempt_id=attempt_id,
+            renderer=renderer or "automatic",
+            executable=str(renpy_executable),
+            stall_timeout_seconds=timeout_seconds,
+        )
     diagnostics.event(
         "capture",
         "Starting isolated capture",
@@ -1869,9 +1998,16 @@ def _run_capture_request(
         creationflags=creationflags,
     ) as (process, owned_runtime_pids):
         capture_started = time.perf_counter()
+        next_snapshot = 0.0
+        last_observation = None
+        saved_observation = None
+        if session is not None:
+            session.capture_status(worker, status="started", engine_pid=process.pid)
         diagnostics.event(
             "capture.process",
             "Capture process started",
+            attempt_id=attempt_id,
+            executable=str(renpy_executable),
             engine_pid=process.pid,
             project=str(discovery.project_root),
             renderer=renderer,
@@ -1888,11 +2024,9 @@ def _run_capture_request(
         seen_composite_destinations: set[Path] = set()
         planned_form_total: int | None = None
         reported_work = -1
-        batch_yielded = False
         checkpoint_baseline = (
             _durable_form_checkpoint_count(checkpoint_root) if checkpoint_root is not None else 0
         )
-        latest_form_progress: int | None = None
         if composite_job_root is not None and materialize_composites:
             composite_job_root.mkdir(parents=True, exist_ok=True)
             composite_executor = ProcessPoolExecutor(
@@ -1946,18 +2080,33 @@ def _run_capture_request(
                     progress_key, line = progress_line
                     if progress_key != last_runtime_progress:
                         last_runtime_progress = progress_key
+                        if session is not None:
+                            last_observation = {
+                                "stage": progress_payload["stage"],
+                                "current": progress_payload["current"],
+                                "total": progress_payload["total"],
+                                "item": str(progress_payload.get("item") or "")[:512],
+                            }
                         # ``timeout_seconds`` is a stall limit, not a cap on the
                         # size of a healthy capture. Large mods can legitimately
                         # contain tens of thousands of canonical forms, so a fixed
                         # wall-clock deadline would kill an active renderer and
                         # restart the entire pass with another backend.
                         deadline = max(deadline, time.monotonic() + timeout_seconds)
+                    if (
+                        session is not None
+                        and last_observation != saved_observation
+                        and time.monotonic() >= next_snapshot
+                    ):
+                        session.capture_status(
+                            worker, status="in progress", progress=last_observation
+                        )
+                        saved_observation = last_observation
+                        next_snapshot = time.monotonic() + 10
                     stage = str(progress_payload["stage"])
                     current = int(progress_payload["current"])
                     total = int(progress_payload["total"])
-                    if stage == "form":
-                        latest_form_progress = current
-                    if stage in {"planned", "checkpoint", "restore", "form"}:
+                    if stage in {"planned", "checkpoint", "restore", "form", "form.start"}:
                         planned_form_total = total
                     watermark_key = (stage, total)
                     prior = visible_progress.watermarks.get(watermark_key, -1)
@@ -2013,10 +2162,20 @@ def _run_capture_request(
                 detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
                 session = diagnostics.current_session()
                 if session is not None:
+                    source_line = re.search(r'(?m)^File "[^"\r\n]+", line \d+[^\r\n]*', detail)
+                    session.capture_status(
+                        worker,
+                        status="script error",
+                        progress=last_observation,
+                        error=source_line[0][:512] if source_line else "",
+                    )
                     session.event(
                         "capture.script-error",
                         "Ren'Py could not compile the game scripts",
                         "error",
+                        attempt_id=attempt_id,
+                        engine_pid=process.pid,
+                        purpose=purpose,
                         executable=str(renpy_executable),
                         renderer=renderer,
                     )
@@ -2027,25 +2186,6 @@ def _run_capture_request(
                     "Ren'Py could not compile the game scripts. Check the reported file/line "
                     "and whether this is the game's compatible Ren'Py version." + detail
                 )
-            if (
-                checkpoint_root is not None
-                and checkpoint_limit is not None
-                and checkpoint_limit > 0
-                and latest_form_progress is not None
-                and latest_form_progress - checkpoint_baseline >= checkpoint_limit
-            ):
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=10)
-                _stop_process_pids(owned_runtime_pids)
-                if not isolated_parallel:
-                    _stop_managed_runtime_pids(discovery.project_root, owned_runtime_pids)
-                batch_yielded = True
-                break
             now = time.monotonic()
             if not running:
                 # Older Windows Ren'Py launchers can report exit just before their
@@ -2102,18 +2242,30 @@ def _run_capture_request(
             else:
                 composite_executor.shutdown(wait=True, cancel_futures=True)
         if result_path.is_file():
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            if session is not None:
+                session.capture_status(
+                    worker,
+                    status="runtime error" if payload.get("fatal_error") else "result returned",
+                    progress=last_observation,
+                    error=str(payload.get("fatal_error") or "")[:512],
+                )
             diagnostics.event(
                 "capture.result",
                 "Capture process returned a result; asset validation follows",
+                attempt_id=attempt_id,
                 engine_pid=process.pid,
+                purpose=purpose,
+                complete=payload.get("capture_complete", True),
+                fatal_error=payload.get("fatal_error"),
                 project=str(discovery.project_root),
                 elapsed_seconds=round(time.perf_counter() - capture_started, 3),
             )
-            return True
-        if batch_yielded:
-            return False
+            if payload.get("fatal_error"):
+                raise CaptureRuntimeError(str(payload["fatal_error"]))
+            return payload.get("capture_complete", True) is not False
         detail = _runtime_diagnostic(discovery.project_root, before=logs_before)
-        trace = _capture_trace_tail(checkpoint_root)
+        trace = _capture_trace_tail(checkpoint_root, attempt=attempt_id)
         locations = [f"project: {discovery.project_root}"]
         if checkpoint_root is not None:
             locations.append(f"capture root: {checkpoint_root}")
@@ -2132,10 +2284,20 @@ def _run_capture_request(
         evidence += "\n\n--- capture paths ---\n" + "\n".join(locations)
         session = diagnostics.current_session()
         if session is not None:
+            session.capture_status(
+                worker,
+                status="timed out" if timed_out else "stopped",
+                progress=last_observation,
+                exit_code=returncode,
+            )
             session.event(
                 "capture",
                 "Capture did not complete",
                 "error",
+                attempt_id=attempt_id,
+                engine_pid=process.pid,
+                elapsed_seconds=round(time.perf_counter() - capture_started, 3),
+                last_step=json.loads(trace.splitlines()[-1]) if trace else None,
                 purpose=purpose,
                 renderer=renderer,
                 exit_code=returncode,
@@ -2279,6 +2441,28 @@ def preflight_runtime(
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     if payload.get("version") != CAPTURE_VERSION:
         raise ValueError("Ren'Py wrote an incompatible SceneLight preflight result")
+    capabilities = payload.get("runtime_capabilities") or {}
+    if (
+        capabilities.get("shader_registration") is False
+        or capabilities.get("render_shader_api") is False
+    ):
+        raise CaptureRuntimeError(
+            "%s cannot register SceneLight's lighting shaders. A compatible runtime is required."
+            % payload.get("renpy_version", "This runtime")
+        )
+    if capabilities.get("model_renderer") is False:
+        raise ValueError(
+            "%s (%s) cannot run SceneLight's lighting shaders. A compatible model renderer is required."
+            % (
+                payload.get("renpy_version", "This runtime"),
+                capabilities.get("renderer", "unknown renderer"),
+            )
+        )
+    if capabilities.get("texture_finalizer") is False:
+        raise CaptureRuntimeError(
+            "%s is missing its graphics texture cleanup method. Select another compatible runtime."
+            % payload.get("renpy_version", "This runtime")
+        )
     if payload.get("texture_cleanup_ok") is False:
         version = payload.get("renpy_version", "This Ren'Py runtime")
         raise ValueError(
@@ -2335,6 +2519,7 @@ def capture_runtime_review(
             state.get("version") == CAPTURE_VERSION
             and state.get("signature") == signature
             and payload.get("version") == CAPTURE_VERSION
+            and not _renderer_capture_failures(payload)
             and _paths_exist(discovery.project_root, payload)
         ):
             return _decode_result(discovery, payload, cached=True)
@@ -2354,30 +2539,9 @@ def capture_runtime_review(
         "inventory_characters": True,
         "review_only": True,
     }
-    # A form that stopped one backend will stop the next one too. Carry the
-    # recorded skips forward instead of rediscovering them on every renderer.
-    carried_skips: list[str] = []
-    if request_path.is_file():
-        try:
-            previous_request = json.loads(request_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            previous_request = {}
-        previous_skips = (
-            previous_request.get("skip_forms") if isinstance(previous_request, dict) else None
-        )
-        if isinstance(previous_skips, list):
-            carried_skips = [str(value) for value in previous_skips if str(value).strip()]
     request_path.write_text(
         json.dumps(_with_plan_version(request), indent=2) + "\n", encoding="utf-8"
     )
-    for carried_name in carried_skips:
-        _add_request_skip_form(request_path, carried_name)
-    if carried_skips:
-        print(
-            f"SceneLight keeping {len(carried_skips)} previously skipped sprite form(s) "
-            "out of this attempt.",
-            flush=True,
-        )
     progress_path.unlink(missing_ok=True)
     # Review and installation capture share the same restart contract: a native
     # renderer crash keeps every finished form and resumes from it instead of
@@ -2401,6 +2565,7 @@ def capture_runtime_review(
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     if payload.get("version") != CAPTURE_VERSION:
         raise ValueError("Ren'Py wrote an incompatible SceneLight review result")
+    _require_healthy_capture_backend(payload)
     _merge_composite_capture_jobs(discovery.project_root, preview_root / "composite_jobs", payload)
     _materialize_composite_captures(discovery.project_root, payload)
     _combine_matting_captures(discovery.project_root, payload)
@@ -2582,6 +2747,11 @@ def _relativize_capture_payload(project_root: Path, payload: dict[str, object]) 
         values = payload.get(list_name)
         if isinstance(values, list):
             payload[list_name] = [relative(value) for value in values]
+    matting = payload.get("matting_captures")
+    if isinstance(matting, list):
+        for entry in matting:
+            if isinstance(entry, dict) and entry.get("relative"):
+                entry["relative"] = relative(entry["relative"])
     raw_composites = payload.get("composite_captures")
     if not isinstance(raw_composites, dict):
         return
@@ -2636,7 +2806,7 @@ def _merge_parallel_capture_payloads(
     """Merge isolated form workers into one capture result."""
 
     merged = dict(master)
-    sprites: dict[str, str] = {}
+    sprites: dict[str, str] = dict(master.get("sprites") or {})
     composites: dict[str, object] = {}
     surface_captures: set[str] = set()
     normalized_captures: set[str] = set()
@@ -2658,6 +2828,12 @@ def _merge_parallel_capture_payloads(
         ):
             raise ValueError("Ren'Py wrote an invalid SceneLight worker result")
         sprites.update((str(name), str(path)) for name, path in raw_sprites.items())
+        pixel_keys = merged.setdefault("pixel_keys", {}).setdefault("sprites", {})
+        worker_keys = payload.get("pixel_keys", {}).get("sprites", {})
+        for name in raw_sprites:
+            pixel_keys.pop(name, None)
+            if name in worker_keys:
+                pixel_keys[name] = worker_keys[name]
         # A worker captures whatever its chunk contains, including backgrounds.
         # Dropping those leaves the merged result pointing at files that only
         # exist inside a worker's capture directory.
@@ -2687,6 +2863,11 @@ def _merge_parallel_capture_payloads(
 
     used_paths = set(sprites.values())
     merged["sprites"] = sprites
+    merged["reused_pixels"] = {
+        "scenes": master.get("reused_pixels", {}).get("scenes", 0),
+        "sprites": sum(payload.get("reused_pixels", {}).get("sprites", 0) for payload in workers)
+        + master.get("reused_pixels", {}).get("sprites", 0),
+    }
     merged["scenes"] = scenes
     merged["scene_sequences"] = scene_sequences
     merged["scene_frame_sources"] = scene_frame_sources
@@ -2777,6 +2958,7 @@ def _saved_worker_result(project_root: Path, path: Path, forms: list[str]) -> di
             or not isinstance(payload, dict)
             or payload.get("version") != CAPTURE_VERSION
             or payload.get("plan_only")
+            or _renderer_capture_failures(payload)
         ):
             return None
         captured = set(payload.get("sprites", {}))
@@ -2887,6 +3069,7 @@ def _run_parallel_capture_workers(
     native_runtime: bool,
     timeout_seconds: int,
     renderer: str | None,
+    prior_sprites: dict | None = None,
 ) -> list[dict[str, object]]:
     if not planned_forms:
         return []
@@ -2894,36 +3077,55 @@ def _run_parallel_capture_workers(
     chunks = _saved_capture_chunks(capture_root, planned_forms, concurrency)
     worker_count = len(chunks)
     concurrency = min(max(1, concurrency), worker_count)
+    progress_lock = threading.Lock()
+
+    def worker_status(index: int, status: str) -> None:
+        with progress_lock:
+            print(f"SceneLight worker {index + 1}/{worker_count}: {status}", flush=True)
+
+    print(f"SceneLight sprite batches: {worker_count}", flush=True)
     completed_paths = [
         capture_root / "parallel" / f"worker-{index + 1}-complete.json"
         for index in range(worker_count)
     ]
-    results = [
-        _saved_worker_result(discovery.project_root, path, chunks[index])
-        for index, path in enumerate(completed_paths)
-    ]
-    for index, payload in enumerate(results):
-        if payload is not None:
-            _record_capture_outcome(payload, discovery.project_root, f"Saved worker {index + 1}")
-
+    session = diagnostics.current_session()
     totals = [len(chunk) for chunk in chunks]
-    completed = [
-        totals[index]
-        if results[index] is not None
-        else _saved_worker_progress(
-            discovery.project_root, capture_root / "parallel" / f"worker-{index + 1}", chunks[index]
-        )
-        for index in range(worker_count)
-    ]
+    completed = []
+    with ProgressStage("worker-checkpoints", total=worker_count) as saved:
+        results = [
+            _saved_worker_result(discovery.project_root, path, chunks[index])
+            for index, path in enumerate(completed_paths)
+        ]
+        if session is not None:
+            session.capture_batch(totals, [payload is not None for payload in results])
+        for index, payload in enumerate(results):
+            if payload is None:
+                completed.append(
+                    _saved_worker_progress(
+                        discovery.project_root,
+                        capture_root / "parallel" / f"worker-{index + 1}",
+                        chunks[index],
+                    )
+                )
+            else:
+                completed.append(totals[index])
+                _record_capture_outcome(
+                    payload, discovery.project_root, f"Saved worker {index + 1}"
+                )
+                worker_status(index, "restored")
+            saved.advance()
     total_forms = len(planned_forms)
-    progress_lock = threading.Lock()
     last_reported = [-1]
     report_step = max(25, total_forms // 100)
-    print(
-        f"SceneLight parallel forms {sum(completed)}/{total_forms}: "
-        f"{concurrency} active worker(s); completed captures retained",
-        flush=True,
-    )
+
+    def print_batch_progress(detail: str) -> None:
+        batches = " ".join(f"{done}/{size}" for done, size in zip(completed, totals))
+        print(
+            f"SceneLight parallel forms {sum(completed)}/{total_forms}: {detail} | batches {batches}",
+            flush=True,
+        )
+
+    print_batch_progress(f"{concurrency} active worker(s); completed captures retained")
     if all(payload is not None for payload in results):
         return results
     worker_group = Path(
@@ -2931,6 +3133,7 @@ def _run_parallel_capture_workers(
     )
     worker_projects = [worker_group / f"w{index + 1}" for index in range(worker_count)]
     copies_completed = [0]
+    copies_needed = sum(payload is None for payload in results)
     prepared = [False] * worker_count
     capture_mode = [
         f"{concurrency} active worker(s), {worker_count} saved batches; "
@@ -2949,12 +3152,9 @@ def _run_parallel_capture_workers(
                 or aggregate - last_reported[0] >= report_step
             ):
                 last_reported[0] = aggregate
-                print(
-                    f"SceneLight parallel forms {aggregate}/{total_forms}: {capture_mode[0]}",
-                    flush=True,
-                )
+                print_batch_progress(capture_mode[0])
 
-    def run_worker(worker_index: int) -> dict[str, object]:
+    def capture_worker(worker_index: int) -> dict[str, object]:
         worker_number = worker_index + 1
         worker_project = worker_projects[worker_index]
         if not prepared[worker_index]:
@@ -2963,7 +3163,7 @@ def _run_parallel_capture_workers(
             with progress_lock:
                 copies_completed[0] += 1
                 print(
-                    f"SceneLight worker copies {copies_completed[0]}/{worker_count}: "
+                    f"SceneLight worker copies {copies_completed[0]}/{copies_needed}: "
                     "isolated game runtimes ready",
                     flush=True,
                 )
@@ -2996,6 +3196,14 @@ def _run_parallel_capture_workers(
             "component_dir": str((capture_root / "components").resolve()),
             "defer_composites": True,
             "explicit_forms": chunks[worker_index],
+            "index_pixels": True,
+            "reuse_pixels": {
+                "sprites": {
+                    name: prior_sprites[name]
+                    for name in chunks[worker_index]
+                    if prior_sprites and name in prior_sprites
+                }
+            },
             "sprite_names": [],
             "sprite_sequences": [],
             "character_tags": master_payload.get("character_tags", []),
@@ -3042,15 +3250,9 @@ def _run_parallel_capture_workers(
                 last_error = error
                 if renderer_index + 1 < len(worker_renderers):
                     next_renderer = worker_renderers[renderer_index + 1]
-                    print(
-                        f"SceneLight worker {worker_number}/{worker_count}: "
-                        f"retrying with the {next_renderer} renderer",
-                        flush=True,
-                    )
+                    worker_status(worker_index, f"retrying with the {next_renderer} renderer")
         if last_error is not None:
             raise last_error
-        with progress_lock:
-            completed[worker_index] = totals[worker_index]
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         _relativize_capture_payload(discovery.project_root, payload)
         _record_capture_outcome(payload, discovery.project_root, f"Worker {worker_number}")
@@ -3072,6 +3274,24 @@ def _run_parallel_capture_workers(
             completed_paths[worker_index],
             {"version": 1, "forms": chunks[worker_index], "payload": payload},
         )
+        report(worker_index, "form", totals[worker_index], totals[worker_index])
+        worker_status(worker_index, "saved")
+        return payload
+
+    def run_worker(worker_index: int, *, retry: bool = False) -> dict[str, object]:
+        worker_status(worker_index, "retrying on its own" if retry else "running")
+        if session is not None:
+            session.capture_status(worker_index + 1, new_attempt=True, status="preparing")
+        try:
+            payload = capture_worker(worker_index)
+        except Exception as error:
+            if session is not None:
+                session.capture_status(worker_index + 1, batch_error=str(error)[:512])
+            raise
+        if session is not None:
+            session.capture_status(
+                worker_index + 1, status="finished", captured=len(payload.get("sprites", {}))
+            )
         return payload
 
     try:
@@ -3089,8 +3309,10 @@ def _run_parallel_capture_workers(
                     results[worker_index] = future.result()
                 except CaptureInstanceConflict:
                     conflicts.append(worker_index)
+                    worker_status(worker_index, "waiting for the other game instances to close")
                 except Exception as error:
                     failures.append(error)
+                    worker_status(worker_index, "stopped")
         # All children have settled before retrying a guard that uses a global
         # mutex instead of temp files. Preserve healthy shards and reuse the
         # failed shard's exact output directory, plan, and durable checkpoints.
@@ -3103,9 +3325,10 @@ def _run_parallel_capture_workers(
             capture_mode[0] = "sequential capture (single-instance protection)"
             for worker_index in sorted(conflicts):
                 try:
-                    results[worker_index] = run_worker(worker_index)
+                    results[worker_index] = run_worker(worker_index, retry=True)
                 except Exception as error:
                     failures.append(error)
+                    worker_status(worker_index, "stopped")
         if failures:
             print(
                 "SceneLight paused with completed capture batches saved. "
@@ -3139,7 +3362,20 @@ def capture_runtime_assets(
     # Raw pixels depend on the helper and visual project content, not on which
     # subset happened to request them. A later scan can therefore add a sprite
     # family without moving every unchanged per-form checkpoint to a new cache.
-    content_signature = _capture_content_signature(discovery)
+    scope_hash = hashlib.sha256(
+        f"capture-index-1/{CAPTURE_PIXEL_VERSION}/{CAPTURE_VERSION}/{CAPTURE_PLAN_VERSION}/{renderer}/{native_runtime}".encode()
+    )
+    if renpy_executable.is_file():
+        scope_hash.update(sha256_file(renpy_executable))
+    compiled = {}
+    with ProgressStage("capture-inputs", item="Reading scripts and artwork to check for changes"):
+        content_signature = _capture_content_signature(
+            discovery, reuse_scope=scope_hash, compiled=compiled
+        )
+    scope = scope_hash.hexdigest()
+    content_signature = hashlib.sha256(
+        ("script-proofs-1/" + content_signature + scope).encode()
+    ).hexdigest()
     signature = _project_signature(discovery, content_signature=content_signature)
     capture_root = cache_root / "captured" / content_signature[:16]
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -3160,16 +3396,30 @@ def capture_runtime_assets(
             state.get("version") == CAPTURE_VERSION
             and state.get("signature") == signature
             and result_payload.get("version") == CAPTURE_VERSION
+            and not _renderer_capture_failures(result_payload)
             and _paths_exist(discovery.project_root, result_payload)
         ):
             _record_capture_outcome(result_payload, discovery.project_root, "Saved capture")
-            return _validate_result(
+            result = _validate_result(
                 discovery,
                 _decode_result(discovery, result_payload, cached=True),
             )
+            print(
+                f"SceneLight capture cache: {len(result_payload.get('sprites', {}))} sprites, "
+                f"{len(result_payload.get('scenes', {}))} backgrounds reused",
+                flush=True,
+            )
+            return result
 
+    # A stopped capture can leave a newer result beside the previous completion
+    # marker. The marker is restored only after every output has been validated.
+    state_path.unlink(missing_ok=True)
+    with ProgressStage("capture-reuse", item="Checking saved capture files") as progress:
+        reuse_pixels = verified_pixels(cache_root, scope, compiled, progress=progress)
     request = {
         "version": CAPTURE_VERSION,
+        "index_pixels": True,
+        "reuse_pixels": reuse_pixels,
         "output_dir": str(capture_root.relative_to(discovery.project_root)).replace("\\", "/"),
         "result": str(result_path.relative_to(discovery.project_root)).replace("\\", "/"),
         "progress": str(progress_path.relative_to(discovery.project_root)).replace("\\", "/"),
@@ -3228,6 +3478,7 @@ def capture_runtime_assets(
         # A previous runtime can have produced a valid result and then failed in
         # unrelated project shutdown code. The helper publishes a new result only
         # after every requested asset is complete.
+        print("SceneLight opening game capture", flush=True)
         _run_capture_request_resumable(
             discovery,
             renpy_executable,
@@ -3259,6 +3510,7 @@ def capture_runtime_assets(
             native_runtime=native_runtime,
             timeout_seconds=timeout_seconds,
             renderer=renderer,
+            prior_sprites=request["reuse_pixels"].get("sprites"),
         )
         result_payload = _merge_parallel_capture_payloads(
             result_payload,
@@ -3275,43 +3527,23 @@ def capture_runtime_assets(
     _combine_matting_captures(discovery.project_root, result_payload)
     if not _paths_exist(discovery.project_root, result_payload):
         missing = _missing_capture_paths(discovery.project_root, result_payload)
-        # One form the renderer could not write must not throw away a whole
-        # inventory. Drop the stragglers, report them as unsupported, and keep
-        # going; a pass that lost a large share of its captures is still fatal.
-        sprites = result_payload.get("sprites")
-        sprite_missing = [key for group, key in missing if group == "sprites"]
-        tolerable = (
-            isinstance(sprites, dict)
-            and sprite_missing
-            and len(sprite_missing) <= max(8, len(sprites) // 50)
-            and all(group == "sprites" for group, _key in missing)
+        raise FileNotFoundError(
+            "Ren'Py did not write every reported SceneLight capture (%d missing): %s"
+            % (
+                len(missing),
+                "; ".join("%s: %s" % (group, key) for group, key in missing[:6]),
+            )
         )
-        if tolerable:
-            errors = result_payload.setdefault("errors", [])
-            if isinstance(errors, list):
-                for key in sprite_missing:
-                    sprites.pop(key, None)
-                    errors.append("sprite %s: the capture file was not written" % (key,))
-            print(
-                "SceneLight skipped %d sprite form(s) whose capture was not written: %s"
-                % (len(sprite_missing), ", ".join(sprite_missing[:6])),
-                flush=True,
-            )
-        else:
-            raise FileNotFoundError(
-                "Ren'Py did not write every reported SceneLight capture (%d missing): %s"
-                % (
-                    len(missing),
-                    "; ".join("%s: %s" % (group, key) for group, key in missing[:6]),
-                )
-            )
+    _require_healthy_capture_backend(result_payload)
     _deduplicate_normalized_captures(discovery.project_root, result_payload)
     _normalize_surface_captures(discovery.project_root, result_payload)
     skipped_forms = set(_asset_capture_errors(result_payload.get("errors"), "sprite"))
     skipped_forms.difference_update(result_payload.get("sprites", {}))
+    reused = result_payload.get("reused_pixels", {})
     print(
         f"SceneLight capture outcome: {len(result_payload.get('sprites', {}))} sprite forms "
-        f"captured; {len(skipped_forms)} skipped. Skip reasons are in Activity and its support export.",
+        f"ready ({reused.get('sprites', 0)} reused); {len(skipped_forms)} skipped. "
+        f"Background captures reused: {reused.get('scenes', 0)}.",
         flush=True,
     )
     summary = result_payload.get("capture_summary")
@@ -3319,19 +3551,23 @@ def capture_runtime_assets(
         summary["captured_sprites"] = len(result_payload.get("sprites", {}))
         summary["skipped_sprites"] = len(skipped_forms)
     _record_capture_outcome(result_payload, discovery.project_root, "Validated capture")
-    _write_capture_result(result_path, result_payload)
-    validated_result = _validate_result(
-        discovery, _decode_result(discovery, result_payload, cached=False)
-    )
-    # Only successful captures may receive the reusable completion marker.
-    state_path.write_text(
-        json.dumps(
-            {"version": CAPTURE_VERSION, "signature": signature},
-            indent=2,
+    with ProgressStage(
+        "capture-save", item="Verifying captured assets and writing the reuse index"
+    ):
+        _write_capture_result(result_path, result_payload)
+        validated_result = _validate_result(
+            discovery, _decode_result(discovery, result_payload, cached=False)
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        record_pixels(cache_root, scope, result_payload, compiled)
+        # Only successful captures may receive the reusable completion marker.
+        state_path.write_text(
+            json.dumps(
+                {"version": CAPTURE_VERSION, "signature": signature},
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return validated_result
 
 
@@ -3438,6 +3674,30 @@ def _pending_form_crash(capture_root: Path) -> bool:
     )
 
 
+def _retain_batch_failures(request_path: Path, result_path: Path) -> int:
+    """Carry reported failures through clean restarts without calling them crashes."""
+    if not result_path.is_file():
+        return 0
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    _require_healthy_capture_backend(payload)
+    failures = payload.get("sprite_failures", {})
+    if not failures:
+        return 0
+    if not isinstance(failures, dict) or any(
+        not isinstance(name, str) or not isinstance(reason, str)
+        for name, reason in failures.items()
+    ):
+        raise ValueError("Invalid sprite failures in capture batch")
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    previous = request.setdefault("completed_form_failures", {})
+    added = len(set(failures) - set(previous))
+    previous.update(failures)
+    temporary = request_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(request, indent=2), encoding="utf-8")
+    os.replace(temporary, request_path)
+    return added
+
+
 def _run_capture_request_resumable(
     discovery: ProjectDiscovery,
     renpy_executable: Path,
@@ -3463,6 +3723,7 @@ def _run_capture_request_resumable(
     crash_retries = 0
     stalled_retries = 0
     completed_batches = 0
+    _reset_request_skips(request_path)
     while True:
         before = _durable_form_checkpoint_count(capture_root)
         try:
@@ -3486,9 +3747,14 @@ def _run_capture_request_resumable(
                 isolated_parallel=isolated_parallel,
             )
             if completed is not False:
+                if result_path.is_file():
+                    _require_healthy_capture_backend(
+                        json.loads(result_path.read_text(encoding="utf-8"))
+                    )
                 return
             after = _durable_form_checkpoint_count(capture_root)
-            if after <= before:
+            failed = _retain_batch_failures(request_path, result_path)
+            if after <= before and not failed:
                 detail = _capture_failure_detail(result_path, capture_root)
                 message = "Ren'Py ended a capture batch without saving a sprite form."
                 if detail:
@@ -3498,7 +3764,8 @@ def _run_capture_request_resumable(
             progress_path.unlink(missing_ok=True)
             print(
                 "SceneLight memory-safe batch %d complete: %d new sprite forms saved "
-                "(%d total). Starting the next batch." % (completed_batches, after - before, after),
+                "(%d total), %d skipped. Starting the next batch."
+                % (completed_batches, after - before, after, failed),
                 flush=True,
             )
         except CaptureInstanceConflict:

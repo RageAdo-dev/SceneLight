@@ -10,22 +10,24 @@ from types import SimpleNamespace
 import pytest
 
 from scenelight.runtime.live_renpy import Renderer, TextureUploadState
+from scenelight.runtime.prepared import FIELDS
 
 
 def test_restored_backgrounds_are_routed_without_a_new_show_statement():
     path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
     text = path.read_text(encoding="utf-8")
-    start = text.index("    def _scenelight_wrap_backgrounds(")
-    end = text.index("\n    def ", start + 5)
+    start = text.index("    def _scenelight_layered_backdrop(")
+    end = text.index("    def _scenelight_restore_background_bindings", start)
     node = ast.parse(textwrap.dedent(text[start:end]))
 
     class Tap:
         def __init__(self, child, key):
-            self.child, self.key = child, key
+            self.child, self.scene_key = child, key
 
     class Entry:
         def __init__(self, name, tag):
             self.name, self.tag, self.displayable = name, tag, object()
+            self.show_time = self.animation_time = 2.0
 
         def copy(self):
             return copy.copy(self)
@@ -36,11 +38,33 @@ def test_restored_backgrounds_are_routed_without_a_new_show_statement():
         Entry(("actor", "idle"), "actor"),
     )
     owner = SimpleNamespace(layers={"master": [room, dynamic, sprite]})
+
+    class Solid:
+        pass
+
+    class Box:
+        def __init__(self, *, layout):
+            assert layout == "fixed"
+
+        def append_scene_list(self, entries):
+            self.scene_list = entries
+            self.children = [entry.displayable for entry in entries]
+
     namespace = {
-        "renpy": SimpleNamespace(display=SimpleNamespace(_scenelight_live_renderer=object())),
+        "renpy": SimpleNamespace(
+            display=SimpleNamespace(
+                _scenelight_live_renderer=object(),
+                imagelike=SimpleNamespace(Solid=Solid),
+                layout=SimpleNamespace(MultiBox=Box),
+            )
+        ),
         "_SceneLightBackground": Tap,
+        "_scenelight_get_registered_image": lambda name: Solid() if name == ("black",) else None,
+        "_scenelight_contains_lit_sprite": lambda _: False,
+        "SCENELIGHT_CHARACTER_TAGS": {"actor"},
+        "SCENELIGHT_MANIFEST": {"excluded_character_tags": ["extra"]},
         "_SCENELIGHT_STRING_TYPES": (str,),
-        "SCENELIGHT_SCENES": {"room day": {}},
+        "SCENELIGHT_SCENES": {"room day": {}, "black": {}},
         "SCENELIGHT_SCENE_SEQUENCES": {},
     }
     exec(compile(node, str(path), "exec"), namespace)
@@ -58,6 +82,28 @@ def test_restored_backgrounds_are_routed_without_a_new_show_statement():
     assert owner.layers["master"][0].displayable is room.displayable
     assert isinstance(owner.layers["master"][1].displayable, Tap)
     assert wrap(owner)
+
+    floor = Entry(("black",), "black")
+    movie = Entry(("weather", "movie"), "weather")
+    scenery = Entry(("window",), "window")
+    actor = Entry(("actor", "idle"), "alias")
+    front = Entry(("snow",), "snow")
+    entries = owner.layers["master"] = [floor, movie, scenery, actor, front]
+    assert wrap(owner)
+    tap = entries[0].displayable
+    assert tap._sc_backdrop_key == "window"
+    assert tap._sc_backdrop.children == [e.displayable for e in (floor, movie, scenery)]
+    assert not wrap(owner)
+    entries[2] = room
+    assert wrap(owner)
+    assert entries[0].displayable._sc_backdrop_key == "room day"
+    assert entries[0].displayable._sc_backdrop.children[-1] is room.displayable
+    entries[1:] = [Entry(("extra",), "alias"), scenery]
+    assert wrap(owner)
+    assert not hasattr(entries[0].displayable, "_sc_backdrop")
+    entries[1:] = [movie, dynamic, sprite]
+    wrap(owner)
+    assert not hasattr(entries[0].displayable, "_sc_backdrop")
 
 
 class Render:
@@ -120,8 +166,6 @@ def test_texture_upload_restores_pixel_unpack_and_texture_state_on_failure():
 
 
 def test_prepared_texture_pool_preserves_frozen_frames_and_reuses_released_frames():
-    from scenelight.runtime.prepared import FIELDS
-
     renderer, draw, analysis, _, errors = renderer_fixture()
     gl = analysis.device.gl
     gl.TexSubImage2D = lambda *args: None
@@ -277,6 +321,36 @@ def renderer_fixture():
         display=SimpleNamespace(draw=draw, log=SimpleNamespace(write=errors.append)),
     )
     return Renderer(gpu, api, None), draw, analysis, copies, errors
+
+
+@pytest.mark.parametrize("scale", [0.75, 2.5])
+def test_lighting_fields_keep_their_texel_dimensions_on_scaled_legacy_gl2(scale):
+    renderer, draw, _, copies, errors = renderer_fixture()
+    allocate = draw.render_to_texture
+    surface_sizes = []
+
+    def scaled(render, **kwargs):
+        texture = allocate(render, **kwargs)
+        texture.texture_width, texture.texture_height = [round(n * scale) for n in render.size]
+        return texture
+
+    def load_pixels(surface, properties):
+        assert properties["mipmap"] is False
+        surface_sizes.append(surface)
+        texture = allocate(Render(*surface))
+        texture.load = lambda: None
+        return texture
+
+    draw.render_to_texture = scaled
+    draw.load_texture = load_pixels
+    renderer.api.display.pgrender = SimpleNamespace(surface=lambda size, alpha: size)
+    background = Background()
+    renderer.capture(background, Render(), 1280, 720, Frame)
+    fields = renderer.fields(renderer.frame(background))
+    assert not errors
+    assert len(copies) == len(fields) == len(surface_sizes) == 4
+    for name, width, height in FIELDS:
+        assert (fields[name].texture_width, fields[name].texture_height) == (width, height)
 
 
 @pytest.mark.parametrize("new_context", [False, True])

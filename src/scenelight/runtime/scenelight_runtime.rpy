@@ -10,6 +10,8 @@
 default persistent.scenelight_enabled = True
 default persistent.scenelight_strength = 1.0
 default scenelight_control_state = _scenelight_control_initial_state()
+default scenelight_scene_tag = None
+default scenelight_scene_pending = False
 default scenelight_fx_state = {
     "version": 1,
     "revision": 0,
@@ -42,7 +44,7 @@ init -50 python:
     def _scenelight_record_diagnostic(stage, details):
         """Record state changes only; no pixels, dialogue, or per-frame logging."""
         global _SCENELIGHT_DIAGNOSTIC_FAILURE, _SCENELIGHT_DIAGNOSTIC_STARTED
-        if _SCENELIGHT_DIAGNOSTIC_FAILURE:
+        if _SCENELIGHT_DIAGNOSTIC_FAILURE or not getattr(renpy.display, "_scenelight_log_privacy", None):
             return
         try:
             path = os.path.join(config.basedir, "scenelight-runtime.jsonl")
@@ -54,15 +56,15 @@ init -50 python:
             with open(path, "a") as stream:
                 if not _SCENELIGHT_DIAGNOSTIC_STARTED:
                     _SCENELIGHT_DIAGNOSTIC_STARTED = True
-                    stream.write(json.dumps({"stage": "runtime.start", "time": _sc_diagnostic_time.time(),
+                    stream.write(json.dumps(renpy.display._scenelight_log_privacy.mask_value({"stage": "runtime.start", "time": _sc_diagnostic_time.time(),
                         "renpy": getattr(renpy, "version_string", "unknown"),
                         "renderer": renpy.get_renderer_info(),
                         "manifest_version": SCENELIGHT_MANIFEST.get("version"),
                         "form_version": SCENELIGHT_FORM_MANIFEST.get("version"),
-                        "profile_strength": SCENELIGHT_PROFILE_STRENGTH}, default=str) + "\n")
-                stream.write(json.dumps({"time": _sc_diagnostic_time.time(), "stage": stage,
+                        "profile_strength": SCENELIGHT_PROFILE_STRENGTH}), default=str) + "\n")
+                stream.write(json.dumps(renpy.display._scenelight_log_privacy.mask_value({"time": _sc_diagnostic_time.time(), "stage": stage,
                                          "renpy": getattr(renpy, "version_string", "unknown"),
-                                         "details": details}, ensure_ascii=True) + "\n")
+                                         "details": details}), ensure_ascii=True) + "\n")
         except Exception:
             _SCENELIGHT_DIAGNOSTIC_FAILURE = True
     _SCENELIGHT_MEASURING_EMITTERS = False
@@ -70,6 +72,22 @@ init -50 python:
     # API entirely. Keep the original executable playable; SceneLight itself
     # is activated by the compatibility launcher installed beside that game.
     _SCENELIGHT_SHADER_AVAILABLE = callable(getattr(renpy, "register_shader", None))
+
+    def _scenelight_restore_renderer():
+        # Use the backend that passed capture when the game starts normally.
+        # Keep explicit launch/session choices; never rewrite saved preferences.
+        if os.environ.get("RENPY_RENDERER") or renpy.session.get("renderer"):
+            return
+        try:
+            with renpy.file("scenelight_runtime/install_report.json") as stream:
+                report = json.load(stream)
+        except (IOError, ValueError):
+            return
+        renderer = report.get("runtime_renderer") if isinstance(report, _SceneLightMapping) else None
+        if renderer in ("gl2", "angle2", "gles2"):
+            renpy.session["renderer"] = renderer
+
+    _scenelight_restore_renderer()
     # Effect packs are experimental and script-only; the player panel is disabled.
     _SCENELIGHT_PLAYER_EFFECT_UI_ENABLED = False
     SCENELIGHT_DEBUG_CONTRAST = 0.0 if os.environ.get("SCENELIGHT_DEBUG_NO_CONTRAST") == "1" else 1.0
@@ -424,7 +442,8 @@ init -50 python:
             return tuple(anchor)
         layer = group.get("layer", "master")
         try:
-            visible = set(renpy.get_showing_tags(layer=layer))
+            visible = dict((str(tag).lower(), tag)
+                           for tag in renpy.get_showing_tags(layer=layer))
             sw, sh = float(config.screen_width), float(config.screen_height)
             if sw <= 0 or sh <= 0:
                 return None
@@ -446,7 +465,7 @@ init -50 python:
                 for tag in tags:
                     if tag not in visible:
                         continue
-                    rect = renpy.get_image_bounds(tag, config.screen_width, config.screen_height, layer)
+                    rect = renpy.get_image_bounds(visible[tag], config.screen_width, config.screen_height, layer)
                     if rect and len(rect) == 4 and rect[2] > 0 and rect[3] > 0:
                         rect = tuple(float(value) for value in rect)
                         if not any(math.isnan(value) or math.isinf(value) for value in rect):
@@ -1170,6 +1189,221 @@ init -50 python:
         sys.modules[module_name] = module
         return module
 
+    renpy.display._scenelight_log_privacy = _scenelight_runtime_module("log_privacy") if renpy.loadable("scenelight_runtime/log_privacy.txt") else None
+    renpy.display._scenelight_edit_forms = None
+    if (os.path.isfile(os.path.join(config.basedir, ".scenelight_developer_install.json"))
+            and renpy.loadable("scenelight_runtime/live_edit.txt")
+            and hasattr(config, "periodic_callbacks") and callable(getattr(renpy, "reload_script", None))):
+        _sc_edit_module = _scenelight_runtime_module("live_edit")
+        renpy.display._scenelight_edit_forms = _sc_edit_module.VisibleForms(config.basedir)
+        renpy.display._scenelight_edit_forms.install = _sc_edit_module.read_install(config.basedir)
+        config.overlay_screens.append("_scenelight_edit_progress")
+
+        def _scenelight_form_input(child, path, layered=False):
+            if isinstance(child, renpy.display.im.ImageBase):
+                surface = renpy.display.im.load_surface(child)
+            elif layered:
+                rendered = renpy.render(child, config.screen_width, config.screen_height, 0.0, 0.0)
+                w, h = rendered.get_size()
+                if w <= 0 or h <= 0 or w * h > 4194304:
+                    return False
+                if tuple(renpy.version_tuple[:2]) >= (8, 3) and callable(getattr(renpy, "render_to_surface", None)):
+                    if type(renpy.display.draw).__name__ == "SWDraw":
+                        return False
+                    surface = renpy.render_to_surface(rendered, resize=True)
+                else:
+                    # Older renderers can only read their window. Use the resolved
+                    # image stack when Ren'Py placed ordinary layers in a Fixed.
+                    children = getattr(child, "children", ())
+                    offsets = getattr(child, "offsets", ())
+                    if (type(child).__name__ not in ("Fixed", "MultiBox") or not 0 < len(children) <= 64
+                            or len(children) != len(offsets) or int(w) != w or int(h) != h):
+                        return False
+                    try:
+                        import pygame_sdl2 as pg
+                    except ImportError:
+                        import pygame as pg
+                    surface = pg.Surface((int(w), int(h)), pg.SRCALPHA, 32)
+                    surface.fill((0, 0, 0, 0))
+                    for item, (x, y) in zip(children, offsets):
+                        if isinstance(item, renpy.display.image.ImageReference):
+                            item = item.target
+                        if type(item).__name__ == "Null":
+                            continue
+                        if not isinstance(item, renpy.display.im.ImageBase) or x != int(x) or y != int(y):
+                            return False
+                        surface.blit(renpy.display.im.load_surface(item), (int(x), int(y)))
+            else:
+                return False
+            if surface.get_width() * surface.get_height() > 4194304:
+                return False
+            renpy.display.scale.image_save_unscaled(surface, path)
+            return True
+
+        def _scenelight_ready_to_reload():
+            return not getattr(renpy.store, "_in_replay", False) and not renpy.context_nesting_level()
+        def _scenelight_preview_artwork(files):
+            try:
+                forms = renpy.display._scenelight_edit_forms
+                forms.recent_art.update(files)
+                forms.recheck_commit = forms.commit_job is not None
+                changed = set()
+                flush = set()
+                requests = {}
+                for filename in files:
+                    aliases = [filename]
+                    if filename.lower().startswith("images/"):
+                        aliases.append(filename[7:])
+                    for alias in aliases:
+                        flush.add(alias)
+                        changed.add(alias.lower())
+                def update(sprite):
+                    if sprite._sc_snapshot_frozen:
+                        return
+                    layered = getattr(sprite, "_sc_layered", False)
+                    if sprite.form_key in requests and not layered:
+                        return
+                    child = sprite.child
+                    sources = _scenelight_visible_sources(child)
+                    if isinstance(child, renpy.display.im.ImageBase):
+                        sources = list(sources) + list(child.predict_files() or ())
+                    if not any(source.replace(chr(92), "/").lower() in changed for source in sources):
+                        return
+                    requests[sprite.form_key] = (sources, child, layered)
+                for entry in renpy.game.context().scene_lists.layers.get("master", ()):
+                    _scenelight_redraw_tree(entry.displayable, update)
+                for filename in flush:
+                    renpy.flush_cache_file(filename)
+                for name, (sources, child, layered) in requests.items():
+                    try:
+                        forms.request(name, sources, lambda path: _scenelight_form_input(child, path, layered), layered)
+                    except Exception as error:
+                        forms.deferred.add(name)
+                        forms.update_status()
+                        _scenelight_record_diagnostic("live_edit.form", {"error": str(error)})
+                renpy.restart_interaction()
+            except Exception as error:
+                _scenelight_record_diagnostic("live_edit.preview", {"error": str(error)})
+        def _scenelight_script_edit(revision, packet):
+            forms = renpy.display._scenelight_edit_forms
+            state = packet.get("state")
+            forms.recheck_commit = forms.commit_job is not None
+            if state == "preview" and packet.get("entries") is not None:
+                forms.script_packet = (revision, packet)
+                forms.status = "Loading script changes"
+                forms.reload_after = __import__("time").time() + .35
+            else:
+                forms.reload_after = 0
+                forms.status = {"checking": "Preparing sprite lighting", "pending": "Updating project lighting", "waiting": "Waiting for sprite artwork"}.get(state, "")
+            forms.until = 0
+            renpy.restart_interaction()
+
+        def _scenelight_edit_tick():
+            forms = renpy.display._scenelight_edit_forms
+            if forms.commit_job and not getattr(forms, "reload_after", 0):
+                action, patch = forms.commit_job[0]
+                forms.commit_job = None
+                if getattr(forms, "recheck_commit", False):
+                    _scenelight_commit_edit()
+                    return
+                if action == "newer":
+                    return
+                if action == "reload":
+                    _scenelight_record_diagnostic("live_edit.reload", {"reason": patch})
+                    _scenelight_reload_install()
+                    return
+                try:
+                    _scenelight_apply_sprite_commit(forms, patch)
+                except Exception as error:
+                    _scenelight_record_diagnostic("live_edit.commit", {"error": str(error)})
+                    _scenelight_reload_install()
+                return
+            reload_after = getattr(forms, "reload_after", 0)
+            if reload_after and __import__("time").time() >= reload_after:
+                forms.reload_after = 0
+                revision, packet = forms.script_packet
+                if _sc_edit_module.script_matches(config.gamedir, packet.get("scripts", {})) and __import__("os").path.isdir(forms.workspace):
+                    renpy.session["_scenelight_script_maps"] = (revision, packet["entries"], packet.get("layers", []), packet["scripts"])
+                    renpy.reload_script()
+                else:
+                    forms.status = "Updating project lighting"
+                    renpy.restart_interaction()
+                return
+            if renpy.session.pop("_scenelight_edit_commit", False):
+                forms.status = "Project lighting updated"
+                forms.until = __import__("time").time() + 3
+                renpy.restart_interaction()
+            if forms.layer_tags:
+                def prepare(sprite):
+                    name = sprite.form_key
+                    if (sprite._sc_snapshot_frozen or not getattr(sprite, "_sc_layered", False)
+                            or name.split()[0] not in forms.layer_tags or name in forms.bindings
+                            or name in forms.evicted or len(forms.pending) >= 3):
+                        return
+                    try:
+                        forms.request(name, (), lambda path: _scenelight_form_input(sprite.child, path, True), True)
+                    except Exception as error:
+                        forms.deferred.add(name)
+                        forms.update_status()
+                        _scenelight_record_diagnostic("live_edit.layer", {"error": str(error)})
+                for entry in renpy.game.context().scene_lists.layers.get("master", ()):
+                    _scenelight_redraw_tree(entry.displayable, prepare, redraw=False)
+            if forms.poll(renpy.display.im.Data):
+                _scenelight_redraw_visible_sprites()
+                renpy.restart_interaction()
+
+        def _scenelight_reload_install():
+            renpy.session.pop("_scenelight_script_maps", None)
+            renpy.session["_scenelight_edit_commit"] = True
+            renpy.reload_script()
+
+        def _scenelight_commit_edit():
+            forms = renpy.display._scenelight_edit_forms
+            forms.recheck_commit = False
+            if not callable(getattr(renpy, "flush_cache_file", None)):
+                _scenelight_reload_install()
+                return
+            packet = renpy.session.get("_scenelight_script_maps", ())
+            forms.check_commit(SCENELIGHT_MANIFEST, SCENELIGHT_FORM_MANIFEST,
+                               packet[3] if len(packet) > 3 else {}, set(SCENELIGHT_CHARACTER_TAGS))
+
+        def _scenelight_apply_sprite_commit(forms, patch):
+            installed, tags, entries, files, cache, skipped = patch
+            for filename in files:
+                getattr(renpy.loader, "loadable_cache", {}).pop(filename, None)
+                renpy.flush_cache_file(filename)
+            touched = set(name.split()[0] for name in entries)
+            for tag in touched:
+                SCENELIGHT_FORM_CANDIDATES[tag] = [
+                    row for row in SCENELIGHT_FORM_CANDIDATES.get(tag, ()) if row[1] not in entries]
+            for name, value in entries.items():
+                if value is None:
+                    SCENELIGHT_FORM_SPRITES.pop(name, None)
+                    continue
+                SCENELIGHT_FORM_SPRITES[name] = value
+                parts = name.split()
+                SCENELIGHT_FORM_CANDIDATES[parts[0]].append((frozenset(parts[1:]), name, value))
+            SCENELIGHT_FORM_MANIFEST.update(cache=cache, skipped=skipped)
+            SCENELIGHT_MANIFEST["character_tags"] = tags
+            forms.install = installed
+            forms.generation += 1
+            forms.bindings.clear()
+            forms.pending.clear()
+            forms.deferred.clear()
+            forms.evicted.clear()
+            forms.layer_tags.clear()
+            forms.recent_art.clear()
+            renpy.session.pop("_scenelight_script_maps", None)
+            forms.status = ""
+            forms.until = 0
+            _scenelight_record_diagnostic("live_edit.commit", {"forms": len(entries), "script_reload": False})
+            _scenelight_redraw_visible_sprites()
+            renpy.restart_interaction()
+
+        config.periodic_callbacks.append(_sc_edit_module.subscribe(
+            config.basedir, _scenelight_commit_edit, _scenelight_ready_to_reload,
+            _scenelight_preview_artwork if callable(getattr(renpy, "flush_cache_file", None)) else None,
+            renpy.display._scenelight_edit_forms, _scenelight_edit_tick, _scenelight_script_edit))
     renpy.display._scenelight_live_renderer = None
     renpy.display._scenelight_live_error = None
     if (_SCENELIGHT_SHADER_AVAILABLE and SCENELIGHT_MANIFEST.get("scene_analysis", "live") == "live"
@@ -1267,7 +1501,7 @@ init -50 python:
             result = self._copy()
             result.child = self.child._in_current_store()
             renderer = renpy.display._scenelight_live_renderer
-            if result._sc_frozen_canvas is None and renderer is not None:
+            if result._sc_frozen_canvas is None and renderer is not None and getattr(self, "_sc_backdrop", None) is None:
                 reference = _SceneLightFrameReference()
                 if renderer.pin_canvas(self, reference):
                     result._sc_frozen_canvas = reference
@@ -1286,12 +1520,19 @@ init -50 python:
             rendered = renpy.render(self.child, width, height, st, at)
             if renderer is not None:
                 before = renderer.frame(self)
-                renderer.capture(self, rendered, width, height, _SceneLightFrameReference)
+                backdrop = getattr(self, "_sc_backdrop", None)
+                if backdrop is not None:
+                    # Sample the scenery at its native layer coordinates and clocks.
+                    # Ren'Py still draws each original entry at its own zorder.
+                    sampled = renpy.render(backdrop, width, height, st, at)
+                    renderer.capture(self, sampled, width, height, _SceneLightFrameReference, backdrop)
+                else:
+                    renderer.capture(self, rendered, width, height, _SceneLightFrameReference)
                 if renderer.frame(self) is not before:
                     _scenelight_redraw_visible_sprites()
                 if renderer.animated(self):
                     renpy.redraw(self, 0.0)
-                captured = renderer.canvas(self)
+                captured = renderer.canvas(self) if backdrop is None else None
                 if captured is not None:
                     canvas, self._sc_canvas_offset = captured
                     self._sc_canvas_mode = True
@@ -1311,6 +1552,8 @@ init -50 python:
             # retain the tap through the renderer's source-identity cache.
             result = renpy.Render(*rendered.get_size())
             result.blit(rendered, (0, 0))
+            if renderer is not None and backdrop is not None:
+                result.depends_on(sampled)
             return result
 
     def _scenelight_live_fields(scene):
@@ -1406,7 +1649,7 @@ init -50 python:
         lights = []
         for entry in entries:
             tag = getattr(entry, "tag", None)
-            if tag not in SCENELIGHT_CHARACTER_TAGS or tag == receiver_tag:
+            if not tag or str(tag).lower() not in SCENELIGHT_CHARACTER_TAGS or tag == receiver_tag:
                 continue
             name = getattr(entry, "name", ()) or (tag,)
             name = name if isinstance(name, _SCENELIGHT_STRING_TYPES) else " ".join(name)
@@ -1435,7 +1678,7 @@ init -50 python:
         # Stable selection if a scene exceeds the four simultaneous sources.
         lights.sort(key=lambda light: (-light[1][3], light[0]))
         return tuple((data, color) for _tag, data, color in lights[:4])
-    SCENELIGHT_FORM_CANDIDATES = {}
+    SCENELIGHT_FORM_CANDIDATES = _SceneLightOrderedDict()
     for _sc_form_name, _sc_form_entry in SCENELIGHT_FORM_SPRITES.items():
         _sc_form_parts = tuple(_sc_form_name.split())
         if not _sc_form_parts:
@@ -1679,17 +1922,22 @@ init -50 python:
                 for entry in reversed(entries)
                 if not entry_tag(entry).startswith(("hide$", "replaced$"))
             ]
-            # Games commonly layer a solid "black" or another overlay above the
-            # real background. Treating the topmost named entry as the scene lit
-            # characters against that overlay, which rendered them black.
-            # Prefer the conventional background tag, then fall back to the
-            # topmost entry for games that name scenes some other way.
-            ordered.sort(key=lambda entry: 0 if entry_tag(entry) == "bg" else 1)
+            # Preserve the conventional bg tag, including show bg after a
+            # scene black. Otherwise use the first image after scene/clear
+            # so later overlays cannot replace a custom-named background.
+            primary_tag = globals().get("scenelight_scene_tag")
+            ordered.sort(key=lambda entry: (
+                0 if entry_tag(entry) == "bg" else
+                1 if getattr(entry.displayable, "_sc_backdrop_key", None) else
+                2 if primary_tag and entry_tag(entry) == primary_tag else 3))
             for entry in ordered:
+                is_primary = bool(primary_tag and entry_tag(entry) == primary_tag)
+                if is_primary:
+                    explicit_background = True
                 background = getattr(entry, "displayable", None)
                 renderer = renpy.display._scenelight_live_renderer
                 if isinstance(background, _SceneLightBackground) and renderer is not None:
-                    key = background.scene_key
+                    key = getattr(background, "_sc_backdrop_key", None) or background.scene_key
                     scene = dict(SCENELIGHT_SCENES.get(key, {}))
                     scene.update({"_sc_live_binding": background.binding, "_sc_live_key": key})
                     frame = renderer.frame(background)
@@ -1721,6 +1969,8 @@ init -50 python:
                     SCENELIGHT_STABLE_SCENE_KEY = key
                     SCENELIGHT_STABLE_SCENE = scene
                     return key, scene
+                if is_primary:
+                    break
         except Exception:
             pass
 
@@ -1730,7 +1980,7 @@ init -50 python:
             attributes = renpy.get_attributes("bg", layer="master")
         except Exception:
             attributes = None
-        if attributes:
+        if attributes and not explicit_background:
             explicit_background = True
             candidates = (" ".join(attributes), attributes[0])
             for key in candidates:
@@ -2227,6 +2477,7 @@ init -50 python:
             self.form_height_ao_edge = _scenelight_texture(form_assets["height_ao_edge"])
             self.form_response = _scenelight_texture(form_assets["response"])
             self._sc_form_binding_pending = False
+            self._sc_edit_generation = getattr(getattr(getattr(renpy, "display", None), "_scenelight_edit_forms", None), "generation", 0)
 
         def after_setstate(self):
             # Saves retain the captured map and texture displayables from their
@@ -2341,7 +2592,9 @@ init -50 python:
             ]
 
         def per_interact(self):
-            if getattr(self, "_sc_form_binding_pending", False):
+            current_generation = getattr(getattr(getattr(renpy, "display", None), "_scenelight_edit_forms", None), "generation", 0)
+            if (getattr(self, "_sc_form_binding_pending", False)
+                    or (not self._sc_snapshot_frozen and getattr(self, "_sc_edit_generation", 0) != current_generation)):
                 self._sc_refresh_form_binding()
                 renpy.redraw(self, 0.0)
             self._sc_prepare_exposure_ownership()
@@ -2689,19 +2942,29 @@ init -50 python:
                 emitter_render = _scenelight_render_for_texture(
                     self.emitter, atlas_width, atlas_height, st, at
                 )
-            if self.has_form:
-                form_width, form_height = self.form_entry["source_size"]
-                response_width, response_height = self.form_entry["response_size"]
+            form_entry = self.form_entry
+            normal_map, height_map, response_map = self.form_normal_noise, self.form_height_ao_edge, self.form_response
+            edit_forms = getattr(renpy.display, "_scenelight_edit_forms", None)
+            if edit_forms and not self._sc_snapshot_frozen and (self.form_key in edit_forms.bindings or self.form_key in edit_forms.evicted):
+                binding = edit_forms.bindings.get(self.form_key)
+                if binding is None:
+                    form_entry = None
+                else:
+                    form_entry, normal_map, height_map, response_map = binding
+            has_form = form_entry is not None
+            if has_form:
+                form_width, form_height = form_entry["source_size"]
+                response_width, response_height = form_entry["response_size"]
             else:
                 form_width = form_height = response_width = response_height = 1
             form_normal_render = _scenelight_render_for_texture(
-                self.form_normal_noise, form_width, form_height, st, at
+                normal_map, form_width, form_height, st, at
             )
             form_aux_render = _scenelight_render_for_texture(
-                self.form_height_ao_edge, form_width, form_height, st, at
+                height_map, form_width, form_height, st, at
             )
             form_response_render = _scenelight_render_for_texture(
-                self.form_response, response_width, response_height, st, at
+                response_map, response_width, response_height, st, at
             )
             wrap_render = live_fields["wrap"] if live_fields else _scenelight_render_for_texture(
                 self.wrap_atlas, atlas_width, atlas_height, st, at
@@ -2860,7 +3123,7 @@ init -50 python:
             group_anchor = controls.get("group_anchor")
             result.add_uniform("u_sc_group_anchor", tuple(group_anchor) + (1.0,)
                                if group_anchor is not None else (0.0, 0.0, 0.0))
-            result.add_uniform("u_sc_has_form", 1.0 if self.has_form else 0.0)
+            result.add_uniform("u_sc_has_form", 1.0 if has_form else 0.0)
             if self._sc_snapshot_frozen:
                 snapshot_rect = self._sc_frozen_screen_rect
             else:
@@ -2873,36 +3136,40 @@ init -50 python:
                 "u_sc_use_snapshot_rect",
                 1.0 if snapshot_rect is not None else 0.0,
             )
-            if self.has_form:
-                result.add_uniform("u_sc_form_center", tuple(self.form_entry["center"]))
+            if has_form:
+                result.add_uniform("u_sc_form_center", tuple(form_entry["center"]))
+                # GLES 2 defaults to different float precision in each stage.
+                result.add_uniform("u_sc_vertex_form_center", tuple(form_entry["center"]))
                 result.add_uniform(
                     "u_sc_mean_form_visibility",
-                    float(self.form_entry["mean_form_visibility"]),
+                    float(form_entry["mean_form_visibility"]),
                 )
                 result.add_uniform(
                     "u_sc_form_contrast_mid",
-                    float(self.form_entry["contrast_mid"]),
+                    float(form_entry["contrast_mid"]),
                 )
-                result.add_uniform("u_sc_height_range", tuple(self.form_entry["height_range"]))
-                result.add_uniform("u_sc_noise_range", float(self.form_entry["noise_range"]))
+                result.add_uniform("u_sc_height_range", tuple(form_entry["height_range"]))
+                result.add_uniform("u_sc_noise_range", float(form_entry["noise_range"]))
             else:
                 result.add_uniform("u_sc_form_center", (0.5, 0.5))
+                result.add_uniform("u_sc_vertex_form_center", (0.5, 0.5))
                 result.add_uniform("u_sc_mean_form_visibility", 1.0)
                 result.add_uniform("u_sc_form_contrast_mid", SCENELIGHT_REFERENCE_ART_MID)
                 result.add_uniform("u_sc_height_range", (-0.25, 1.25))
                 result.add_uniform("u_sc_noise_range", 4.0)
-            diagnostic_key = (SCENELIGHT_STABLE_SCENE_KEY, self.form_key, self.has_form,
+            diagnostic_key = (SCENELIGHT_STABLE_SCENE_KEY, self.form_key, has_form,
                               child_render.get_size(), self._sc_exposure_owner,
                               strength, enabled, repr(controls.get("calibration", {})),
                               self._sc_snapshot_frozen,
-                              self.form_entry.get("normal_noise") if self.has_form else None)
+                              form_entry.get("source_sha256") if has_form else None)
             if getattr(self, "_sc_diagnostic_key", None) != diagnostic_key:
                 self._sc_diagnostic_key = diagnostic_key
                 _scenelight_record_diagnostic("sprite.binding", {
                     "background": SCENELIGHT_STABLE_SCENE_KEY, "image": self.form_key,
                     "tag": self.image_name[0], "canvas": child_render.get_size(),
-                    "mapped_form": self.has_form,
-                    "form_size": self.form_entry.get("source_size") if self.has_form else None,
+                    "mapped_form": has_form,
+                    "live_form": bool(edit_forms and self.form_key in edit_forms.bindings and has_form),
+                    "form_size": form_entry.get("source_size") if has_form else None,
                     "exposure_owner": self._sc_exposure_owner, "strength": strength,
                     "enabled": enabled, "calibration": controls.get("calibration", {}),
                     "authored_grade": self.authored_grade_strength,
@@ -2957,12 +3224,14 @@ init -50 python:
             if args is not None:
                 resolved_name = tuple(getattr(args, "name", ()) or self.image_name)
                 resolved_name += tuple(getattr(args, "args", ()) or ())
-            return SceneLightSprite(
+            sprite = SceneLightSprite(
                 child,
                 self.image_name,
                 resolved_name,
                 authored_grade_strength=_scenelight_authored_grade_strength(child),
             )
+            sprite._sc_layered = type(self.original).__name__ in ("LayeredImage", "LayeredImageProxy")
+            return sprite
 
         def __getattr__(self, name):
             if name == "original":
@@ -2984,9 +3253,9 @@ init -50 python:
         if not _SCENELIGHT_SHADER_AVAILABLE:
             return
         parts = str(tag).split()
-        if not parts or parts[0] == "bg":
+        if not parts or parts[0].lower() == "bg":
             return
-        tag = parts[0]
+        tag = parts[0].lower()
         # Author registration may discover a tag that static analysis missed,
         # but must not override an explicit choice in the Characters checklist.
         if tag in globals().get("SCENELIGHT_MANIFEST", {}).get("excluded_character_tags", ()):
@@ -2994,7 +3263,7 @@ init -50 python:
         SCENELIGHT_CHARACTER_TAGS.add(tag)
         for image_name in list(_scenelight_registered_image_names()):
             image_tuple = tuple(image_name.split())
-            if not image_tuple or image_tuple[0] != tag:
+            if not image_tuple or image_tuple[0].lower() != tag:
                 continue
             original = _scenelight_get_registered_image(image_tuple)
             if original is None or isinstance(original, (SceneLightSprite, SceneLightImageLike)):
@@ -3016,7 +3285,7 @@ init -50 python:
                 return candidate
         return None
 
-    def _scenelight_redraw_tree(displayable):
+    def _scenelight_redraw_tree(displayable, on_sprite=None, redraw=True):
         """Invalidate only SceneLight sprites reachable from one scene entry."""
 
         pending = [displayable]
@@ -3030,7 +3299,10 @@ init -50 python:
                 continue
             seen.add(identity)
             if isinstance(current, SceneLightSprite):
-                renpy.redraw(current, 0.0)
+                if on_sprite is not None:
+                    on_sprite(current)
+                if redraw:
+                    renpy.redraw(current, 0.0)
             visit = getattr(current, "visit", None)
             if visit is None:
                 continue
@@ -3054,6 +3326,68 @@ init -50 python:
         for entry in entries:
             _scenelight_redraw_tree(getattr(entry, "displayable", None))
 
+    def _scenelight_layered_backdrop(entries):
+        if not entries:
+            return False
+        base = entries[0]
+        tap = base.displayable
+        if not isinstance(tap, _SceneLightBackground):
+            return False
+        previous = getattr(tap, "_sc_backdrop", None)
+        if len(entries) == 1 and previous is None:
+            return False
+        # A solid scene can be a backing plate for a movie, room art and
+        # props shown separately. A named room already has its own light tap.
+        image = _scenelight_get_registered_image(getattr(base, "name", None) or ())
+        if not isinstance(image, renpy.display.imagelike.Solid):
+            return False
+        members = []
+        key = None
+        excluded = SCENELIGHT_MANIFEST.get("excluded_character_tags", ())
+        for entry in entries[1:]:
+            tag = str(entry.tag or "").lower()
+            parts = getattr(entry, "name", ()) or ()
+            if isinstance(parts, _SCENELIGHT_STRING_TYPES):
+                parts = parts.split()
+            parts = tuple(str(part).lower() for part in parts)
+            family = parts[0] if parts else tag
+            if tag.startswith(("hide$", "replaced$")):
+                continue
+            if tag in SCENELIGHT_CHARACTER_TAGS or family in SCENELIGHT_CHARACTER_TAGS or tag in excluded or family in excluded:
+                break
+            if tag == "bg":
+                members = []
+                key = None
+                break
+            if not parts or _scenelight_contains_lit_sprite(entry.displayable):
+                break
+            members.append(entry)
+            key = " ".join(parts)
+        if not members and previous is None:
+            return False
+        if previous is not None and members:
+            old_base = previous.scene_list[0]
+            if ((old_base.show_time, old_base.animation_time) == (base.show_time, base.animation_time)
+                    and len(previous.scene_list) == len(members) + 1
+                    and all(a is b for a, b in zip(previous.scene_list[1:], members))):
+                return False
+        updated = base.copy()
+        replacement = _SceneLightBackground(tap.child, tap.scene_key)
+        if members:
+            first = base.copy()
+            first.displayable = tap.child
+            backdrop = renpy.display.layout.MultiBox(layout="fixed")
+            backdrop.layer_name = "master"
+            backdrop.append_scene_list([first] + members)
+            for index, child in enumerate(backdrop.children):
+                if isinstance(child, _SceneLightBackground):
+                    backdrop.children[index] = child.child
+            replacement._sc_backdrop = backdrop
+            replacement._sc_backdrop_key = key
+        updated.displayable = replacement
+        entries[0] = updated
+        return True
+
     def _scenelight_wrap_backgrounds(owner):
         if renpy.display._scenelight_live_renderer is None:
             return False
@@ -3073,7 +3407,7 @@ init -50 python:
                 updated.displayable = _SceneLightBackground(entry.displayable, scene_key)
                 owner.layers["master"][index] = updated
                 changed = True
-        return changed
+        return _scenelight_layered_backdrop(owner.layers.get("master", ())) or changed
 
     def _scenelight_restore_background_bindings():
         # Saves made before the live engine contain ordinary background
@@ -3095,6 +3429,7 @@ init -50 python:
 
     def _scenelight_route_scene_add(original_add, owner, args, kwargs):
         """Shade expression sprites at the engine scene boundary."""
+        global scenelight_scene_tag, scenelight_scene_pending
         routed_args = list(args)
         layer = kwargs.get("layer", routed_args[0] if len(routed_args) > 0 else None)
         child = kwargs.get("thing", routed_args[1] if len(routed_args) > 1 else None)
@@ -3110,7 +3445,7 @@ init -50 python:
 
         if (
             layer == "master"
-            and tag in SCENELIGHT_CHARACTER_TAGS
+            and tag.lower() in SCENELIGHT_CHARACTER_TAGS
             and child is not None
             and not isinstance(child, (SceneLightSprite, SceneLightImageLike))
             and not isinstance(registered, (SceneLightSprite, SceneLightImageLike))
@@ -3158,19 +3493,30 @@ init -50 python:
             if layer == "master":
                 _scenelight_wrap_backgrounds(owner)
         if layer == "master":
+            if (globals().get("scenelight_scene_pending", False)
+                    and tag.lower() not in SCENELIGHT_CHARACTER_TAGS):
+                scenelight_scene_tag = tag.lower() if tag else None
+                scenelight_scene_pending = False
             _scenelight_redraw_visible_sprites(owner)
         return result
 
-    def _scenelight_route_scene_mutation(original, owner, args, kwargs):
+    def _scenelight_route_scene_mutation(original, owner, args, kwargs, cleared=False):
         """Invalidate remaining lit sprites after hide/scene operations."""
+        global scenelight_scene_tag, scenelight_scene_pending
+        global SCENELIGHT_STABLE_SCENE_KEY, SCENELIGHT_STABLE_SCENE
 
         layer = kwargs.get("layer", args[0] if args else None)
         result = original(owner, *args, **kwargs)
         if layer == "master":
+            if cleared:
+                scenelight_scene_tag = None
+                scenelight_scene_pending = True
+                SCENELIGHT_STABLE_SCENE_KEY = None
+                SCENELIGHT_STABLE_SCENE = None
             _scenelight_redraw_visible_sprites(owner)
         return result
 
-    def _scenelight_mutation_router(original):
+    def _scenelight_mutation_router(original, cleared=False):
         def routed(owner, *args, **kwargs):
             # A full restart resets the store but leaves this router attached to
             # the engine's scene-list class, and the rebuilt scene lists call it
@@ -3180,7 +3526,7 @@ init -50 python:
             route = globals().get("_scenelight_route_scene_mutation")
             if route is None:
                 return original(owner, *args, **kwargs)
-            return route(original, owner, args, kwargs)
+            return route(original, owner, args, kwargs, cleared=cleared)
 
         return routed
 
@@ -3209,7 +3555,7 @@ init -50 python:
                 if original is None:
                     continue
                 setattr(scene_lists, "_scenelight_original_" + method_name, original)
-            setattr(scene_lists, method_name, _scenelight_mutation_router(original))
+            setattr(scene_lists, method_name, _scenelight_mutation_router(original, cleared=method_name == "clear"))
 
 
 init 999 python:
@@ -3224,6 +3570,40 @@ init 999 python:
             renpy.display.video.get_movie_texture = _scenelight_movie_texture_hook(_scenelight_movie_texture)
         # Re-register the finished image displayables under the same names. All
         # existing show statements and ATL transforms therefore continue to work.
+        def _scenelight_install_script_preview():
+            _sc_edit_forms = getattr(renpy.display, "_scenelight_edit_forms", None)
+            _sc_edit_packet = renpy.session.get("_scenelight_script_maps") if _sc_edit_forms else None
+            if _sc_edit_packet:
+                if len(_sc_edit_packet) > 3:
+                    _sc_edit_forms.compiled = _sc_edit_module.loaded_bytecode(config.basedir, _sc_edit_forms.install, _sc_edit_packet[3])
+                def _scenelight_verify_script_image(name, filename, digest):
+                    tag = name.split()[0]
+                    if tag in SCENELIGHT_MANIFEST.get("excluded_character_tags", ()):
+                        return False
+                    if tag not in SCENELIGHT_CHARACTER_TAGS and not SCENELIGHT_MANIFEST.get("auto_include_new_characters", False):
+                        return False
+                    image = _scenelight_get_registered_image(tuple(name.split()))
+                    if not isinstance(image, renpy.display.im.Image) or image.filename != filename:
+                        return False
+                    with renpy.file(filename) as stream:
+                        return __import__("hashlib").sha256(stream.read(32 * 1024 * 1024 + 1)).hexdigest() == digest
+                _sc_edit_tags = _sc_edit_forms.install_script_maps(_sc_edit_packet[:2], _scenelight_verify_script_image, renpy.display.im.Data)
+                for tag in (_sc_edit_packet[2] if len(_sc_edit_packet) > 2 else ()):
+                    if tag not in SCENELIGHT_MANIFEST.get("excluded_character_tags", ()) and (tag in SCENELIGHT_CHARACTER_TAGS or SCENELIGHT_MANIFEST.get("auto_include_new_characters", False)):
+                        _sc_edit_forms.layer_tags.add(tag)
+                        _sc_edit_tags.add(tag)
+                SCENELIGHT_CHARACTER_TAGS.update(_sc_edit_tags)
+                if _sc_edit_forms.layer_tags:
+                    _sc_edit_forms.status = "Preparing layered sprite lighting"
+                    _sc_edit_forms.until = __import__("time").time() + 3
+                elif _sc_edit_tags:
+                    _sc_edit_forms.update_status(_sc_edit_forms.bindings)
+                elif _sc_edit_packet[1]:
+                    _sc_edit_forms.status = "Updating project lighting"
+                else:
+                    _sc_edit_forms.status = "Script updated"
+                    _sc_edit_forms.until = __import__("time").time() + 3
+        _scenelight_install_script_preview()
         for _scenelight_tag in list(SCENELIGHT_CHARACTER_TAGS):
             scenelight_register_tag(_scenelight_tag)
 
@@ -3320,3 +3700,15 @@ init 999 python:
                 scenelight_effects=ToggleScreen("scenelight_effect_controls")
             )
         )
+
+screen _scenelight_edit_progress():
+    zorder 200
+    $ _sl_status = getattr(getattr(renpy.display, "_scenelight_edit_forms", None), "status", "")
+    if _sl_status:
+        frame:
+            xalign 0.98
+            yalign 0.03
+            background "#132333eb"
+            padding (12, 7)
+            xmaximum int(config.screen_width * .9)
+            text _sl_status.replace("{", "{{") size 18 color "#e5f2f8" substitute False

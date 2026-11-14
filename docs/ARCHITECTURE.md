@@ -21,6 +21,9 @@ flowchart LR
 | `setup_gui.py` | Installation, character review, components and updates |
 | `desktop.py` | Windows EXE entry point and bundled runtime selection |
 | `project.py`, `capture.py` | Source discovery and renderer-backed asset capture |
+| `capture_reuse.py`, `updates.py` | Changed-asset detection and reuse of prepared data |
+| `project_watch.py`, `artwork_preview.py`, `script_preview.py` | Live project edits and provisional lighting previews |
+| `setup_stages.py`, `setup_timing.py`, `setup_progress_view.py` | Stage progress and remaining-time estimates |
 | `engine.py`, `form_maps.py` | CPU reference analysis and sprite surface reconstruction |
 | `builder.py`, `cuda_backend.py` | Installation data, offline transport and optional CUDA acceleration |
 | `prepared.py` | Per-frame movie preparation |
@@ -79,8 +82,8 @@ form's size and its alpha. Those engines capture every form twice instead, over
 pure black and over pure white, and the host recovers the pixels with
 `alpha = 1 - (white - black)`. The form is fitted into a virtual screen grown to
 its own size, which keeps the pair 1:1 with the form rather than with the game's
-window. This path costs two draws and two encodes per form, so a Python 2 project
-captures a few times slower than a Ren'Py 8 project of the same size.
+window. This path needs two draws and two encodes per form; its cost depends on
+the artwork and engine.
 
 Large captures use isolated workers with separate writable state and bounded
 concurrency. Completed forms are journaled by image tag and normalized attribute

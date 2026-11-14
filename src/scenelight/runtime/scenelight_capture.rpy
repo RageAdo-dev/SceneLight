@@ -1,6 +1,7 @@
 # SceneLight raw-asset resolver. This is inert during normal gameplay.
 init -999 python:
     import hashlib
+    import inspect
     import json
     import math
     import os
@@ -9,6 +10,14 @@ init -999 python:
     import time
     import traceback
     import zlib
+
+    renpy.display._scenelight_capture_log_mask = None
+    if os.environ.get("SCENELIGHT_CAPTURE_REQUEST") and renpy.loadable("scenelight_capture_privacy.txt"):
+        with renpy.file("scenelight_capture_privacy.txt") as _sc_privacy_file:
+            _sc_privacy_namespace = {}
+            eval(compile(_sc_privacy_file.read(), "scenelight_capture_privacy.txt", "exec", 0, True), _sc_privacy_namespace)
+            renpy.display._scenelight_capture_log_mask = _sc_privacy_namespace["mask_value"]
+            del _sc_privacy_namespace
 
     try:
         import cPickle as _scenelight_pickle
@@ -41,11 +50,6 @@ init -999 python:
     _scenelight_deferred_form_paths = [None]
     _scenelight_deferred_form_stream = [None]
     _scenelight_deferred_form_count = [0]
-
-    # A renderer that dies inside one form cannot report an exception, so the
-    # form is journaled before capture and skipped once it stops the process.
-    # One unreadable form must not fail the whole inventory.
-    _scenelight_form_crash_limit = 1
 
     def _scenelight_structure_summary(displayable):
         """List the displayable types under one form, for crash comparison."""
@@ -131,9 +135,10 @@ init -999 python:
         """
 
         filename = _scenelight_trace_path[0]
-        if not filename:
+        if not filename or not renpy.display._scenelight_capture_log_mask:
             return
         record["time"] = round(time.time(), 3)
+        record["attempt_id"] = os.environ.get("SCENELIGHT_CAPTURE_ATTEMPT_ID")
         record["renpy"] = renpy.version_string
         record["renderer"] = os.environ.get("RENPY_RENDERER") or "automatic"
         record.setdefault("screen", [config.screen_width, config.screen_height])
@@ -146,7 +151,7 @@ init -999 python:
             try:
                 # A renderer crash ends only this process: once the line is
                 # flushed the host can read it, so no sync is required.
-                stream.write(json.dumps(record, sort_keys=True) + "\n")
+                stream.write(json.dumps(renpy.display._scenelight_capture_log_mask(record), sort_keys=True) + "\n")
                 stream.flush()
             finally:
                 stream.close()
@@ -164,6 +169,37 @@ init -999 python:
         """
 
         return bool(os.environ.get("SCENELIGHT_ENABLE_TEXTURE_PROBE"))
+
+    def _scenelight_capture_memory_ceiling(baseline, growth_limit, address_bits):
+        if growth_limit <= 0:
+            return 0
+        ceiling = (baseline or 0) + growth_limit
+        if address_bits <= 32:
+            ceiling = min(ceiling, 1536 * 1048576)
+            if baseline is not None and baseline >= ceiling:
+                raise RuntimeError("The game already uses the capture memory budget of this "
+                    "32-bit runtime. A compatible 64-bit runtime is required.")
+        return ceiling
+
+    def _scenelight_runtime_capabilities():
+        draw = renpy.display.draw
+        result = {
+            "renderer": type(draw).__name__,
+            "model_renderer": getattr(draw, "texture_loader", None) is not None,
+            "shader_registration": callable(getattr(renpy, "register_shader", None)),
+            "render_shader_api": all(callable(getattr(renpy.Render, name, None))
+                for name in ("add_shader", "add_uniform", "add_property")),
+        }
+        # Check the compiled class, not the source bundled beside it. Some
+        # Python 2 builds expose GLTexture without its required finalizer.
+        # This check allocates no graphics resources during startup.
+        if result["model_renderer"]:
+            try:
+                from renpy.gl2.gl2texture import GLTexture
+                result["texture_finalizer"] = callable(getattr(GLTexture, "__del__", None))
+            except ImportError:
+                pass
+        return result
 
     def _scenelight_probe_texture_cleanup():
         # Exercise the compiled runtime, rather than trusting its version or
@@ -220,8 +256,9 @@ init -999 python:
         )
 
     def _scenelight_log(message):
-        sys.stdout.write(message + "\n")
-        sys.stdout.flush()
+        if renpy.display._scenelight_capture_log_mask:
+            sys.stdout.write(renpy.display._scenelight_capture_log_mask(message) + "\n")
+            sys.stdout.flush()
 
     def _scenelight_load_capture_plan(filename, signature, sprite_names, version=3):
         if not signature or not os.path.isfile(filename):
@@ -310,6 +347,107 @@ init -999 python:
         except Exception:
             return None
         return hashlib.sha256(serialized).hexdigest()
+
+    def _scenelight_pixel_environment():
+        try:
+            draw = renpy.display.draw
+            info = getattr(renpy, "get_renderer_info", lambda: {})()
+            return [renpy.version_string, type(draw).__name__, str(info.get("renderer")),
+                    config.screen_width, config.screen_height, getattr(draw, "draw_per_virt", None),
+                    _scenelight_capture_pixel_limit(), getattr(renpy.game.preferences, "language", None)]
+        except Exception:
+            return None
+
+    def _scenelight_pixel_key(name, environment, sources, styles):
+        """Describe the resolved static tree, including the bytes Ren'Py actually loads."""
+        def style_key(style):
+            state = style.__getstate__()
+            parent = state.get("parent")
+            if parent and parent not in styles:
+                chain = []
+                current = parent
+                while current:
+                    if current in chain:
+                        raise ValueError("cyclic style")
+                    chain.append(current)
+                    current = renpy.style.styles[current].__getstate__().get("parent")
+                states = [renpy.style.styles[k].__getstate__() for k in chain]
+                styles[parent] = hashlib.sha256(_scenelight_pickle.dumps(states, 2)).hexdigest()
+            return [state, styles.get(parent)]
+
+        def describe(d, depth):
+            if depth > 32:
+                raise ValueError("nested displayable")
+            t = type(d)
+            kind = (t.__module__, t.__name__)
+            fields = vars(d).copy()
+            style = style_key(fields.pop("style"))
+            children = []
+            if kind == ("renpy.display.im", "Image"):
+                filename = d.filename
+                if not filename.lower().endswith((".png", ".jpeg", ".jpg")) or d.get_oversample() != 1:
+                    raise ValueError("dynamic or scaled image source")
+                if filename not in sources:
+                    load = renpy.loader.load
+                    if "directory" in _scenelight_callable_arguments(load):
+                        stream = load(filename, directory="images")
+                    else:
+                        stream = load(filename)
+                    try:
+                        digest = hashlib.sha256()
+                        while True:
+                            block = stream.read(1048576)
+                            if not block:
+                                break
+                            digest.update(block)
+                        sources[filename] = digest.hexdigest()
+                    finally:
+                        stream.close()
+                fields["source_digest"] = sources[filename]
+            elif kind == ("renpy.display.layout", "MultiBox") and d.default_layout == "fixed":
+                children = fields.pop("children")
+                last = fields.pop("child", None)
+                if last is not None and not any(last is child for child in children):
+                    raise ValueError("additional layout child")
+                if d.layers or d.scene_list:
+                    raise ValueError("scene layer")
+            elif kind == ("renpy.display.transform", "Transform") and d.function is None:
+                children = [fields.pop("child")]
+                fields.pop("children", None)
+                state = vars(fields.pop("state"))
+                if state.get("shader") or state.get("mesh"):
+                    raise ValueError("custom shader")
+                fields["transform_state"] = state
+            else:
+                raise ValueError("untracked displayable")
+            return [kind, fields, style, [describe(c, depth + 1) for c in children]]
+
+        try:
+            if environment is None:
+                return None
+            parts = _scenelight_image_spelling(tuple(name.split()))
+            for end in range(len(parts), 0, -1):
+                original = _scenelight_get_registered_image(parts[:end])
+                if original is not None:
+                    break
+            cls = type(original)
+            if cls.__module__ in ("store.layeredimage", "store") and cls.__name__ == "LayeredImage":
+                if original.attribute_function or original.at or any(
+                    type(layer).__module__ != cls.__module__
+                    or type(layer).__name__ not in ("Always", "Attribute")
+                    for layer in original.layers
+                ):
+                    return None
+            elif end != len(parts) or cls.__module__ not in (
+                "renpy.display.im", "renpy.display.layout", "renpy.display.transform"
+            ):
+                return None
+            tree = describe(_scenelight_capture_displayable(name), 0)
+            data = json.dumps([environment, tree], sort_keys=True, separators=(",", ":"))
+            return hashlib.sha256(data.encode("utf-8")).hexdigest()
+        except Exception:
+            # Custom displayables and non-serializable rendering inputs need a fresh capture.
+            return None
 
     def _scenelight_load_structure_index(filename, output_relative):
         if not os.path.isfile(filename):
@@ -454,6 +592,30 @@ init -999 python:
             return source_name
         return None
 
+    def _scenelight_callable_arguments(function):
+        getargs = getattr(inspect, "getfullargspec", None) or inspect.getargspec
+        try:
+            return getargs(function).args
+        except (TypeError, ValueError):
+            return ()
+
+    def _scenelight_screenshot(rendered):
+        screenshot = renpy.display.draw.screenshot
+        arguments = _scenelight_callable_arguments(screenshot)
+        if "fullscreen_video" in arguments:
+            return screenshot(rendered, False)
+        if arguments:
+            return screenshot(rendered)
+        try:
+            return screenshot(rendered)
+        except TypeError as error:
+            # Older Cython methods expose no signature. Retry only their
+            # argument-count error, never a TypeError inside the renderer.
+            detail = str(error)
+            if "screenshot() takes exactly 2" not in detail:
+                raise
+            return screenshot(rendered, False)
+
     def _scenelight_copy_source_png(source_name, relative):
         filename = os.path.join(config.basedir, relative)
         parent = os.path.dirname(filename)
@@ -473,7 +635,11 @@ init -999 python:
         source_file = None
         destination_file = None
         try:
-            source_file = renpy.loader.load(source_name, directory="images")
+            load_image = renpy.loader.load
+            if "directory" in _scenelight_callable_arguments(load_image):
+                source_file = load_image(source_name, directory="images")
+            else:
+                source_file = load_image(source_name)
             destination_file = open(temporary, "wb")
             while True:
                 block = source_file.read(1024 * 1024)
@@ -956,27 +1122,6 @@ init -999 python:
             return ""
         return " ".join([parts[0]] + sorted(set(parts[1:])))
 
-    def _scenelight_load_form_attempts(filename):
-        """Read the crash journal a previous process left behind."""
-
-        try:
-            stream = open(filename, "r")
-            try:
-                value = json.load(stream)
-            finally:
-                stream.close()
-        except Exception:
-            return {}
-        if not _scenelight_is_mapping(value):
-            return {}
-        result = {}
-        for key, count in value.items():
-            try:
-                result[str(key)] = int(count)
-            except (TypeError, ValueError):
-                continue
-        return result
-
     def _scenelight_save_form_attempts(filename, attempts):
         # Only a crash leaves an entry behind, so the journal stays tiny.
         # Diagnostics must never fail a capture, so write errors are ignored.
@@ -1178,6 +1323,7 @@ init -999 python:
 
         filename = os.path.join(config.basedir, relative)
         draw = renpy.display.draw
+        _scenelight_log_capture_attempt({"stage": "matting_measure", "form": name})
         rendered = renpy.render(
             displayable,
             config.screen_width,
@@ -1227,6 +1373,10 @@ init -999 python:
             backdrop_width = max(width, screen[0])
             backdrop_height = max(height, screen[1])
             for label, colour in (("black", "#000000"), ("white", "#ffffff")):
+                _scenelight_log_capture_attempt({
+                    "stage": "matting_pass", "form": name, "backdrop": label,
+                    "size": [width, height],
+                })
                 backdrop = composite_type(
                     (backdrop_width, backdrop_height),
                     (0, 0),
@@ -1237,7 +1387,7 @@ init -999 python:
                 tree = renpy.render(
                     backdrop, backdrop_width, backdrop_height, 0.0, 0.0
                 )
-                surface = draw.screenshot(tree)
+                surface = _scenelight_screenshot(tree)
                 grabbed = surface.get_size()
                 _scenelight_save_surface_fast(
                     surface, "%s.%s.png" % (filename, label)
@@ -1303,6 +1453,7 @@ init -999 python:
 
         filename = os.path.join(config.basedir, relative)
         started = time.time()
+        _scenelight_log_capture_attempt({"stage": "render_to_file", "form": name})
         renpy.render_to_file(
             displayable,
             filename,
@@ -1399,7 +1550,7 @@ init -999 python:
                 "render_seconds": round(time.time() - render_started, 4),
             }
         )
-        surface = draw.screenshot(rendered)
+        surface = _scenelight_screenshot(rendered)
         readback_done = time.time()
         _scenelight_log_capture_attempt(
             {
@@ -1558,14 +1709,7 @@ init -999 python:
             0.0,
             0.0,
         )
-        screenshot = renpy.display.draw.screenshot
-        try:
-            # Ren'Py 7 and later accept only the render tree.
-            surface = screenshot(rendered)
-        except TypeError:
-            # Ren'Py 6.99 also requires its fullscreen-video flag. This is the
-            # renderer API bundled with the original DDLC release.
-            surface = screenshot(rendered, False)
+        surface = _scenelight_screenshot(rendered)
         surface = renpy.display.scale.smoothscale(
             surface,
             (rendered.width, rendered.height),
@@ -1675,11 +1819,7 @@ init -999 python:
             float(seconds),
             float(seconds),
         )
-        screenshot = renpy.display.draw.screenshot
-        try:
-            surface = screenshot(rendered)
-        except TypeError:
-            surface = screenshot(rendered, False)
+        surface = _scenelight_screenshot(rendered)
         surface = renpy.display.scale.smoothscale(
             surface,
             (rendered.width, rendered.height),
@@ -1783,7 +1923,33 @@ init -999 python:
                 result.append(str(name))
         return result
 
+    def _scenelight_image_spelling(name):
+        """Recover registered spelling before passing normalized keys to Ren'Py."""
+        index = getattr(_scenelight_image_spelling, "index", None)
+        if index is None:
+            index = {}
+            for registered in _scenelight_registered_image_names():
+                parts = tuple(registered.split())
+                for length in range(1, len(parts) + 1):
+                    original = parts[:length]
+                    key = tuple(part.lower() for part in original)
+                    if key in index and index[key] != original:
+                        index[key] = None
+                    else:
+                        index[key] = original
+            if index:
+                _scenelight_image_spelling.index = index
+        parts = tuple(name)
+        for length in range(len(parts), 0, -1):
+            key = tuple(part.lower() for part in parts[:length])
+            if key in index:
+                if index[key] is None:
+                    raise ValueError("Image names differ only by case: %s" % " ".join(key))
+                return index[key] + parts[length:]
+        return parts
+
     def _scenelight_get_registered_image(name):
+        name = _scenelight_image_spelling(name)
         getter = getattr(renpy, "get_registered_image", None)
         if getter is None:
             getter = getattr(getattr(renpy, "exports", None), "get_registered_image", None)
@@ -1902,12 +2068,16 @@ init -999 python:
             parts = tuple(value.lower().split())
             if not parts:
                 continue
+            requested_name = " ".join(parts)
+            try:
+                parts = _scenelight_image_spelling(parts)
+            except ValueError:
+                continue
             if command == "hide":
                 shown.predict_hide(None, parts)
                 continue
             if command not in ("show", "temporary"):
                 continue
-            requested_name = " ".join(parts)
             try:
                 canonical = shown.apply_attributes(None, parts[0], parts)
             except Exception:
@@ -1952,7 +2122,7 @@ init -999 python:
 
     def _scenelight_capture_displayable(name):
         """Resolve full image attributes, including LayeredImage arguments."""
-        parts = tuple(name.split())
+        parts = _scenelight_image_spelling(tuple(name.split()))
         if not parts:
             raise Exception("Empty image name")
 
@@ -2027,6 +2197,20 @@ init -999 python:
 
         with open(request_path, "r") as stream:
             request = json.load(stream)
+        pixel_environment = _scenelight_pixel_environment()
+        pixel_keys = {"sprites": {}, "scenes": {}}
+        source_hashes, style_hashes = {}, {}
+        reused_scenes = 0
+
+        def prior_pixels(kind, name, key_name):
+            if not request.get("index_pixels"):
+                return None
+            key = _scenelight_pixel_key(name, pixel_environment, source_hashes, style_hashes)
+            if key is None:
+                return None
+            pixel_keys[kind][key_name] = key
+            prior = request.get("reuse_pixels", {}).get(kind, {}).get(key_name)
+            return prior[1] if prior and prior[0] == key else None
         _scenelight_log(
             "SceneLight request loaded: %s (%d explicit forms)."
             % (
@@ -2169,7 +2353,7 @@ init -999 python:
             if not tag:
                 tag = value.show_args.get("image")
             if isinstance(tag, _scenelight_string_types) and tag:
-                normalized_tag = tag.split()[0]
+                normalized_tag = tag.split()[0].lower()
                 character_tags.add(normalized_tag)
                 character_variable_tags[str(variable_name).strip().lower()] = normalized_tag
                 continue
@@ -2229,7 +2413,9 @@ init -999 python:
             )
         scene_names = set()
         if request.get("inventory_backgrounds") or request.get("inventory_characters"):
-            registered_names = _scenelight_registered_image_names()
+            registered_names = [
+                name.lower() for name in _scenelight_registered_image_names()
+            ]
             if request.get("inventory_backgrounds"):
                 scene_names.update(script_scenes)
 
@@ -2294,67 +2480,15 @@ init -999 python:
 
                 review_tags.update(character_tags)
 
-                # Geometry validates semantic character evidence below; it
-                # never creates that evidence. A portrait-shaped cut-in,
-                # sticker sheet, or poem illustration can have exactly the
-                # same dimensions and transparency as a sprite. Guessing from
-                # pixels alone would therefore be unsafe across arbitrary mods.
-                minimum_height = max(1, int(config.screen_height * 0.35))
-                maximum_width = max(1, int(config.screen_width * 0.80))
-
-                # Ren'Py uses the same image/tag machinery for characters,
-                # stickers, poem pages, logos, cut-ins, and UI decoration.
-                # Semantic metadata therefore proposes candidates but cannot
-                # by itself make an asset eligible for automatic lighting.
-                # Require foreground-scale portrait geometry for every
-                # automatically discovered family. Explicit author config is
-                # the intentional escape hatch for chibis and unusual art.
-                # Keep selection preferences in the profile, but do not keep
-                # removed families active in the generated runtime manifest.
+                # The host checks visible alpha bounds after capture. Render
+                # dimensions include transparent padding and can be a whole
+                # screen even for a narrow character, so they cannot reject a
+                # family here. Only the semantic candidates above proceed.
                 eligible_character_tags = explicit_character_tags & (
                     registered_tags | set(script_show_counts)
                 )
-                geometry_candidates = {}
-                for registered_name in registered_names:
-                    parts = tuple(registered_name.split())
-                    if parts:
-                        geometry_candidates.setdefault(parts[0], []).append(registered_name)
-                automatic_tags = (
-                    set() if manual_character_selection
-                    else character_tags - explicit_character_tags - excluded_character_tags
-                )
-                ordered_automatic_tags = sorted(automatic_tags)
-                if ordered_automatic_tags:
-                    publish_progress("geometry", 0, len(ordered_automatic_tags))
-                for tag_index, tag in enumerate(ordered_automatic_tags, 1):
-                    publish_progress("geometry", tag_index, len(ordered_automatic_tags))
-                    for registered_name in geometry_candidates.get(tag, ()):
-                        try:
-                            candidate = _scenelight_capture_displayable(registered_name)
-                            rendered = renpy.render(
-                                candidate,
-                                config.screen_width,
-                                config.screen_height,
-                                0.0,
-                                0.0,
-                            )
-                            width = int(rendered.width)
-                            height = int(rendered.height)
-                            portrait_ratio = float(width) / float(max(1, height))
-                            if (
-                                height >= minimum_height
-                                and width < maximum_width
-                                and portrait_ratio <= 1.05
-                            ):
-                                eligible_character_tags.add(tag)
-                                break
-                        except Exception:
-                            pass
-                        finally:
-                            try:
-                                renpy.display.render.free_memory()
-                            except Exception:
-                                pass
+                if not manual_character_selection:
+                    eligible_character_tags.update(character_tags)
                 character_tags = eligible_character_tags - excluded_character_tags
 
                 if review_only:
@@ -2607,6 +2741,17 @@ init -999 python:
             return True
 
         restore_stats = {"exact": 0, "recovered": 0, "unmarked": 0, "missing": 0}
+        # Older checkpoints used a readable prefix before the form digest.
+        # Index those once; listing the whole cache for every form is quadratic.
+        legacy_sprite_paths = {}
+        try:
+            for entry in os.listdir(output_root):
+                if entry.startswith("sprite_") and entry.endswith(".png"):
+                    digest = entry.rsplit("_", 1)[-1][:-4]
+                    relative = os.path.join(output_relative, entry).replace(os.sep, "/")
+                    legacy_sprite_paths.setdefault(digest, []).append(relative)
+        except OSError:
+            pass
 
         def restore_sprite_checkpoint(name):
             normalized = " ".join(name.lower().split())
@@ -2619,34 +2764,27 @@ init -999 python:
                 candidates.append(saved)
             if deterministic not in candidates:
                 candidates.append(deterministic)
-            # The filename keeps a readable copy of the planned spelling, which
-            # can change between processes even when the form itself is the
-            # same. Match the stable digest suffix so earlier pixels are found.
+            # Keep accepting the twelve-character digest used by older captures.
             digest = hashlib.sha256(
                 _scenelight_form_key(normalized).encode("utf-8")
             ).hexdigest()[:12]
-            try:
-                directory = os.path.join(config.basedir, output_relative)
-                suffix = "_%s.png" % digest
-                for entry in os.listdir(directory):
-                    if not entry.startswith("sprite_") or not entry.endswith(suffix):
-                        continue
-                    candidate = os.path.join(output_relative, entry).replace(os.sep, "/")
-                    if candidate not in candidates:
-                        candidates.append(candidate)
-            except OSError:
-                pass
+            for candidate in legacy_sprite_paths.get(digest, ()):
+                if candidate not in candidates:
+                    candidates.append(candidate)
             seen_file = False
             for relative in candidates:
                 absolute = os.path.join(config.basedir, relative.replace("/", os.sep))
                 composite_job = _scenelight_composite_job_path(relative)
                 present = os.path.isfile(absolute) and os.path.getsize(absolute) > 32
+                matted = None if present else _scenelight_resume_matted(absolute)
                 if present:
                     seen_file = True
                 if present and os.path.isfile(absolute + ".surface-checkpoint"):
                     surface_captures.add(relative)
                 elif present and os.path.isfile(absolute + ".surface-normalized"):
                     normalized_captures.add(relative)
+                elif matted is not None:
+                    _scenelight_matting_captures.append(matted)
                 elif present and _scenelight_is_raw_surface(absolute) and not (
                     os.path.isfile(absolute + ".composite-normalized")
                     or os.path.isfile(composite_job)
@@ -2702,9 +2840,21 @@ init -999 python:
         if ordered_scenes:
             publish_progress("scene", 0, len(ordered_scenes))
         for scene_index, name in enumerate(ordered_scenes, 1):
+            parts = name.split()
+            scene_key = (" ".join(parts[1:]) if parts[0].lower() == "bg" and len(parts) > 1 else name).lower()
+            # A normalized public name can represent two different registered images.
+            if scene_key in captures["scenes"]:
+                pixel_keys["scenes"].pop(scene_key, None)
+                previous = None
+            else:
+                previous = prior_pixels("scenes", name, scene_key)
             try:
-                timeline, source_frames = _scenelight_capture_scene_timeline(
-                    name, output_relative, live=request.get("scene_analysis") == "live")
+                if previous:
+                    timeline, source_frames = [[0, previous]], {}
+                    reused_scenes += 1
+                else:
+                    timeline, source_frames = _scenelight_capture_scene_timeline(
+                        name, output_relative, live=request.get("scene_analysis") == "live")
             except Exception:
                 timeline = []
                 capture_failures[("scene", name)] = traceback.format_exc()
@@ -2811,7 +2961,15 @@ init -999 python:
             and plan_only_threshold > 0
             and len(planned_forms) >= plan_only_threshold
         )
-        ordered_planned_forms = [] if plan_only else sorted(planned_forms)
+        # A worker may use ANGLE while the inventory process uses desktop GL.
+        # Compare each form in the renderer which would actually produce its pixels.
+        check_forms = request.get("index_pixels") and not plan_only
+        for name in sorted(planned_forms) if check_forms else ():
+            previous = prior_pixels("sprites", name, name)
+            if previous:
+                captures["sprites"][name] = previous
+        reused_sprites = len(captures["sprites"])
+        ordered_planned_forms = [] if plan_only else sorted(planned_forms.difference(captures["sprites"]))
         pending_forms = []
         for restore_index, actual_name in enumerate(ordered_planned_forms, 1):
             if not restore_sprite_checkpoint(actual_name):
@@ -2871,31 +3029,10 @@ init -999 python:
                 % len(host_skips)
             )
         attempt_path = os.path.join(output_root, "form_attempts.json")
-        attempt_counts = _scenelight_load_form_attempts(attempt_path)
-        quarantined_names = [
-            actual_name
-            for actual_name in pending_forms
-            if attempt_counts.get(_scenelight_form_key(actual_name), 0)
-            >= _scenelight_form_crash_limit
-        ]
-        if quarantined_names:
-            quarantined_keys = set(
-                _scenelight_form_key(actual_name) for actual_name in quarantined_names
-            )
-            for quarantined_name in quarantined_names:
-                errors.append(
-                    "sprite %s: the renderer stopped while capturing this form"
-                    % quarantined_name
-                )
-            pending_forms = [
-                actual_name
-                for actual_name in pending_forms
-                if _scenelight_form_key(actual_name) not in quarantined_keys
-            ]
-            _scenelight_log(
-                "SceneLight skipped %d form(s) that stopped the renderer: %s"
-                % (len(quarantined_names), ", ".join(sorted(quarantined_names)))
-            )
+        # An old attempt can also mean cancellation or a power loss. Only the
+        # supervisor, which observes the process exit, may request a crash skip.
+        attempt_counts = {}
+        _scenelight_save_form_attempts(attempt_path, attempt_counts)
 
         if ordered_planned_forms:
             publish_progress(
@@ -2915,8 +3052,30 @@ init -999 python:
                 % (restored_forms, len(ordered_planned_forms), len(pending_forms))
             )
         previous_form_started = [None]
+        completed_failures = request.get("completed_form_failures") or {}
+        for name, detail in completed_failures.items():
+            if name in planned_forms and name not in captures["sprites"]:
+                capture_failures[("sprite", name)] = detail
+        pending_forms = [name for name in pending_forms if name not in completed_failures]
+        completed_before_batch = len(ordered_planned_forms) - len(pending_forms)
+        batch_limit = int(os.environ.get("SCENELIGHT_CAPTURE_BATCH_LIMIT", "0"))
+        memory_baseline = _scenelight_process_memory()
+        fatal_error = None
+        memory_limit = 0
+        capture_complete = True
+        if pending_forms:
+            try:
+                memory_limit = _scenelight_capture_memory_ceiling(
+                    memory_baseline,
+                    int(os.environ.get("SCENELIGHT_CAPTURE_MEMORY_LIMIT", "0")),
+                    64 if sys.maxsize > 2 ** 32 else 32,
+                )
+            except RuntimeError as error:
+                fatal_error = str(error)
+                pending_forms = []
+                capture_complete = False
         for index, actual_name in enumerate(pending_forms, 1):
-            completed = restored_forms + index
+            completed = completed_before_batch + index
             # Publish the form before rendering it. A native crash leaves this
             # as the last progress record, which names the offending image in
             # the support report instead of the form that finished before it.
@@ -2966,7 +3125,27 @@ init -999 python:
                     len(ordered_planned_forms),
                     item=actual_name,
                 )
-        if not plan_only:
+            memory = _scenelight_process_memory() if memory_limit > 0 else None
+            if index < len(pending_forms) and (
+                (batch_limit > 0 and index >= batch_limit)
+                or (memory is not None and memory >= memory_limit)
+            ):
+                # Publish a partial result only after the form and its journal
+                # are complete. The controller never needs to kill a live form.
+                capture_complete = False
+                reason = "memory" if memory is not None and memory >= memory_limit else "forms"
+                _scenelight_log_capture_attempt(
+                    {
+                        "stage": "batch.complete",
+                        "current": completed,
+                        "total": len(ordered_planned_forms),
+                        "reason": reason,
+                        "memory_baseline_mb": (memory_baseline or 0) / 1048576.0,
+                        "memory_limit_mb": memory_limit / 1048576.0,
+                    }
+                )
+                break
+        if not plan_only and capture_complete:
             for requested_name in sorted(sprite_names):
                 forms = request_forms.get(requested_name, ())
                 if any(form in captures["sprites"] for form in forms):
@@ -2977,6 +3156,11 @@ init -999 python:
                     "no canonical story state",
                 )
                 errors.append("sprite %s: %s" % (requested_name, detail))
+            for (kind, name), detail in sorted(capture_failures.items()):
+                if kind == "sprite":
+                    error = "sprite %s: %s" % (name, detail)
+                    if error not in errors:
+                        errors.append(error)
 
         # Release the final partial batch before publishing the atomic result.
         try:
@@ -3012,8 +3196,20 @@ init -999 python:
             _scenelight_deferred_form_stream[0] = None
         result = {
             "version": 42,
+            "capture_complete": capture_complete,
+            "fatal_error": fatal_error,
+            "planned_form_count": len(ordered_planned_forms),
+            "sprite_failures": {
+                name: detail
+                for (kind, name), detail in capture_failures.items()
+                if kind == "sprite"
+            },
             "texture_cleanup_ok": _scenelight_probe_texture_cleanup() if (request.get("probe_texture_cleanup") and _scenelight_texture_probe_supported()) else None,
             "renpy_version": renpy.version_string,
+            "pixel_environment": pixel_environment,
+            "pixel_keys": pixel_keys,
+            "reused_pixels": {"scenes": reused_scenes, "sprites": reused_sprites},
+            "runtime_capabilities": _scenelight_runtime_capabilities(),
             # Source-only inspection cannot see this value when options.rpyc
             # lives inside an RPA. Publishing the initialized runtime value
             # lets setup preserve the exact roaming save namespace before it

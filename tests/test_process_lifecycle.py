@@ -30,6 +30,7 @@ def test_close_stops_new_operation_while_previous_cleanup_finishes(
         _running=False,
         _process=None,
         _cancel_requested=threading.Event(),
+        _reset_progress_panel=noop,
         _refresh_project_state=noop,
         operation_var=widget,
         progress_frame=widget,
@@ -149,7 +150,7 @@ def test_setup_exit_finishes_child_cleanup(tmp_path: Path, phase: str) -> None:
             widget = SimpleNamespace(set=noop, configure=noop, grid=noop, start=noop, stop=noop)
             app = SimpleNamespace(
                 _running=False, _process=None, _cancel_requested=threading.Event(),
-                _refresh_project_state=noop, operation_var=widget, progress_frame=widget,
+                _reset_progress_panel=noop, _refresh_project_state=noop, operation_var=widget, progress_frame=widget,
                 progress=widget, cancel_operation_button=widget, _append_log=noop,
                 _events=queue.Queue(), project_var=SimpleNamespace(get=lambda: str(root)),
                 _close_character_review_window=noop, destroy=noop,

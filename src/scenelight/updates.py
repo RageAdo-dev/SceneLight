@@ -35,6 +35,8 @@ from .sidecar import managed_project_root, storage_root
 from .update_settings import analysis_config_sha256, selection_settings, settings_manifest
 
 MODULES = (
+    "live_edit",
+    "log_privacy",
     "live_gpu",
     "live_renpy",
     "live_opencl",
@@ -163,6 +165,7 @@ def runtime_hashes(root: Path, *, expected=None, stamps=None, verified_out=None)
 def _record_plan(mode: str, reason: str, **details) -> None:
     from .diagnostics import current_session
 
+    print("SceneLight update plan: " + mode, flush=True)
     print("SceneLight update: " + reason, flush=True)
     session = current_session()
     if session is not None:
@@ -173,11 +176,17 @@ def recover_update(root: Path) -> None:
     journal = _plain_project_path(root, Path(JOURNAL))
     if not journal.exists():
         return
+    with ProgressStage("runtime-cleanup", item="Checking the update recovery record") as progress:
+        _finish_update(root, journal, progress)
+
+
+def _finish_update(root, journal, progress):
     record = read_json(journal)
     token = record.get("transaction")
     if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{16}", token):
         raise RuntimeError("SceneLight update journal is invalid; retain it for a support report.")
-    stage = _plain_project_path(root, Path("game") / (".sl-u-" + token))
+    stage_parent = Path() if record.get("mode") == "assets" else Path("game")
+    stage = _plain_project_path(root, stage_parent / (".sl-u-" + token))
     data = _plain_project_path(root, EMBED_ROOT)
     backup = stage / "previous"
     embedded = record.get("embedded") is True
@@ -185,20 +194,61 @@ def recover_update(root: Path) -> None:
         root, Path(MANIFEST_NAME if embedded else ".scenelight_install.json")
     )
     checked = set()
+    staged_files = []
     for path in stage.rglob("*"):
         _plain_project_path(root, path.relative_to(root), checked=checked)
-    if record.get("mode") == "files":
+        if path.is_file():
+            staged_files.append(path)
+            progress.set_item("Checking recovery files: " + path.name)
+            progress.advance()
+    if record.get("mode") in {"files", "assets"}:
         entries = record.get("entries")
         allowed = set(runtime_payload(embedded=embedded)) | {
             "game/scenelight_runtime/inspector.rpyc",
             "game/scenelight_runtime/manifest.json",
         }
+        if record["mode"] == "assets":
+            if not embedded:
+                raise RuntimeError("Asset refresh requires an embedded installation.")
+            saved = stage / "previous-record.json"
+            if _sha256(saved) != record.get("previous_record_sha256"):
+                raise RuntimeError("Asset refresh recovery record changed.")
+            previous_files = read_json(saved)["files"]
+            next_record = stage / "next-record.json"
+            proposed = next_record if next_record.is_file() else manifest
+            if _sha256(proposed) != record.get("committed_sha256"):
+                raise RuntimeError("Asset refresh ownership record changed.")
+            next_files = read_json(proposed)["files"]
+            allowed = {
+                name
+                for name in previous_files.keys() | next_files.keys()
+                if name.startswith(EMBED_ROOT.as_posix() + "/")
+            }
+            allowed.update(
+                name + "c" for name in previous_files if name.endswith(".rpy") and name in allowed
+            )
         if not isinstance(entries, dict) or not entries or set(entries) - allowed:
             raise RuntimeError("SceneLight update journal contains unexpected file paths.")
         committed = manifest.is_file() and _sha256(manifest) == record.get("committed_sha256")
+        progress.set_total(len(entries) + len(staged_files) + (0 if committed else len(entries)))
         for relative, entry in entries.items():
+            progress.set_item("Verifying " + relative)
             if not isinstance(entry, dict):
                 raise RuntimeError("Invalid runtime update entry.")
+            if record["mode"] == "assets":
+                if Path(relative).as_posix() != relative or ":" in relative:
+                    raise RuntimeError("Invalid asset recovery path.")
+                compiler_output = (
+                    relative.endswith(".rpyc")
+                    and relative[:-1] in previous_files
+                    and relative not in previous_files
+                )
+                if (
+                    not compiler_output and entry.get("old_sha256") != previous_files.get(relative)
+                ) or entry.get("new_sha256") != next_files.get(relative):
+                    raise RuntimeError(
+                        "Asset recovery checksums differ from installation ownership."
+                    )
             target = _plain_project_path(root, Path(relative))
             actual = _sha256(target) if target.is_file() else None
             acceptable = {entry.get("new_sha256"), entry.get("old_sha256")}
@@ -215,6 +265,7 @@ def recover_update(root: Path) -> None:
                 saved = stage / "previous" / relative
                 if not saved.is_file() or _sha256(saved) != entry["old_sha256"]:
                     raise RuntimeError("Runtime recovery backup is incomplete: " + relative)
+            progress.advance()
         if not committed:
             saved_record = stage / "previous-record.json"
             if not saved_record.is_file() or _sha256(saved_record) != record.get(
@@ -226,14 +277,23 @@ def recover_update(root: Path) -> None:
                     "Installation record changed during update; retained recovery files."
                 )
             for relative, entry in entries.items():
+                progress.set_item("Restoring " + relative)
                 target = root / relative
                 if entry.get("old_sha256") is not None:
                     if not target.is_file() or _sha256(target) != entry["old_sha256"]:
                         os.replace(stage / "previous" / relative, target)
                 else:
                     target.unlink(missing_ok=True)
+                progress.advance()
             _record_plan("recovered", "Restored previous code after an interrupted update.")
         journal.unlink()
+        for path in staged_files:
+            progress.set_item("Cleaning up " + path.name)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass  # Retry during directory cleanup below.
+            progress.advance()
         shutil.rmtree(stage, ignore_errors=True)
         return
     if manifest.is_file() and _sha256(manifest) == record.get("committed_sha256"):
@@ -266,33 +326,51 @@ def _publish(
     payload: dict[str, Path | bytes | None],
     embedded: bool,
     previous_files: dict,
+    *,
+    previous_record_hash: str | None = None,
+    verified_stamps: dict[str, str] | None = None,
 ) -> dict:
     token = uuid.uuid4().hex[:16]
-    for relative in payload:
-        _plain_project_path(root, Path(relative))
     _plain_project_path(root, Path(JOURNAL))
-    stage = _plain_project_path(root, Path("game") / (".sl-u-" + token))
+    stage_parent = Path() if previous_record_hash is not None else Path("game")
+    stage = _plain_project_path(root, stage_parent / (".sl-u-" + token))
     stage.mkdir()
     manifest = _plain_project_path(
         root, Path(MANIFEST_NAME if embedded else ".scenelight_install.json")
     )
     entries = {}
+    retired_stamps = {}
+    verified_stamps = verified_stamps or {}
     try:
-        with ProgressStage("runtime-copy", item="Staging changed code only; maps stay in place"):
+        with ProgressStage(
+            "runtime-copy", total=len(payload), item="Preparing changed files"
+        ) as progress:
             for relative, source in payload.items():
-                target = root / relative
+                target = _plain_project_path(root, Path(relative))
+                progress.set_item(
+                    ("Checking obsolete file: " if source is None else "Staging: ") + relative
+                )
                 saved = stage / "previous" / relative
                 replacement = stage / "next" / relative
-                saved.parent.mkdir(parents=True, exist_ok=True)
-                replacement.parent.mkdir(parents=True, exist_ok=True)
+                old_digest = None
                 if target.is_file():
-                    shutil.copy2(target, saved)
+                    if source is None:
+                        # Move obsolete files to the rollback directory after journaling.
+                        old_digest, retired_stamps[relative], _ = verified_digest(
+                            target, previous_files.get(relative), verified_stamps.get(relative)
+                        )
+                    else:
+                        saved.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(target, saved)
+                        old_digest = _sha256(saved)
+                if source is not None:
+                    replacement.parent.mkdir(parents=True, exist_ok=True)
                 if isinstance(source, bytes):
                     replacement.write_bytes(source)
                 elif source is not None:
                     shutil.copy2(source, replacement)
                 entries[relative] = {
-                    "old_sha256": _sha256(saved) if saved.exists() else None,
+                    "old_sha256": old_digest,
                     "new_sha256": _sha256(replacement) if source is not None else None,
                 }
                 if entries[relative]["old_sha256"] != previous_files.get(relative):
@@ -300,30 +378,52 @@ def _publish(
                 expected_new = new["files" if embedded else "runtime_files"].get(relative)
                 if entries[relative]["new_sha256"] != expected_new:
                     raise RuntimeError("SceneLight package changed while staging an update.")
+                progress.advance()
+            progress.set_item("Writing the update recovery record")
             shutil.copy2(manifest, stage / "previous-record.json")
             _atomic_json(stage / "next-record.json", new)
             journal = {
                 "transaction": token,
                 "embedded": embedded,
-                "mode": "files",
+                "mode": "assets" if previous_record_hash is not None else "files",
                 "entries": entries,
                 "previous_record_sha256": _sha256(stage / "previous-record.json"),
                 "committed_sha256": _sha256(stage / "next-record.json"),
             }
+            if (
+                previous_record_hash is not None
+                and journal["previous_record_sha256"] != previous_record_hash
+            ):
+                raise RuntimeError("Installation ownership changed during refresh.")
             _atomic_json(root / JOURNAL, journal)
         with ProgressStage(
-            "runtime-setup", item="Publishing compatible runtime; analysis retained"
-        ):
-            for relative in payload:
-                target = root / relative
-                actual = _sha256(target) if target.is_file() else None
+            "runtime-apply", total=len(payload), item="Applying changed files"
+        ) as progress:
+            for relative, source in payload.items():
+                progress.set_item(("Retiring: " if source is None else "Installing: ") + relative)
+                target = _plain_project_path(root, Path(relative))
+                actual = None
+                if target.is_file():
+                    if source is None:
+                        actual, _, _ = verified_digest(
+                            target, entries[relative]["old_sha256"], retired_stamps.get(relative)
+                        )
+                    else:
+                        actual = _sha256(target)
                 if actual != entries[relative]["old_sha256"]:
                     raise RuntimeError("Runtime was edited while updating: " + relative)
-                if payload[relative] is None:
-                    target.unlink(missing_ok=True)
+                if source is None:
+                    if actual is not None:
+                        backup = stage / "previous" / relative
+                        backup.parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(target, backup)
                 else:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(stage / "next" / relative, target)
+                progress.advance()
+        with ProgressStage("install-record", item="Saving the updated installation record"):
+            if _sha256(manifest) != journal["previous_record_sha256"]:
+                raise RuntimeError("Installation ownership changed during publication.")
             os.replace(stage / "next-record.json", manifest)
         recover_update(root)
     except BaseException:
@@ -337,6 +437,67 @@ def _publish(
         "code_files_removed": sum(path is None for path in payload.values()),
         "derived_files_copied": 0,
     }
+
+
+def publish_changed_assets(root, staged, previous, new, record_hash, *, verified_stamps=None):
+    from .diagnostics import current_session
+
+    previous_files = dict(previous["files"])
+    files = new["files"]
+    prefix = EMBED_ROOT.as_posix() + "/"
+    changed = {
+        name: staged / name.removeprefix(prefix)
+        for name, digest in files.items()
+        if previous_files.get(name) != digest
+    }
+    removed = {name for name in previous_files if name not in files}
+    # Ren'Py can load compiled scripts even after their source is removed.
+    for name in list(changed) + list(removed):
+        compiled = name + "c"
+        if name.endswith(".rpy") and compiled not in files and compiled not in previous_files:
+            path = _plain_project_path(root, Path(compiled))
+            if path.is_file():
+                previous_files[compiled] = _sha256(path)
+                removed.add(compiled)
+    if any(not name.startswith(prefix) for name in changed.keys() | removed):
+        raise RuntimeError("Asset refresh cannot replace files outside the SceneLight runtime.")
+    added = sum(name not in previous_files for name in changed)
+    replaced = len(changed) - added
+    retained = len(files) - len(changed)
+    message = (
+        f"SceneLight file update: {added:,} new, {replaced:,} replaced, "
+        f"{len(removed):,} obsolete, {retained:,} unchanged."
+    )
+    print(message, flush=True)
+    session = current_session()
+    if session is not None:
+        session.event(
+            "update.files",
+            message,
+            added=added,
+            replaced=replaced,
+            obsolete=len(removed),
+            unchanged=retained,
+        )
+    # Install textures before the indexes that reference them. Obsolete files
+    # can go once both indexes have been replaced.
+    changed = dict(sorted(changed.items(), key=lambda item: item[0].endswith(".json")))
+    changed.update(dict.fromkeys(sorted(removed)))
+    if changed:
+        _publish(
+            root,
+            new,
+            changed,
+            True,
+            previous_files,
+            previous_record_hash=record_hash,
+            verified_stamps=verified_stamps,
+        )
+    elif _sha256(root / MANIFEST_NAME) == record_hash:
+        _atomic_json(root / MANIFEST_NAME, new)
+    else:
+        raise RuntimeError("Installation ownership changed during refresh.")
+    return len(changed)
 
 
 def try_runtime_update(

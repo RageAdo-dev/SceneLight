@@ -354,11 +354,23 @@ def test_legacy_embed_owns_and_removes_compatibility_launcher(
         b"legacy refreshed transport"
     )
 
+    replacement_runtime = tmp_path / "replacement-renpy.exe"
+    replacement_runtime.write_bytes(b"replacement runtime")
+    install_path = managed / ".scenelight_install.json"
+    install_record = json.loads(install_path.read_text())
+    install_record["playback_executable"] = str(replacement_runtime)
+    install_path.write_text(json.dumps(install_record))
+
     refreshed = refresh_embedded_from_managed(project, managed)
 
     assert refreshed["developer_refreshed"] is True
     assert launcher.read_bytes() != b"original game executable"
     assert original_backup.read_bytes() == backup_bytes
+    assert (project / EMBED_ROOT / "native-launcher.txt").read_text().strip() == str(
+        replacement_runtime
+    )
+    updated_manifest = json.loads((project / MANIFEST_NAME).read_text())
+    assert updated_manifest["native_launcher"]["runtime"] == str(replacement_runtime)
     assert (project / EMBED_ROOT / "transport_atlas.png").read_bytes() == (
         b"legacy refreshed transport"
     )

@@ -45,6 +45,16 @@ _INTRO = (
         keywords="install beginner quickstart getting started setup",
     ),
     _topic(
+        "live-updates",
+        WORKFLOW,
+        "Edit while playtesting",
+        "Keep Setup open while you edit the project with the developer API installed.",
+        "Live updates are on by default for installed projects in developer mode. To turn them off for this project, open Settings → Advanced and clear Live updates while editing. If you updated from an older build, launch the game once with the new runtime.",
+        "Save a loose PNG, JPEG, WebP, or BMP to preview the artwork in the open game with the current lighting. Visible sprites use the new artwork for shading while Setup builds their surface maps. The playtest shows Updating lighting, then Lighting ready when the map is applied. Forms that need the full renderer show Project update pending. When you add a character with a loose image file and a simple show statement, Setup prepares the sprite and Ren'Py reloads the edited script. Advance to the show line to see it. For layered characters, you can add an outfit or expression and show it in the scene. The playtest builds lighting from the visible pose. Setup applies verified sprite maps in place. Changes to backgrounds, the runtime or other scripts can still trigger a reload.",
+        "Changing or removing the active story statement can affect where Ren’Py resumes. If an update fails or you cancel it, fix the problem and turn live updates back on.",
+        keywords="hot reload edit playtest automatic refresh sprites backgrounds story",
+    ),
+    _topic(
         "first-command",
         START,
         "Your first command",

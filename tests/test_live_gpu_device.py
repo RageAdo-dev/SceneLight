@@ -1,4 +1,29 @@
+from types import SimpleNamespace
+
+import pytest
+
+from scenelight.runtime import live_gpu
 from scenelight.runtime.live_gpu import FLOAT, RG32F, RGBA8, Device
+
+
+@pytest.mark.parametrize("angle_current", [False, True])
+def test_windows_loader_uses_only_the_current_angle_context(monkeypatch, angle_current):
+    def lookup(name):
+        return {"libEGL.dll": 11, "libGLESv2.dll": 12}.get(name, 0)
+
+    kernel = SimpleNamespace(GetModuleHandleW=lookup)
+    egl = SimpleNamespace(
+        eglGetCurrentContext=lambda: int(angle_current), eglGetProcAddress=lambda _: 42
+    )
+    gles = SimpleNamespace()
+    desktop = SimpleNamespace(wglGetProcAddress=lambda _: 43)
+    libraries = {"kernel32": kernel, "libEGL.dll": egl, "libGLESv2.dll": gles, "opengl32": desktop}
+    monkeypatch.setattr(live_gpu.sys, "platform", "win32")
+    monkeypatch.setattr(live_gpu.C, "WinDLL", lambda name, **kwargs: libraries[name], raising=False)
+    monkeypatch.setattr(live_gpu.C, "WINFUNCTYPE", object(), raising=False)
+    library, get, _prototype = live_gpu._resolver()
+    assert library is (gles if angle_current else desktop)
+    assert get(b"glBindBuffer") == (42 if angle_current else 43)
 
 
 class Driver:

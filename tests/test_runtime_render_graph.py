@@ -11,6 +11,141 @@ import pytest
 from scenelight.runtime.shader_data import SHADERS
 
 
+@pytest.mark.parametrize(
+    "report, environment, session, expected",
+    [
+        ('{"runtime_renderer":"angle2"}', {}, {}, "angle2"),
+        ('{"runtime_renderer":"gl2"}', {}, {}, "gl2"),
+        ('{"runtime_renderer":null}', {}, {}, None),
+        ('{"runtime_renderer":"sw"}', {}, {}, None),
+        ('{"runtime_renderer":"angle2"}', {"RENPY_RENDERER": "gl2"}, {}, None),
+        ('{"runtime_renderer":"angle2"}', {}, {"renderer": "gl2"}, "gl2"),
+        ("invalid", {}, {}, None),
+    ],
+)
+def test_playback_restores_the_successful_backend_without_changing_preferences(
+    report, environment, session, expected
+):
+    import io
+    import json
+
+    path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
+    source = path.read_text()
+    start = source.index("    def _scenelight_restore_renderer():")
+    end = source.index("\n    _scenelight_restore_renderer()", start)
+    preferences = SimpleNamespace(renderer="auto")
+    namespace = {
+        "_SceneLightMapping": dict,
+        "os": SimpleNamespace(environ=environment),
+        "json": json,
+        "renpy": SimpleNamespace(
+            session=session.copy(),
+            file=lambda _: io.StringIO(report),
+            game=SimpleNamespace(preferences=preferences),
+        ),
+    }
+    exec(compile(textwrap.dedent(source[start:end]), str(path), "exec"), namespace)
+    namespace["_scenelight_restore_renderer"]()
+    assert namespace["renpy"].session.get("renderer") == expected
+    assert preferences.renderer == "auto"
+
+
+@pytest.mark.parametrize("live", [True, False])
+@pytest.mark.parametrize(
+    "images, primary, expected",
+    [
+        (["bg classroom", "black", "hero neutral"], None, "classroom"),
+        (["black", "hero neutral"], "black", "black"),
+        (["black", "bg classroom", "hero neutral"], "black", "classroom"),
+        (["room day", "hero neutral"], "room", "room day"),
+        (["room day", "black", "hero neutral"], "room", "room day"),
+        (["unknown day", "black", "hero neutral"], "unknown", None),
+    ],
+)
+def test_background_selection_with_overlays_and_cached_lighting(live, images, primary, expected):
+    path = Path(__file__).resolve().parents[1] / "src/scenelight/runtime/scenelight_runtime.rpy"
+    source = path.read_text()
+    start = source.index("    def _scenelight_live_scene_entry():")
+    end = source.index("\n    def _scenelight_live_scene():", start)
+    node = ast.parse(textwrap.dedent(source[start:end])).body[0]
+    scenes = {key: {"uv": (0, 0, 1, 1)} for key in ("classroom", "black", "room day")}
+
+    class Background:
+        def __init__(self, key):
+            self.scene_key = key
+            self.binding = key
+
+    entries = []
+    for name in images:
+        key = name.removeprefix("bg ")
+        entries.append(
+            SimpleNamespace(
+                tag=name.split()[0],
+                name=tuple(name.split()),
+                displayable=Background(key) if key in scenes else object(),
+            )
+        )
+    renderer = SimpleNamespace(frame=lambda _: None) if live else None
+    namespace = {
+        "renpy": SimpleNamespace(
+            game=SimpleNamespace(
+                context=lambda: SimpleNamespace(
+                    scene_lists=SimpleNamespace(layers={"master": entries}),
+                )
+            ),
+            display=SimpleNamespace(_scenelight_live_renderer=renderer),
+        ),
+        "_SceneLightBackground": Background,
+        "SCENELIGHT_SCENES": scenes,
+        "SCENELIGHT_SCENE_SEQUENCES": {},
+        "SCENELIGHT_STABLE_SCENE_KEY": None,
+        "SCENELIGHT_STABLE_SCENE": None,
+        "scenelight_scene_tag": primary,
+        "_scenelight_timed_scene": lambda key, *_args: scenes.get(key),
+    }
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
+    key, scene = namespace["_scenelight_live_scene_entry"]()
+    assert key == expected
+    assert scene is None if expected is None else scene["uv"] == scenes[expected]["uv"]
+
+
+def test_scene_clear_resets_lighting_and_first_show_survives_overlays():
+    namespace, _transform, _sprite = _registration_runtime()
+    _load_runtime_definitions(
+        namespace, "_scenelight_route_scene_add", "_scenelight_route_scene_mutation"
+    )
+    namespace.update(
+        {
+            "_scenelight_unwrap_replaced_background": lambda *args: None,
+            "_scenelight_wrap_backgrounds": lambda *args: None,
+            "_scenelight_redraw_visible_sprites": lambda *args: None,
+            "SCENELIGHT_STABLE_SCENE_KEY": "previous",
+            "SCENELIGHT_STABLE_SCENE": {"uv": (0, 0, 1, 1)},
+            "scenelight_scene_tag": "previous",
+            "scenelight_scene_pending": False,
+        }
+    )
+    mutate = namespace["_scenelight_route_scene_mutation"]
+    add = namespace["_scenelight_route_scene_add"]
+
+    def original(*args, **kwargs):
+        return "result"
+
+    owner = object()
+    mutate(original, owner, ("screens",), {}, cleared=True)
+    assert namespace["scenelight_scene_tag"] == "previous"
+    mutate(original, owner, ("master",), {}, cleared=True)
+    assert namespace["SCENELIGHT_STABLE_SCENE"] is None
+    assert namespace["SCENELIGHT_STABLE_SCENE_KEY"] is None
+    add(original, owner, ("master", object(), "sayori"), {"name": ("sayori", "idle")})
+    assert namespace["scenelight_scene_pending"] is True
+    for name in ("room", "black"):
+        add(original, owner, ("master", object(), name), {"name": (name, "day")})
+        assert namespace["scenelight_scene_tag"] == "room"
+    mutate(original, owner, ("master", "black"), {})
+    assert namespace["scenelight_scene_tag"] == "room"
+
+
 def test_incoming_transition_is_live_in_transition_coordinates_and_forwards_events():
     class Displayable:
         pass
@@ -606,6 +741,7 @@ def test_character_registration_preserves_existing_wrappers_and_wraps_new_aliase
         ("sayori",): alias,
         ("sayori", "tap"): Sprite(raw, ("sayori", "tap")),
         ("sayori", "new"): raw,
+        ("Sayori", "Happy"): raw,
         ("monika",): object(),
         ("bg", "room"): object(),
     }
@@ -631,8 +767,9 @@ def test_character_registration_preserves_existing_wrappers_and_wraps_new_aliase
     assert registry[("sayori",)] is alias
     assert isinstance(registry[("sayori", "tap")], Sprite)
     assert registry[("sayori", "new")].original is raw
+    assert registry[("Sayori", "Happy")].original is raw
     assert registry[("monika",)] is before_monika
-    assert namespace["SCENELIGHT_WRAPPED_IMAGES"] == ["sayori new"]
+    assert namespace["SCENELIGHT_WRAPPED_IMAGES"] == ["sayori new", "Sayori Happy"]
 
 
 @pytest.mark.parametrize("keyword_arguments", [False, True])
@@ -659,14 +796,19 @@ def test_scene_router_wraps_final_character_only_on_master(keyword_arguments):
     composite = object()
     original = Transform(composite, "ATL")
     name = ("sayori", "turned", "md")
-    for layer, tag in (("master", "sayori"), ("screens", "sayori"), ("master", "prop")):
+    for layer, tag in (
+        ("master", "sayori"),
+        ("master", "Sayori"),
+        ("screens", "sayori"),
+        ("master", "prop"),
+    ):
         args = (layer, original, tag, None, None, None, name)
         kwargs = {}
         if keyword_arguments:
             args = ()
             kwargs = {"layer": layer, "thing": original, "key": tag, "name": name}
         assert route(add, owner, args, kwargs) == "engine-result"
-        if layer == "master" and tag == "sayori":
+        if layer == "master" and tag.lower() == "sayori":
             assert isinstance(calls[-1].child, Sprite)
             assert calls[-1].child.child is composite
             assert calls[-1].child.image_name == name

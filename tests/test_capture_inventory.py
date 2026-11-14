@@ -50,6 +50,39 @@ def capture_functions(**namespace):
     return namespace
 
 
+def test_capitalized_image_names_retain_engine_spelling_in_capture_and_sequences():
+    image = object()
+    calls = []
+
+    class ShownImageInfo:
+        def apply_attributes(self, layer, tag, requested):
+            calls.append((tag, requested))
+            return requested if requested == ("Junoru", "Happy") else None
+
+        def predict_show(self, layer, name):
+            pass
+
+    runtime = NS(
+        display=NS(image=NS(images={("Junoru", "Happy"): image}, ShownImageInfo=ShownImageInfo)),
+        Displayable=object,
+    )
+    functions = capture_functions(renpy=runtime)
+    assert functions["_scenelight_capture_displayable"]("junoru happy") is image
+    forms = []
+    functions["_scenelight_plan_sequence"](
+        ["show junoru happy"], {"junoru happy"}, lambda *args: forms.append(args)
+    )
+    assert calls == [("Junoru", ("Junoru", "Happy"))]
+    assert forms == [("junoru happy", "Junoru Happy")]
+
+
+def test_case_only_image_collisions_are_reported_instead_of_picking_wrong_pixels():
+    runtime = NS(display=NS(image=NS(images={("Hero", "happy"): 1, ("hero", "happy"): 2})))
+    functions = capture_functions(renpy=runtime)
+    with pytest.raises(ValueError, match="differ only by case"):
+        functions["_scenelight_capture_displayable"]("hero happy")
+
+
 @pytest.fixture
 def inventory():
     def run(statements, tags=None, progress=None, **config):

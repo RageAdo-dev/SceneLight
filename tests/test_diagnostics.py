@@ -6,6 +6,37 @@ from pathlib import Path
 from scenelight import diagnostics
 
 
+def test_export_includes_worker_results_and_crashes_while_setup_is_open(tmp_path):
+    setup = diagnostics.Session("setup", root=tmp_path)
+    worker = diagnostics.Session("cli", existing=setup.path)
+    worker.event("capture.process", "Capture process started", attempt_id="attempt1", engine_pid=45)
+    worker.event(
+        "capture",
+        "Capture did not complete",
+        "error",
+        attempt_id="attempt1",
+        exit_code=3221225477,
+        last_progress=["form.start", 42, 98, "actor idle"],
+        last_step={"stage": "rendering", "token": "secret-value"},
+    )
+    worker.event("capture.summary", "Worker 2 finished", captured_sprites=82, skipped_assets=1)
+    destination = tmp_path / "report.zip"
+    diagnostics.export_report(setup.path, destination)
+    with zipfile.ZipFile(destination) as archive:
+        summary = archive.read("SUMMARY.txt").decode()
+        assert "Status: running" in summary
+        assert "Last error: Capture did not complete" in summary
+        assert "0xC0000005" in summary and "42/98, actor idle" in summary
+        capture = archive.read("capture.json")
+        assert b"secret-value" not in capture
+        assert {row["stage"] for row in json.loads(capture)} == {
+            "capture.process",
+            "capture",
+            "capture.summary",
+        }
+        assert len(json.loads(archive.read("session.json"))["build_sha256"]) == 64
+
+
 def test_sessions_retain_failure_context_and_search_after_reopening(tmp_path):
     session = diagnostics.Session("setup", root=tmp_path)
     session.update(operation="install", project="D:/games/example")
@@ -22,6 +53,50 @@ def test_sessions_retain_failure_context_and_search_after_reopening(tmp_path):
     assert "raise ValueError" in rows[0]["details"]["traceback"]
     assert rows[0]["pid"]
     assert json.loads((session.path / "session.json").read_text())["runtime_sha256"]
+
+
+def test_live_capture_report_survives_rotation_and_discards_old_batch_state(tmp_path, monkeypatch):
+    session = diagnostics.Session("setup", root=tmp_path)
+    session.capture_status(None, new_attempt=True, status="script error", purpose="review")
+    session.capture_status(None, error='File "game/broken.rpy", line 2: expected statement.')
+    session.event("capture.script-error", "Ren'Py could not compile the game scripts", "error")
+    session.output("Loading error handling took 0.04s")
+    destination = tmp_path / "report.zip"
+    diagnostics.export_report(session.path, destination)
+    with zipfile.ZipFile(destination) as archive:
+        summary = archive.read("SUMMARY.txt").decode()
+        assert "No parallel sprite batch" in summary
+        assert 'File "game/broken.rpy", line 2' in summary
+        assert "Last error: Ren'Py could not compile" in summary
+    session.capture_status(None, new_attempt=True, status="result returned", purpose="plan")
+    session.capture_batch([12] * 7, [False] * 7)
+    session.capture_status(7, status="stopped", exit_code=75)
+    session.capture_batch([10] * 6, [True] + [False] * 5)
+    session.capture_status(2, status="started", engine_pid=33, renderer="gl2")
+    session.capture_status(
+        2,
+        status="in progress",
+        progress={
+            "stage": "form.start",
+            "current": 3,
+            "total": 10,
+            "item": "actor idle",
+            "token": "test-key",
+        },
+    )
+    monkeypatch.setattr(diagnostics, "SEGMENT_BYTES", 180)
+    for _ in range(24):
+        session.event("capture.asset_skipped", "Skipped unrelated form")
+    diagnostics.export_report(session.path, destination)
+    with zipfile.ZipFile(destination) as archive:
+        text = archive.read("SUMMARY.txt").decode()
+        assert "Worker 1: restored" in text and "Worker 6: queued" in text
+        assert "Worker 7" not in text and "Main capture: script error" not in text
+        assert "form.start 3/10 · actor idle" in text
+        data = archive.read("capture-state.json")
+        assert b"test-key" not in data
+        workers = next(iter(json.loads(data).values()))["workers"]
+        assert workers["2"]["engine_pid"] == 33
 
 
 def test_bounded_journal_and_concurrent_writers_keep_complete_json(tmp_path, monkeypatch):
@@ -100,6 +175,48 @@ def test_progress_is_compact_but_full_console_remains_available(tmp_path):
     session.attach_text("same-worker", "first failure")
     session.attach_text("same-worker", "second failure")
     assert len(list((session.path / "evidence").glob("*.txt"))) == 2
+
+
+def test_account_names_are_masked_on_disk_in_activity_and_in_legacy_exports(tmp_path):
+    account = "Jane Élodie O'Neil"
+    folder = "C:\\Users\\" + account + "\\Desktop\\Eidolon"
+    other = "/home/" + account + "/mods/bg.png"
+    fields = {
+        "username": account,
+        folder: {"message": other},
+        "request": json.dumps({"user_name": account}),
+    }
+    session = diagnostics.Session("setup", root=tmp_path / "sessions")
+    project = Path.home() / "Desktop" / "Eidolon"
+    session.update(project=str(project), failure=folder)
+    session.event("capture", folder, "error", values=fields)
+    session.capture_status(3, status="stopped", executable=folder, progress={"item": "dog"})
+    session.output("Opening " + folder)
+    session.attach_text("worker", json.dumps(fields) + "\n" + json.dumps(fields))
+    session.flush(close=True)
+    for path in session.path.rglob("*"):
+        if path.is_file():
+            body = path.read_text(encoding="utf-8")
+            assert account not in body and "Neil" not in body
+    row = diagnostics.sessions(tmp_path / "sessions")[0]
+    assert row["project"].startswith("<USER>") and diagnostics.session_game_root(row) == project
+    assert diagnostics.session_game_root({"project": r"C:\Users\<USER>\Game"}) is None
+    # Simulate a journal and engine log saved on a different machine by an older release.
+    with session.journal.open("a", encoding="utf-8") as log:
+        log.write(json.dumps({"stage": "old", "message": folder, "details": fields}) + "\n")
+    (tmp_path / "log.txt").write_text(
+        "Windows username: " + account + "\n" + other, encoding="utf-8"
+    )
+    out = tmp_path / "support.zip"
+    diagnostics.export_report(session.path, out, game_root=tmp_path)
+    assert "Neil" not in str(diagnostics.read_events(session.path))
+    with zipfile.ZipFile(out) as archive:
+        for name in archive.namelist():
+            body = archive.read(name).decode()
+            assert "Neil" not in name + body
+            if name.endswith(".json"):
+                json.loads(body)
+        assert "/mods/bg.png" in archive.read("game/log.txt").decode()
 
 
 def test_large_inspector_json_is_exported_whole_not_a_broken_tail(tmp_path, monkeypatch):

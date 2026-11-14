@@ -1,6 +1,9 @@
 """Finalization reports stages and completed file counts through commit or rollback."""
 
+import errno
+import hashlib
 import json
+import os
 import queue
 import shutil
 import threading
@@ -12,6 +15,97 @@ from scenelight import cli, developer, diagnostics
 from scenelight import progress as module
 from scenelight import setup_gui as ui
 from scenelight.progress import ProgressStage, copytree_with_progress
+
+
+def test_cache_copy_is_independent_and_preserves_timestamps(tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "copy"
+    (source / "empty").mkdir(parents=True)
+    sprite = source / "pose-雪.png"
+    sprite.write_bytes(b"old")
+    os.utime(sprite, ns=(1730000000000000000, 1730000000000000000))
+    module.copy_cache_tree(source, target, "form-cache")
+    copied = target / sprite.name
+    assert copied.stat().st_mtime_ns == sprite.stat().st_mtime_ns
+    assert copied.read_bytes() == b"old"
+    assert (target / "empty").is_dir()
+    copied.write_bytes(b"new")
+    assert sprite.read_bytes() == b"old"
+
+
+def test_seeded_hashes_follow_replaced_added_and_deleted_maps(tmp_path):
+    from scenelight.updates import runtime_hashes
+
+    source = tmp_path / "source"
+    root = tmp_path / "build"
+    maps = root / "game/scenelight_runtime/sprite_form"
+    maps.parent.mkdir(parents=True)
+    source.mkdir()
+    for name in ("unchanged.png", "updated.png", "removed.png"):
+        (source / name).write_bytes(b"old")
+    verified = {}
+    module.copy_cache_tree(source, maps, "form-cache", verified=verified)
+    modified = maps / "updated.png"
+    earlier = modified.stat()
+    modified.write_bytes(b"new")
+    os.utime(modified, ns=(earlier.st_atime_ns, earlier.st_mtime_ns))
+    (maps / "removed.png").unlink()
+    (maps / "added.png").write_bytes(b"add")
+    expected, stamps = {}, {}
+    for relative, (digest, stamp) in verified.items():
+        key = (maps / relative).relative_to(root).as_posix()
+        expected[key], stamps[key] = digest, stamp
+    actual = runtime_hashes(root, expected=expected, stamps=stamps)
+    assert actual == {
+        (maps / name).relative_to(root).as_posix(): hashlib.sha256(content).hexdigest()
+        for name, content in (
+            ("unchanged.png", b"old"),
+            ("updated.png", b"new"),
+            ("added.png", b"add"),
+        )
+    }
+
+
+@pytest.mark.parametrize("mode", ["transfer", "different-volume", "locked", "commit-failure"])
+def test_disposable_cache_publication(tmp_path, monkeypatch, mode):
+    project = tmp_path / "project"
+    managed = tmp_path / "working"
+    source = managed / ".scenelight_cache"
+    source.mkdir(parents=True)
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
+    destination = cli.analysis_cache_root(project)
+    destination.mkdir(parents=True)
+    (destination / "previous").write_bytes(b"previous build")
+    for name in ("capture_result.json", "capture_state.json"):
+        (source / name).write_text('{"version": 1}')
+    (source / "sprite.png").write_bytes(b"prepared")
+    inode = (source / "sprite.png").stat().st_ino
+    (source / "capture.tmp").write_bytes(b"temporary")
+    replace = os.replace
+
+    def replace_checked(src, dst):
+        if src == source and mode in ("different-volume", "locked"):
+            raise OSError(errno.EXDEV if mode == "different-volume" else errno.EACCES, mode)
+        if mode == "commit-failure" and dst == destination and src.suffix == ".tmp":
+            raise PermissionError("cannot publish")
+        replace(src, dst)
+
+    monkeypatch.setattr(cli.os, "replace", replace_checked)
+    if mode == "commit-failure":
+        with pytest.raises(PermissionError, match="cannot publish"):
+            cli._preserve_analysis_cache(project, managed, consume=True)
+        assert (destination / "previous").read_bytes() == b"previous build"
+        assert (source / "sprite.png").read_bytes() == b"prepared"
+    else:
+        assert cli._preserve_analysis_cache(project, managed, consume=True) == destination
+        assert (destination / "sprite.png").read_bytes() == b"prepared"
+        assert not (destination / "capture.tmp").exists()
+        if mode == "transfer":
+            assert (destination / "sprite.png").stat().st_ino == inode
+            assert not source.exists()
+        else:
+            assert (source / "sprite.png").read_bytes() == b"prepared"
+    assert not list(destination.parent.glob(".slc-*"))
 
 
 def test_heartbeat_reports_waiting_without_inventing_completion(monkeypatch):
@@ -128,51 +222,160 @@ def test_ui_leaves_map_100_percent_and_updates_elapsed_without_new_console_lines
         bar.starts += 1
 
     bar.start = start
-    label = types.SimpleNamespace(value="old map stage")
-    label.set = lambda value: setattr(label, "value", value)
+
+    class Label:
+        text = ""
+
+        def set(self, text):
+            self.text = text
+
+        def configure(self, *, text):
+            self.text = text
+
+        def grid(self):
+            pass
+
+        def grid_remove(self):
+            self.text = ""
+
+    live = ui.OperationProgress("Starting", 80)
+    live.observe("form 14501/14501: last", 98)
     state = types.SimpleNamespace(
         _events=events,
+        _live_progress=live,
+        _last_progress_view=(live.step, "", "", "", (), (), ()),
+        _cancel_requested=threading.Event(),
         _active_operation="embed",
-        _progress_phase="form",
-        _progress_current=14501,
-        _progress_total=14501,
-        _progress_started_at=80.0,
-        _progress_origin=0,
-        _progress_indeterminate=False,
-        _latest_progress=None,
-        _last_elapsed_refresh=0.0,
         progress=bar,
-        operation_var=label,
+        operation_var=Label(),
+        progress_count=Label(),
+        progress_percent=Label(),
+        progress_clock=Label(),
+        progress_eta=Label(),
+        progress_detail=Label(),
+        progress_receipt=Label(),
         _append_log=lambda *_args, **_kw: None,
         after=lambda *_args: None,
+        _drain_events=lambda: None,
+        worker_strip=types.SimpleNamespace(show=lambda *_args: None),
+        stage_ribbon=types.SimpleNamespace(show=lambda *_args: None),
     )
-    state._drain_events = types.MethodType(ui.SceneLightSetup._drain_events, state)
     state._refresh_elapsed_progress = types.MethodType(
         ui.SceneLightSetup._refresh_elapsed_progress, state
     )
-    events.put(("log", "SceneLight stage form-workers 0/0: Waiting for workers"))
-    ui.SceneLightSetup._drain_events(state)
+
+    def pump(line=None):
+        if line:
+            events.put(("log", line))
+        ui.SceneLightSetup._drain_events(state)
+
+    pump("SceneLight stage form-workers 0/0: Waiting for workers")
     assert bar.state["mode"] == "indeterminate" and bar.starts == 1
-    assert "Finishing sprite-map workers" in label.value and "100%" not in label.value
+    assert (
+        "Finishing sprite-map workers" in state.operation_var.text
+        and "%" not in state.progress_count.text
+    )
     now[0] += 9
-    ui.SceneLightSetup._drain_events(state)
-    assert "elapsed 9s" in label.value
-    events.put(("log", "SceneLight stage cache-save 0/0: Counting files"))
-    ui.SceneLightSetup._drain_events(state)
+    pump()
+    assert (
+        "Total elapsed 29s" in state.progress_clock.text
+        and "This step 9s" in state.progress_clock.text
+    )
+    pump("SceneLight stage cache-save 0/0: Counting files")
     now[0] += 3
-    events.put(("log", "SceneLight stage cache-save 0/40000: map.png"))
-    ui.SceneLightSetup._drain_events(state)
+    pump("SceneLight stage cache-save 0/40000: map.png")
     assert bar.state["mode"] == "determinate" and bar.state["maximum"] == 40000
-    assert "Saving reusable analysis files" in label.value
-    assert "elapsed 3s" in label.value, "Discovering the total must not reset the stage clock"
-    events.put(("log", "SceneLight stage cache-save 17000/40000: map-17000.png"))
-    ui.SceneLightSetup._drain_events(state)
-    assert "17,000 of 40,000" in label.value and "map-17000.png" in label.value
-    before = label.value
-    state._active_operation = None
+    assert "Saving reusable analysis files" in state.operation_var.text
+    assert "This step 3s" in state.progress_clock.text
+    pump("SceneLight stage cache-save 17000/40000: map-17000.png")
+    assert (
+        "17,000 of 40,000" in state.progress_count.text
+        and "map-17000.png" in state.progress_detail.text
+    )
+    before = state.progress_clock.text
+    state.progress_eta.text = "Under 1 min left overall"
+    state._cancel_requested.set()
+    state.operation_var.set("Cancelling")
     now[0] += 20
-    ui.SceneLightSetup._drain_events(state)
-    assert label.value == before
+    pump("SceneLight stage cache-save 22000/40000: later.png")
+    assert state.operation_var.text == "Cancelling" and state.progress_clock.text == before
+    assert not state.progress_eta.text
+
+
+def test_worker_retries_and_restored_batches_leave_the_sprite_count_intact():
+    live = ui.OperationProgress("Starting", 0)
+    live.observe("SceneLight sprite batches: 6", 1)
+    live.observe("SceneLight worker 1/6: restored", 1)
+    live.observe("SceneLight parallel forms 3000/18000: 6 workers", 2)
+    live.observe("SceneLight worker copies 2/6: ready", 3)
+    live.observe("SceneLight worker 3/6: retrying with the gl2 renderer", 4)
+    assert live.worker_states() == ("restored", "queued", "retrying", "queued", "queued", "queued")
+    live.observe("SceneLight parallel forms 100/18000: catching up", 5)
+    live.observe("SceneLight worker 2/6: saved", 6)
+    assert (live.step.current, live.step.total) == (3000, 18000)
+    assert "2 of 6" in live.detail() and "Worker 3 retrying" in live.detail()
+    live.observe("SceneLight worker 3/6: saved", 7)
+    live.observe("SceneLight worker 3/6: saved", 8)
+    assert "3 of 6" in live.detail() and "retrying" not in live.detail()
+    live.observe("SceneLight worker cleanup 1/1: releasing runtimes", 9)
+    assert live.step.total == 0
+    live.observe("SceneLight sprite batches: 2", 10)
+    assert not live.batches
+
+
+def test_step_clock_and_estimate_follow_measured_work_and_survive_an_idle_renderer():
+    live = ui.OperationProgress("Starting", 10)
+    live.observe("SceneLight renderer 1/3: trying the native game", 20)
+    assert live.step.total == 0 and "Attempt 1 of 3" in live.detail()
+    live.observe("SceneLight resolver capturing form 100/150: yuri smile", 30)
+    assert "yuri smile" in live.detail()
+    live.observe("SceneLight resolver form 105/150", 32)
+    live.observe("SceneLight resolver form 110/150", 34)
+    assert "About 16s left in this step" in live.timing(35)
+    assert "left" not in live.timing(64)
+    assert "Total elapsed 54s" in live.timing(64)
+    live.observe(
+        "SceneLight capture outcome: 18142 sprite forms ready (18141 reused); 2 skipped. Background captures reused: 1010.",
+        70,
+    )
+    live.observe("SceneLight background cache: 1008/1010 reused; 2 analyzed", 72)
+    assert "18,141 sprites reused · 1 captured · 2 skipped" in live.summary()
+    assert "1,008 backgrounds reused · 2 analyzed" in live.summary()
+    live.observe(r"scene 3/4: C:\Users\PrivateName\mod\art.png", 73)
+    assert "PrivateName" not in live.detail()
+    live.observe("SceneLight applied 4 changed files; 900 existing sprite maps retained.", 75)
+    assert live.detail().startswith("4 changed files") and live.step.total == 0
+
+
+def test_worker_totals_match_the_meter_through_a_retry_and_plan_change():
+    live = ui.OperationProgress("Updating", 0, operation="refresh")
+    live.observe("SceneLight sprite batches: 2", 1)
+    live.observe("SceneLight parallel forms 70/100: 2 workers | batches 50/50 20/50", 2)
+    live.observe("SceneLight worker 2/2: retrying with the gl2 renderer", 3)
+    live.observe("SceneLight parallel forms 55/100: catching up | batches 50/50 5/50", 4)
+    assert live.batch_counts == ((50, 50), (20, 50)) and live.step.current == 70
+    assert live.milestone_states()[1] == ("Capture artwork", "active")
+    assert "Last update 22s ago" in live.timing(25)
+    live.observe("SceneLight sprite batches: 1", 26)
+    assert live.batch_counts == ()
+
+
+def test_fast_update_skips_unused_phases_and_early_cleanup_does_not_imply_install():
+    live = ui.OperationProgress("Updating", 0, operation="refresh")
+    live.observe("SceneLight stage workspace-cleanup 0/0: cleaning up", 1)
+    assert live.milestone_states()[0] == ("Check project", "active")
+    live.observe("SceneLight stage runtime-copy 0/8: runtime scripts", 2)
+    assert [status for _, status in live.milestone_states()] == [
+        "done",
+        "skipped",
+        "skipped",
+        "active",
+    ]
+    live.observe("SceneLight stage install-verify 1/8: checking", 3)
+    assert live.milestone_states()[-1] == ("Apply files", "active")
+    scan = ui.OperationProgress("Scanning", 0, operation="scan")
+    scan.observe("SceneLight scan 4/4: finalizing backgrounds and character candidates", 3)
+    assert scan.milestone_states()[-1] == ("Review assets", "active")
 
 
 def test_activity_retains_each_finalization_phase_even_when_fast(tmp_path):
@@ -188,6 +391,21 @@ def test_activity_retains_each_finalization_phase_even_when_fast(tmp_path):
         session.output(f"SceneLight stage {phase} 0/40: starting")
     rows = diagnostics.read_events(session.path)
     assert len([row for row in rows if "SceneLight stage" in row["message"]]) == 5
+
+
+def test_activity_retains_worker_receipts_and_retries_without_a_spurious_fraction(tmp_path):
+    session = diagnostics.Session("setup", root=tmp_path)
+    lines = [
+        "SceneLight worker 3/6: running",
+        "SceneLight worker 3/6: retrying with the gl2 renderer",
+        "SceneLight worker 3/6: saved",
+        "SceneLight background cache: 2/2 reused; 0 analyzed",
+    ]
+    for line in lines:
+        session.output(line)
+    rows = [row for row in diagnostics.read_events(session.path) if row["message"] in lines]
+    assert {row["message"] for row in rows} == set(lines)
+    assert all("current" not in row["details"] for row in rows)
 
 
 def test_existing_installation_is_not_labeled_ready_during_update(tmp_path):
@@ -232,6 +450,11 @@ def test_existing_installation_is_not_labeled_ready_during_update(tmp_path):
         _scan_ok=True,
         developer_mode=True,
         step_labels=[],
+        workflow_steps=Widget(),
+        selection_card=Widget(),
+        setup_toolbar=Widget(),
+        setup_flow=Widget(),
+        _last_run_text="",
     )
     for name in (
         "project_name_var",
@@ -254,6 +477,7 @@ def test_existing_installation_is_not_labeled_ready_during_update(tmp_path):
         "sdk_browse",
         "cuda_check",
         "inspector_check",
+        "live_edit_check",
         "verify_button",
         "review_button",
         "characters_button",
@@ -322,3 +546,64 @@ def test_activity_refresh_follows_live_end_but_preserves_older_reading(position,
     _replace_activity_text(text, "new verification progress", reset=reset)
     assert calls[-1] == (("see", "end") if follow else ("move", position[0]))
     assert ("insert", ("end", "new verification progress")) in calls
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_update_borrows_cache_without_copy_and_recovers_checkout(tmp_path, monkeypatch, stopped):
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
+    project = tmp_path / "game-project"
+    managed = cli.managed_project_root(project)
+    managed.mkdir(parents=True)
+    saved = cli.analysis_cache_root(project)
+    saved.mkdir(parents=True)
+    (saved / "pixels.png").write_bytes(b"verified pixels")
+    identity = (saved / "pixels.png").stat().st_ino
+    monkeypatch.setattr(cli, "copy_cache_tree", lambda *a: pytest.fail("copied the cache"))
+    assert cli._restore_analysis_cache(project, managed, transfer=True)
+    working = managed / ".scenelight_cache"
+    assert cli.analysis_cache_root(project) == working
+    assert (working / "pixels.png").stat().st_ino == identity
+    (working / "new.png").write_bytes(b"new pixels")
+    if stopped:
+        suspended = working / "suspended-runtime"
+        suspended.mkdir()
+        (suspended / "scenelight_runtime.rpy").write_bytes(b"playback runtime")
+        cli._return_checked_out_cache(project)
+        assert (managed / "game/scenelight_runtime.rpy").read_bytes() == b"playback runtime"
+        assert not (saved / "suspended-runtime").exists()
+    else:
+        assert cli._preserve_analysis_cache(project, managed, consume=True) == saved
+    assert (saved / "pixels.png").stat().st_ino == identity
+    assert (saved / "new.png").read_bytes() == b"new pixels"
+    assert cli.analysis_cache_root(project) == saved
+    assert not working.exists()
+    assert not cli.cache_checkout_marker(saved).exists()
+    cli._return_checked_out_cache(project)
+
+
+def test_checkout_uses_legacy_cache_once(tmp_path, monkeypatch):
+    from scenelight import sidecar
+
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
+    project = tmp_path / "project"
+    managed = cli.managed_project_root(project)
+    managed.mkdir(parents=True)
+    legacy = tmp_path / "old-volume" / "cache"
+    legacy.mkdir(parents=True)
+    (legacy / "image.png").write_bytes(b"cached")
+    monkeypatch.setattr(sidecar, "_legacy_analysis_cache", lambda root: legacy)
+    assert cli.analysis_cache_root(project) == legacy
+    assert cli._restore_analysis_cache(project, managed, transfer=True)
+    current = cli._preserve_analysis_cache(project, managed, consume=True)
+    assert current != legacy and cli.analysis_cache_root(project) == current
+    assert (current / "image.png").read_bytes() == b"cached"
+
+
+@pytest.mark.parametrize("command", [["launch"], ["scan", "--runtime-review"]])
+def test_other_workspace_operations_refuse_concurrent_update(tmp_path, monkeypatch, command):
+    from scenelight.updates import operation_lock
+
+    monkeypatch.setenv("SCENELIGHT_MANAGED_ROOT", str(tmp_path / "projects"))
+    with operation_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="Another SceneLight update"):
+            cli._main([*command, "--project", str(tmp_path)])

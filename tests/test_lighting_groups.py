@@ -133,3 +133,19 @@ def test_shared_anchor_tracks_movement_hidden_leader_and_frame_cache():
     assert resolve(group) is None
     api.group("hug", anchor=(0.1, 0.9))
     assert resolve(api.state()["groups"]["hug"]) == (0.1, 0.9)
+
+
+def test_group_anchor_uses_the_engines_capitalized_tag():
+    ns = _runtime_api()
+    engine = ns["renpy"]
+    engine.display = SimpleNamespace()
+    engine.game = SimpleNamespace(interface=SimpleNamespace(frame_time=1))
+    ns["config"] = SimpleNamespace(screen_width=1000, screen_height=1000)
+    ns["_SCENELIGHT_MEASURING_EMITTERS"] = False
+    engine.get_showing_tags = lambda **kw: ["Junoru", "Sachiro"]
+    calls = []
+    engine.get_image_bounds = lambda tag, *args: calls.append(tag) or (100, 200, 300, 400)
+    ns["scenelight"].group("pair", ["Junoru", "Sachiro"], anchor="Junoru")
+    group = ns["scenelight"].state()["groups"]["pair"]
+    assert ns["_scenelight_control_group_anchor"](group) == (0.25, 0.4)
+    assert calls == ["Junoru"]

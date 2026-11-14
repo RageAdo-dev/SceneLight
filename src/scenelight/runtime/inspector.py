@@ -15,6 +15,11 @@ import time
 import uuid
 import zipfile
 
+try:
+    import _scenelight_log_privacy as log_privacy
+except ImportError:
+    from scenelight.runtime import log_privacy
+
 
 def escape(value):
     # Ren'Py 7 distributions can omit xml.sax and newer html modules.
@@ -317,7 +322,9 @@ def findings(report):
                 + sprite.get("origins", {}).get("strength", "the last rule")
                 + " wins.",
             )
-        if sprite.get("managed") and not sprite.get("mapped_form"):
+        if sprite.get("live_lighting"):
+            add("info", prefix + sprite["live_lighting"] + ".")
+        elif sprite.get("managed") and not sprite.get("mapped_form"):
             add("warning", prefix + "using a generic surface map instead of an exact sprite map.")
         if sprite.get("authored_color_grade"):
             add("info", prefix + "the game also applies external color grading.")
@@ -351,9 +358,7 @@ def _redact(text):
         text_type = str
     if not isinstance(text, text_type):
         text = text.decode("utf-8", "replace")
-    home = os.path.expanduser("~")
-    for value in (home, home.replace("\\", "/"), home.replace("\\", "\\\\")):
-        text = re.sub(re.escape(value), "<USER>", text, flags=re.I)
+    text = log_privacy.mask_text(text)
     return re.sub(
         r"(?i)((?:token|password|api[_-]?key|secret|authorization)[\"']?\s*[:=]\s*[\"']?)[^\s,\"'&]+",
         r"\1<REDACTED>",
@@ -410,7 +415,7 @@ def support_files(root, report):
                 "message": "A runtime update was interrupted. Close the game and run Update SceneLight to recover it.",
             }
         )
-    serialized = _redact(json.dumps(report, indent=2, ensure_ascii=True))
+    serialized = _redact(json.dumps(log_privacy.mask_value(report), indent=2, ensure_ascii=True))
     files = {"scenelight-inspector.json": serialized}
     for name in (
         "scenelight-runtime.jsonl",

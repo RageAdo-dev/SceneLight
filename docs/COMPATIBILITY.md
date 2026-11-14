@@ -4,9 +4,8 @@
 
 - **Windows:** the downloadable app includes its own Python and Preview components.
 - **Ren’Py:** compatible Ren’Py 7 and 8 projects. Some older games can use the
-  bundled Ren’Py 7.7.1 compatibility runtime. Python 2 projects capture a few
-  times slower than Ren’Py 8 projects, because those engines have no offscreen
-  screenshot and every character form is captured twice.
+  bundled Ren’Py 7.7.1 compatibility runtime. Preparation can take longer on
+  older engines, which need an extra capture pass for transparent sprites.
 - **Graphics:** OpenGL 3.3 or OpenGL ES 3.0 with supported floating-point rendering.
   A dedicated graphics card is not required.
 
@@ -22,8 +21,10 @@ no separate sprites may have nothing to light. Automatic discovery cannot identi
 every custom image setup; review the character checklist before installing.
 
 Missing or unsupported assets are reported and skipped individually. Once the
-artwork is added or repaired, run Scan/Update again. Newly added scenes and assets
-need an update and a game restart before their prepared lighting is available.
+artwork is added or repaired, run Scan/Update again. Developer installations also
+support [live updates](AUTHOR_QUICKSTART.md#live-updates-while-editing) while Setup
+and the game stay open. Changes to unsupported custom displayables may still need
+a full update and restart.
 
 Preview displays one sprite. Cast-light settings can be exported there, but their
 effect on other characters must be checked in-game. Custom shaders and transforms

@@ -151,11 +151,14 @@ def test_one_bundle_has_readable_checks_identity_logs_and_optional_picture(tmp_p
             }
         )
     )
-    (tmp_path / "log.txt").write_text("token=secret-value\nRenderer: tested")
+    (tmp_path / "log.txt").write_text(
+        "token=secret-value\nRenderer: tested\nC:\\Users\\Jane Example\\mods\\Eidolon"
+    )
     (tmp_path / "private-art.png").write_bytes(b"artwork")
     (tmp_path / "save.dat").write_bytes(b"save")
     report = {
         "notes": "<script>bad</script> café",
+        "environment": {"USERNAME": "Jane Example", "sdk": "/Users/Jane Example/bin/renpy"},
         "sprites": [
             {
                 "image": "héro",
@@ -181,6 +184,8 @@ def test_one_bundle_has_readable_checks_identity_logs_and_optional_picture(tmp_p
         assert data["installation"][".scenelight_developer_install.json"]["owned_file_count"] == 1
         text = "\n".join(archive.read(path).decode() for path in archive.namelist())
         assert "secret-value" not in text and "private inventory" not in text
+        assert "Jane Example" not in text and "Example" not in data["environment"]["sdk"]
+        assert data["environment"]["USERNAME"] == "<USER>"
         assert "&lt;script&gt;bad&lt;/script&gt;" in archive.read("report.html").decode()
         assert any("wins" in row["message"] for row in data["findings"])
     second = write_support_bundle(str(tmp_path), report, screenshot=b"selected screenshot")

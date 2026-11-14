@@ -61,6 +61,7 @@ class Renderer(object):
         self.texture_transform = None
         self.retired_source_frame_time = None
         self.drawable = None
+        self.use_surface_fields = False
         # Every engine texture we asked for since the last drawable change.
         # Ren'Py's render caches can outlive our own containers, so the caches
         # are not enough to find them again at reset time.
@@ -102,6 +103,7 @@ class Renderer(object):
         self.frames.clear()
         self.frozen_canvases.clear()
         self.cleanup_checked = False
+        self.use_surface_fields = False
         self.last_analysis_time = None
         self.prepared_pool[:] = []
         self.prepared_releases.clear()
@@ -246,14 +248,33 @@ class Renderer(object):
         finally:
             draw.current_fbo = saved_fbo
 
-    def capture(self, background, rendered, width, height, frame_factory):
+    def _field_texture(self, draw, size):
+        properties = {"drawable_resolution": False, "mipmap": False}
+        if not self.use_surface_fields:
+            target = draw.render_to_texture(self.api.Render(*size), properties=properties)
+            if (target.texture_width, target.texture_height) == size:
+                self._own_texture(target)
+                return target
+            # Older GL2 scales render targets with the window even when
+            # drawable_resolution is false. Texel copies need exact storage.
+            self.use_surface_fields = True
+        surface = self.api.display.pgrender.surface(size, True)
+        target = draw.load_texture(surface, properties=properties)
+        target.load()
+        if (target.texture_width, target.texture_height) != size:
+            raise RuntimeError("Renderer could not allocate a lighting field at its native size.")
+        self._own_texture(target)
+        return target
+
+    def capture(self, background, rendered, width, height, frame_factory, backdrop=None):
         """Analyze the actual child render, including its final placement."""
         try:
             draw = self._context()
             if draw is None:
                 return
             self._release_retired_sources()
-            placement = tuple(background.child.get_placement())
+            child = background.child if backdrop is None else backdrop
+            placement = tuple(child.get_placement())
             binding = getattr(background, "binding", background)
             previous = self.backgrounds.get(binding)
             animated = self._animated_shader(rendered)
@@ -262,11 +283,14 @@ class Renderer(object):
             if previous is not None and previous[0] == signature:
                 return
             canvas = self.api.Render(width, height)
-            offset = background.child.place(canvas, 0, 0, width, height, rendered)
+            offset = child.place(canvas, 0, 0, width, height, rendered)
             canvas.xclipping = canvas.yclipping = True
             prepared = (
                 self.prepared.frame(background, rendered, width, height)
-                if self.prepared is not None and not animated and offset in (None, (0, 0))
+                if self.prepared is not None
+                and backdrop is None
+                and not animated
+                and offset in (None, (0, 0))
                 else None
             )
             if prepared is not None:
@@ -316,11 +340,7 @@ class Renderer(object):
                     ):
                         if name not in outputs:
                             continue
-                        target = draw.render_to_texture(
-                            self.api.Render(*size),
-                            properties={"drawable_resolution": False, "mipmap": False},
-                        )
-                        self._own_texture(target)
+                        target = self._field_texture(draw, size)
                         self.analysis.device.bind_targets((outputs[name],))
                         gl.ActiveTexture(self.gpu.TEXTURE0)
                         gl.BindTexture(self.gpu.TEXTURE_2D, target.number)
@@ -371,11 +391,7 @@ class Renderer(object):
                 ):
                     target = fields.get(name)
                     if target is None:
-                        target = draw.render_to_texture(
-                            self.api.Render(*size),
-                            properties={"drawable_resolution": False, "mipmap": False},
-                        )
-                        self._own_texture(target)
+                        target = self._field_texture(draw, size)
                     gl.ActiveTexture(self.gpu.TEXTURE0)
                     gl.BindTexture(self.gpu.TEXTURE_2D, target.number)
                     gl.TexSubImage2D(

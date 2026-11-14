@@ -49,6 +49,19 @@ def _resolver():
                 get = library.SDL_GL_GetProcAddress
                 get.argtypes, get.restype = [GLcharp], GLvoidp
                 return library, get, C.WINFUNCTYPE
+        # Some Ren'Py builds link SDL into a Python extension. Their ANGLE
+        # context still belongs to the loaded EGL/GLES libraries, not WGL.
+        egl_handle = kernel.GetModuleHandleW("libEGL.dll")
+        gles_handle = kernel.GetModuleHandleW("libGLESv2.dll")
+        if egl_handle and gles_handle:
+            egl = C.WinDLL("libEGL.dll", handle=egl_handle)
+            current = egl.eglGetCurrentContext
+            current.argtypes, current.restype = [], GLvoidp
+            if current():
+                library = C.WinDLL("libGLESv2.dll", handle=gles_handle)
+                get = egl.eglGetProcAddress
+                get.argtypes, get.restype = [GLcharp], GLvoidp
+                return library, get, C.WINFUNCTYPE
         library = C.WinDLL("opengl32")
         get = library.wglGetProcAddress
         get.argtypes, get.restype = [GLcharp], GLvoidp
@@ -3338,7 +3351,9 @@ class Analysis(object):
                 else if(row==1) color=vec4(ambient_display,confidence);
                 else if(row==2) color=vec4(shadow_display,radius);
                 else if(row<24){
-                    Light v=row<15 ? lights[(row-3)/3] : families[(row-15)/3];
+                    Light v;
+                    if(row<15) v=lights[(row-3)/3];
+                    else v=families[(row-15)/3];
                     int plane=(row-3)%3;
                     color=plane==0 ? v.position : (plane==1 ? v.color : vec4(v.emission,1.0,v.creative ? 1.0 : 0.0,1.0));
                 }

@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import threading
 import time
 from pathlib import Path
 
+from .file_verification import bounded_file_work, verified_digest
+
 STAGE_LABELS = {
+    "worker-checkpoints": "Checking saved worker batches",
+    "capture-save": "Saving verified captures",
+    "background-cache": "Checking saved background lighting",
+    "capture-inputs": "Checking game files for changes",
+    "capture-reuse": "Checking saved sprite and background captures",
+    "background-fields": "Preparing background lighting",
+    "cache-restore": "Restoring verified analysis files",
+    "form-cache": "Preparing existing sprite maps for the update",
     "form-workers": "Finishing sprite-map workers",
     "form-index": "Saving the sprite-map index",
     "analysis-report": "Saving the analysis report",
@@ -18,6 +29,7 @@ STAGE_LABELS = {
     "cache-cleanup": "Removing the previous cache",
     "runtime-setup": "Preparing the game runtime",
     "runtime-copy": "Transferring SceneLight files into the game",
+    "runtime-apply": "Applying updated lighting files",
     "runtime-hashes": "Verifying SceneLight files",
     "source-index": "Recording the game's source files",
     "install-record": "Saving installation details",
@@ -127,3 +139,53 @@ def copytree_with_progress(source: Path, destination: Path, phase: str, *, ignor
             return result
 
         shutil.copytree(source, destination, ignore=ignore, copy_function=copy_file)
+
+
+def copy_cache_tree(source: Path, destination: Path, phase: str, *, verified=None) -> None:
+    """Copy independent files into a fresh cache tree, including their timestamps."""
+    if os.name != "nt":
+        copytree_with_progress(source, destination, phase)
+        return
+
+    with ProgressStage(phase, item="Counting cache files") as progress:
+        directories = [Path(".")]
+        files = []
+        for relative in directories:
+            with os.scandir(source / relative) as entries:
+                for entry in entries:
+                    info = entry.stat(follow_symlinks=False)
+                    if info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT or not (
+                        stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)
+                    ):
+                        # Use copytree's link and special-file handling before creating the target.
+                        shutil.copytree(source, destination)
+                        return
+                    path = relative / entry.name
+                    if entry.is_dir(follow_symlinks=False):
+                        directories.append(path)
+                    else:
+                        files.append(path)
+        for relative in directories:
+            (destination / relative).mkdir()
+        progress.set_total(len(files))
+
+        def copy(relative):
+            # Both captures and maps are read again during this update. Buffered
+            # writes keep their bytes available without another disk seek.
+            original = source / relative
+            target = destination / relative
+            with original.open("rb") as reader, target.open("xb") as writer:
+                shutil.copyfileobj(reader, writer, length=128 * 1024)
+            shutil.copystat(original, target)
+            if verified is not None:
+                digest, stamp, _ = verified_digest(target)
+                return relative, digest, stamp
+            return relative, None, None
+
+        for relative, digest, stamp in bounded_file_work(copy, files, workers=8):
+            if stamp is not None:
+                verified[relative] = (digest, stamp)
+            progress.set_item(relative.name)
+            progress.advance()
+        for relative in reversed(directories):
+            shutil.copystat(source / relative, destination / relative)

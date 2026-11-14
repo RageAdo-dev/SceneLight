@@ -24,6 +24,7 @@ BASE_REQUIREMENTS = (
     "psutil==7.2.2",
     "PySide6-Essentials==6.11.2",
     "imageio-ffmpeg==0.6.0",
+    "watchdog==7.1.0",
 )
 
 
@@ -41,6 +42,7 @@ BASE_DEPENDENCIES = {
     "psutil": BASE_REQUIREMENTS[3],
     "PySide6": BASE_REQUIREMENTS[4],
     "imageio_ffmpeg": BASE_REQUIREMENTS[5],
+    "watchdog": BASE_REQUIREMENTS[6],
 }
 
 

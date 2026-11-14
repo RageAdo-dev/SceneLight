@@ -127,6 +127,11 @@ class SpriteSpec:
         return canvas
 
 
+def renderer_surface_image(image: Image.Image) -> Image.Image:
+    source = np.asarray(image.convert("RGBA"), dtype=np.uint16)
+    return Image.fromarray(((source * source[..., 3:4]) >> 8).astype(np.uint8), mode="RGBA")
+
+
 def _sprite_alpha_blit(
     destination: np.ndarray,
     source: np.ndarray,

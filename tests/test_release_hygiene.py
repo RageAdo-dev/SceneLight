@@ -201,7 +201,7 @@ def test_runtime_routes_expression_sprites_at_scene_boundary() -> None:
     assert "def _scenelight_install_scene_router():" in runtime
     assert 'for module_name in ("scenelists", "core")' in runtime
     assert 'layer == "master"' in runtime
-    assert "tag in SCENELIGHT_CHARACTER_TAGS" in runtime
+    assert "tag.lower() in SCENELIGHT_CHARACTER_TAGS" in runtime
     assert "SceneLightSprite(child, image_name)" in runtime
     assert "child._change_transform_child(" in runtime
     assert "authored_grade_strength=authored_grade_strength" in runtime
@@ -265,7 +265,7 @@ def test_runtime_scene_router_survives_a_full_restart() -> None:
         + "\n"
         + "\n".join(SHADERS.values())
     )
-    router_start = runtime.index("    def _scenelight_mutation_router(original):")
+    router_start = runtime.index("    def _scenelight_mutation_router(")
     router_end = runtime.index("\n    def _scenelight_install_scene_router", router_start)
     router = runtime[router_start:router_end]
 
@@ -372,10 +372,11 @@ def test_capture_helper_resolves_layeredimage_attributes_without_final_prebake()
     assert "shown.apply_attributes" in helper
     assert f'"version": {CAPTURE_VERSION}' in helper
     assert 'getattr(renpy, "render_to_file", None)' in helper
-    assert 'renpy.loader.load(source_name, directory="images")' in helper
+    assert '"directory" in _scenelight_callable_arguments(load_image)' in helper
+    assert 'load_image(source_name, directory="images")' in helper
     assert 'source_name.lower().endswith(".png")' in helper
-    assert "surface = screenshot(rendered)" in helper
-    assert "surface = screenshot(rendered, False)" in helper
+    assert "surface = _scenelight_screenshot(rendered)" in helper
+    assert "return screenshot(rendered, False)" in helper
     assert "renpy.display.render.free_memory()" in helper
     assert '"background capture failed for all %d registered scenes"' in helper
     assert 'current_filename.endswith("/00gltest.rpy")' in helper

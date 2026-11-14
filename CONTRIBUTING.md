@@ -6,7 +6,7 @@ to a particular game's names or artwork.
 
 ## Development setup
 
-Use Python 3.10 or newer in a virtual environment:
+Use Python 3.11 or newer in a virtual environment:
 
 ```text
 python -m pip install -e ".[dev,preview]"
@@ -33,14 +33,5 @@ not run.
 Keep game archives, extracted user art, saves, caches, private captures and local
 machine paths out of commits. Documentation artwork must permit redistribution
 and include its source, license and credits. See [the example credits](docs/media/CREDITS.md).
-
-## Comments and documentation
-
-Describe what the code does and why a reader needs to know. Keep explanations of
-compatibility constraints, numerical choices and failure recovery; omit praise
-and repeated assurances. Start instructions with the action. Release notes should
-list changes and downloads without introductory filler or marketing slogans.
-For performance claims, give the workload, hardware and measured scope. Keep
-historical results dated and separate from current behavior.
 
 [Documentation index](docs/README.md) · [Security reports](SECURITY.md)

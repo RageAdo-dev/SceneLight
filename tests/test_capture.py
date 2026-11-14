@@ -8,6 +8,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 import scenelight.capture as capture_module
+import scenelight.cli as cli_module
 from scenelight.capture import (
     CaptureResult,
     _capture_command,
@@ -103,6 +104,7 @@ def test_legacy_or_non_windows_worker_keeps_the_default_renderer(
 
 def test_parallel_worker_payloads_merge_into_the_normal_capture_contract() -> None:
     master = {
+        "pixel_environment": ["gl2"],
         "version": capture_module.CAPTURE_VERSION,
         "plan_only": True,
         "character_tags": ["hero"],
@@ -115,6 +117,9 @@ def test_parallel_worker_payloads_merge_into_the_normal_capture_contract() -> No
             "version": capture_module.CAPTURE_VERSION,
             "plan_only": False,
             "sprites": {"hero idle": "worker/hero.png"},
+            "pixel_environment": ["angle2"],
+            "pixel_keys": {"sprites": {"hero idle": "worker-key"}},
+            "reused_pixels": {"sprites": 1},
             "composite_captures": {
                 "worker/hero.png": {"size": [10, 10], "layers": []},
                 "worker/unreferenced.png": {"size": [1, 1], "layers": []},
@@ -133,6 +138,8 @@ def test_parallel_worker_payloads_merge_into_the_normal_capture_contract() -> No
 
     assert merged["plan_only"] is False
     assert merged["sprites"] == {"hero idle": "worker/hero.png"}
+    assert merged["pixel_keys"]["sprites"] == {"hero idle": "worker-key"}
+    assert merged["reused_pixels"]["sprites"] == 1
     assert list(merged["composite_captures"]) == ["worker/hero.png"]
     assert merged["resolved_requests"] == ["hero", "hero idle"]
     assert merged["character_candidates"] == {"hero": "worker/hero.png"}
@@ -186,6 +193,8 @@ def test_worker_capture_paths_are_made_portable_inside_the_project(tmp_path: Pat
     destination.touch()
     payload = {
         "sprites": {"hero": str(destination)},
+        "version": capture_module.CAPTURE_VERSION,
+        "matting_captures": [{"relative": str(destination), "size": [1, 1]}],
         "surface_captures": [str(destination)],
         "normalized_captures": [],
         "composite_captures": {
@@ -203,6 +212,8 @@ def test_worker_capture_paths_are_made_portable_inside_the_project(tmp_path: Pat
     assert payload["surface_captures"] == [relative_destination]
     manifest = payload["composite_captures"][relative_destination]
     assert manifest["layers"][0]["source"] == ".scenelight_cache/worker/component.png"
+    merged = _merge_parallel_capture_payloads({}, [payload], {"hero": ["hero"]})
+    assert merged["matting_captures"] == [{"relative": relative_destination, "size": [1, 1]}]
 
 
 def test_durable_form_count_uses_semantic_journal_keys(tmp_path: Path) -> None:
@@ -542,6 +553,22 @@ def test_native_runtime_is_preferred_before_sdk(tmp_path: Path) -> None:
     ]
 
 
+def test_installed_routing_launcher_is_not_used_as_a_capture_engine(tmp_path):
+    project = tmp_path / "installed"
+    (project / "game/scenelight_runtime").mkdir(parents=True)
+    (project / "renpy").mkdir()
+    (project / "renpy/vc_version.py").write_text('version = "7.4.11"')
+    executable = project / "Game.exe"
+    executable.write_bytes(cli_module.launcher_asset().read_bytes())
+    sdk = tmp_path / "sdk/renpy.exe"
+    (sdk.parent / "renpy").mkdir(parents=True)
+    (sdk.parent / "renpy/vc_version.py").write_text('version = "7.5.3"')
+    sdk.touch()
+    (project / "game/scenelight_runtime/native-launcher.txt").write_text(str(sdk))
+    assert _resolve_renpy_executable(project, None) == sdk
+    assert _runtime_capture_launchers(project, sdk) == [(sdk, False, "the selected Ren'Py SDK")]
+
+
 def test_modern_runtime_never_falls_back_to_a_different_major_sdk(tmp_path: Path) -> None:
     managed = tmp_path / "modern-game"
     (managed / "renpy").mkdir(parents=True)
@@ -583,6 +610,17 @@ def test_matching_sdk_is_chosen_for_the_project_engine_version(tmp_path: Path, m
     assert matched == (tmp_path / "renpy-8.3.7-sdk" / "renpy.exe").resolve()
 
 
+def test_sdk_extracted_into_an_identically_named_folder_is_discovered(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    launcher = tmp_path / "renpy-7.5.3-sdk/renpy-7.5.3-sdk/renpy.exe"
+    launcher.parent.mkdir(parents=True)
+    launcher.touch()
+    assert _matching_renpy_sdk(project, (7, 5, 3)) == launcher
+
+
 def test_sdk_from_another_major_is_not_used_for_the_project(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     project = tmp_path / "Eidolon"
@@ -622,9 +660,6 @@ def test_old_renpy_expands_to_automatic_angle_and_gl_attempts(tmp_path: Path) ->
         (executable, True, "native (automatic renderer)", None),
         (executable, True, "native (angle renderer)", "angle"),
         (executable, True, "native (gl renderer)", "gl"),
-        # Last resort: a pure software process keeps GL textures out of the
-        # compositor that captures character forms.
-        (executable, True, "native (software renderer)", "sw"),
     ]
 
 
@@ -638,7 +673,6 @@ def test_modern_renpy_expands_to_angle2_and_gl2_attempts(tmp_path: Path) -> None
         None,
         "angle2",
         "gl2",
-        "sw",
     ]
 
 
@@ -947,6 +981,54 @@ def test_preflight_rejects_engine_that_leaks_textures(tmp_path: Path, monkeypatc
         preflight_runtime(discovery, tmp_path / "renpy.exe")
 
 
+@pytest.mark.parametrize(
+    "capabilities, detail",
+    [
+        ({"shader_registration": False, "model_renderer": False}, "lighting shaders"),
+        ({"shader_registration": True, "render_shader_api": False}, "lighting shaders"),
+        (
+            {"shader_registration": True, "model_renderer": True, "texture_finalizer": False},
+            "texture cleanup",
+        ),
+    ],
+)
+def test_preflight_checks_compiled_engine_capabilities_without_allocating_a_probe(
+    tmp_path, monkeypatch, capabilities, detail
+):
+    (tmp_path / "game").mkdir()
+    discovery = ProjectDiscovery(tmp_path, tmp_path / "game", {}, {}, [])
+
+    def run(*args, result_path, **kwargs):
+        result_path.write_text(
+            json.dumps(
+                {
+                    "version": capture_module.CAPTURE_VERSION,
+                    "runtime_capabilities": capabilities,
+                    "texture_cleanup_ok": None,
+                }
+            )
+        )
+
+    monkeypatch.setattr(capture_module, "_run_capture_request", run)
+    with pytest.raises(ValueError, match=detail):
+        preflight_runtime(discovery, tmp_path / "renpy.exe")
+
+
+def test_native_python2_engine_precedes_compatible_fallbacks(tmp_path, monkeypatch):
+    project = tmp_path / "mod"
+    (project / "renpy").mkdir(parents=True)
+    (project / "renpy/__init__.py").write_text("version_tuple = (7, 4, 11, 'test')")
+    native = project / "mod.exe"
+    native.touch()
+    fallback = tmp_path / "sdk"
+    (fallback / "renpy").mkdir(parents=True)
+    (fallback / "renpy/__init__.py").write_text("version_tuple = (7, 7, 1, 'test')")
+    sdk = fallback / "renpy.exe"
+    sdk.touch()
+    monkeypatch.setattr(cli_module, "_is_compatibility_runtime", lambda _: True)
+    assert [row[0] for row in _runtime_capture_launchers(project, sdk, (sdk,))] == [native, sdk]
+
+
 def test_full_capture_always_uses_runtime_background_inventory(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "project"
     game = project / "game"
@@ -965,9 +1047,9 @@ def test_full_capture_always_uses_runtime_background_inventory(tmp_path: Path, m
     scanned = []
     original_signature = capture_module._capture_content_signature
 
-    def content_signature(discovery):
+    def content_signature(discovery, **kwargs):
         scanned.append(discovery)
-        return original_signature(discovery)
+        return original_signature(discovery, **kwargs)
 
     monkeypatch.setattr(capture_module, "_capture_content_signature", content_signature)
 
@@ -1099,13 +1181,9 @@ def test_runtime_character_inventory_requires_structural_or_character_evidence()
     assert "tag not in registered_tags" in helper
     assert "tag in character_hints" in helper
     assert "count > 1 or tag in script_hidden_tags" in helper
-    assert "height >= minimum_height" in helper
-    assert "width < maximum_width" in helper
-    assert "portrait_ratio <= 1.05" in helper
-    assert "config.screen_height * 0.35" in helper
     assert "eligible_character_tags = explicit_character_tags & (" in helper
     assert "registered_tags | set(script_show_counts)" in helper
-    assert "character_tags - explicit_character_tags - excluded_character_tags" in helper
+    assert "eligible_character_tags.update(character_tags)" in helper
     assert "character_tags = eligible_character_tags" in helper
     assert "story_tags = set(script_show_counts) | set(script_hidden_tags)" not in helper
 
@@ -1145,7 +1223,9 @@ def test_runtime_capture_fits_forms_into_the_framebuffer_limit() -> None:
     assert '"stage": "capped"' in helper
     # A form wider than the readback buffer is clipped, so it has to be fitted
     # before the screenshot, never after.
-    assert helper.index('"stage": "capped"') < helper.index("surface = draw.screenshot(rendered)")
+    assert helper.index('"stage": "capped"') < helper.index(
+        "surface = _scenelight_screenshot(rendered)"
+    )
 
 
 def test_host_capture_temp_names_are_compact_and_stay_beside_destination(tmp_path: Path) -> None:
@@ -1159,8 +1239,11 @@ def test_host_capture_temp_names_are_compact_and_stay_beside_destination(tmp_pat
     assert len(str(temporary)) < len(str(destination))
 
 
-def test_parallel_capture_keeps_healthy_renderers_alive() -> None:
-    assert capture_module.CAPTURE_PARALLEL_PROCESS_BATCH_SIZE is None
+def test_parallel_capture_bounds_workers_within_the_scheduler_memory_budget() -> None:
+    assert (
+        0 < capture_module.CAPTURE_PROCESS_MEMORY_LIMIT <= capture_module.CAPTURE_FORM_WORKER_BYTES
+    )
+    assert capture_module.CAPTURE_PARALLEL_PROCESS_BATCH_SIZE > 0
 
 
 def test_parallel_capture_preserves_ordered_family_locality() -> None:
@@ -1197,7 +1280,7 @@ def test_character_capture_uses_the_gpu_readback_that_keeps_alpha() -> None:
     # subtree, which every layered character with scaled layers has. Character
     # capture must stay on the GPU, whose RGBA readback keeps alpha.
     assert 'raise Exception("SceneLight character capture requires a GPU renderer")' in helper
-    assert "surface = draw.screenshot(rendered)" in helper
+    assert "surface = _scenelight_screenshot(rendered)" in helper
     assert "import renpy.display.swdraw" not in helper
     assert "renpy.display.draw = software_draw" not in helper
     assert "_scenelight_software_draw" not in helper
@@ -1732,15 +1815,17 @@ def test_surface_workers_scale_up_and_pipeline_leaves_export_capacity(monkeypatc
     assert _composite_pipeline_worker_count(449) == 4
 
 
+@pytest.mark.parametrize("canvas", [(960, 960), (1920, 1080)])
 def test_merge_capture_rejects_sticker_and_ui_families_but_keeps_characters(
     tmp_path: Path,
+    canvas,
 ) -> None:
     game = tmp_path / "game"
     game.mkdir()
     background = tmp_path / "background.png"
     Image.new("RGB", (1280, 720), (18, 30, 42)).save(background)
     character = tmp_path / "character.png"
-    character_image = Image.new("RGBA", (960, 960), (0, 0, 0, 0))
+    character_image = Image.new("RGBA", canvas, (0, 0, 0, 0))
     ImageDraw.Draw(character_image).rectangle((280, 40, 680, 950), fill=(220, 150, 130, 255))
     character_image.save(character)
     sticker = tmp_path / "sticker.png"
