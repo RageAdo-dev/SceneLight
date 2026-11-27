@@ -1,7 +1,7 @@
-numpy==2.2.6
-opencv-python-headless==5.0.0.93
+numpy==2.4.6
+opencv-python-headless==5.1.0.95
 Pillow==13.0.0
 psutil==7.2.2
-PySide6-Essentials==6.11.2
-imageio-ffmpeg==0.6.0
-watchdog==7.1.0
+PySide6-Essentials==6.12.0
+imageio-ffmpeg==0.8.1
+watchdog==7.1.1
